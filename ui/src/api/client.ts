@@ -3,6 +3,7 @@ import type {
   FollowupStreamEvent,
   HealthResponse,
   RagAgent,
+  RagCitation,
   RagChatStreamEvent,
   RagChatMessage,
   RagChatSessionSummary,
@@ -482,16 +483,53 @@ export async function chatWithRagAgent(
   if (!response.ok) {
     throw new Error(`Failed to chat with RAG agent: ${response.status}`)
   }
-  return (await response.json()) as { session_id: string; messages: RagChatMessage[] }
+  const parsed = (await response.json()) as {
+    session_id: string
+    messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
+  }
+  return {
+    session_id: parsed.session_id,
+    messages: parsed.messages.map((message) => ({
+      ...message,
+      citations: normalizeRagCitations(message.citations),
+    })),
+  }
 }
 
 type RagAgentChatStreamOptions = {
   signal?: AbortSignal
   onSession: (sessionId: string) => void
   onChunk: (text: string) => void
-  onCitations: (citations: Citation[]) => void
+  onCitations: (citations: RagCitation[]) => void
   onDone: () => void
   onError?: (error: string) => void
+}
+
+function normalizeRagCitation(citation: Partial<RagCitation> | null | undefined): RagCitation | null {
+  if (
+    typeof citation?.source_title !== 'string' ||
+    typeof citation?.source_url !== 'string' ||
+    typeof citation?.chunk_id !== 'string' ||
+    typeof citation?.text !== 'string'
+  ) {
+    return null
+  }
+  return {
+    source_title: citation.source_title,
+    source_url: citation.source_url,
+    chunk_id: citation.chunk_id,
+    text: citation.text,
+  }
+}
+
+function normalizeRagCitations(citations: unknown): RagCitation[] {
+  if (!Array.isArray(citations)) {
+    return []
+  }
+  return citations.flatMap((citation) => {
+    const normalized = normalizeRagCitation(citation as Partial<RagCitation>)
+    return normalized ? [normalized] : []
+  })
 }
 
 export async function streamRagAgentChat(
@@ -533,7 +571,7 @@ export async function streamRagAgentChat(
       return false
     }
     if (parsed.type === 'citations') {
-      options.onCitations(parsed.citations)
+      options.onCitations(normalizeRagCitations(parsed.citations))
       return false
     }
     if (parsed.type === 'done') {
@@ -612,10 +650,18 @@ export async function getRagAgentChatSessionMessages(
   if (!response.ok) {
     throw new Error(`Failed to load RAG agent chat session: ${response.status}`)
   }
-  return (await response.json()) as {
+  const parsed = (await response.json()) as {
     session_id: string
     agent_id: string
-    messages: RagChatMessage[]
+    messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
+  }
+  return {
+    session_id: parsed.session_id,
+    agent_id: parsed.agent_id,
+    messages: parsed.messages.map((message) => ({
+      ...message,
+      citations: normalizeRagCitations(message.citations),
+    })),
   }
 }
 

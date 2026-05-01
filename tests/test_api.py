@@ -575,12 +575,30 @@ def test_rag_chat_returns_agent_reply():
 
     mock_context = MagicMock()
     mock_context.context = "Relevant context."
-    mock_context.chunks = [{"source_title": "Doc", "source_url": "https://example.com"}]
+    mock_context.chunks = [
+        {
+            "source_title": "Doc",
+            "source_url": "https://example.com",
+            "chunk_id": "chunk-1",
+            "text": "Retrieved chunk text.",
+        }
+    ]
 
     mock_user_message = MagicMock()
     mock_user_message.to_dict.return_value = {"role": "user"}
     mock_assistant_message = MagicMock()
-    mock_assistant_message.to_dict.return_value = {"role": "assistant", "content": "Answer"}
+    mock_assistant_message.to_dict.return_value = {
+        "role": "assistant",
+        "content": "Answer",
+        "citations": [
+            {
+                "source_title": "Doc",
+                "source_url": "https://example.com",
+                "chunk_id": "chunk-1",
+                "text": "Retrieved chunk text.",
+            }
+        ],
+    }
 
     llm_result = MagicMock()
     llm_result.content = "Answer"
@@ -604,6 +622,66 @@ def test_rag_chat_returns_agent_reply():
     assert response.status_code == 200
     payload = response.json()
     assert payload["session_id"] == "chat-1"
+    assert payload["reply"]["citations"] == [
+        {
+            "source_title": "Doc",
+            "source_url": "https://example.com",
+            "chunk_id": "chunk-1",
+            "text": "Retrieved chunk text.",
+        }
+    ]
+
+
+def test_rag_chat_stream_returns_rich_citations():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = "Keep it concise."
+
+    mock_context = MagicMock()
+    mock_context.context = "Relevant context."
+    mock_context.chunks = [
+        {
+            "source_title": "Doc",
+            "source_url": "https://example.com",
+            "chunk_id": "chunk-1",
+            "text": "Retrieved chunk text.",
+        }
+    ]
+
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={"message": "Hello", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+
+    events = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "Doc",
+            "source_url": "https://example.com",
+            "chunk_id": "chunk-1",
+            "text": "Retrieved chunk text.",
+        }
+    ]
 
 
 def test_rag_chat_sessions_returns_agent_scoped_summaries():

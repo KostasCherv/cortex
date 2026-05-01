@@ -3,6 +3,7 @@ import { Loader2, SendHorizontal } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getRagAgentChatSessionMessages, streamRagAgentChat } from '@/api/client'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,6 +24,56 @@ function MarkdownMessage({ content }: { content: string }) {
       <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-table:my-2 prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </div>
+    </div>
+  )
+}
+
+function CitationMarkers({ citations }: { citations: RagChatMessage['citations'] }) {
+  if (citations.length === 0) return null
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      {citations.map((citation, index) => {
+        const key = citation.chunk_id || citation.source_url || `${citation.source_title}-${index}`
+
+        return (
+          <span key={key} className="group relative inline-flex">
+            <button
+              type="button"
+              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-border/70 bg-background px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              aria-label={`Show citation ${index + 1}`}
+            >
+              [{index + 1}]
+            </button>
+            <div className="absolute left-0 top-full z-20 hidden w-80 pt-2 group-hover:block group-focus-within:block">
+              <div className="rounded-xl border border-border/80 bg-background/95 p-3 shadow-xl backdrop-blur-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <Badge variant="outline" className="text-[11px] font-normal">
+                    [{index + 1}]
+                  </Badge>
+                  {citation.source_url ? (
+                    <a
+                      href={citation.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-xs font-medium text-foreground hover:underline"
+                    >
+                      {citation.source_title || 'source'}
+                    </a>
+                  ) : (
+                    <span className="truncate text-xs font-medium text-foreground">
+                      {citation.source_title || 'source'}
+                    </span>
+                  )}
+                </div>
+                <div className="max-h-56 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                  {citation.text}
+                </div>
+              </div>
+            </div>
+          </span>
+        )
+      })}
     </div>
   )
 }
@@ -227,6 +278,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
                 </div>
                 <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm max-md:max-w-[86%]">
                   <MarkdownMessage content={m.content} />
+                  <CitationMarkers citations={m.citations} />
                 </div>
               </div>
             ),

@@ -36,6 +36,11 @@ export type Citation = {
   source_title: string
 }
 
+export type RagCitation = Citation & {
+  chunk_id: string
+  text: string
+}
+
 export type ConversationTurn = {
   role: 'user' | 'assistant'
   content: string
@@ -102,7 +107,7 @@ export type RagChatMessage = {
   owner_id: string
   role: 'user' | 'assistant'
   content: string
-  citations: Citation[]
+  citations: RagCitation[]
   created_at: string
 }
 
@@ -119,6 +124,6 @@ export type RagChatSessionSummary = {
 export type RagChatStreamEvent =
   | { type: 'session'; session_id: string }
   | { type: 'chunk'; text: string }
-  | { type: 'citations'; citations: Citation[] }
+  | { type: 'citations'; citations: RagCitation[] }
   | { type: 'done' }
   | { type: 'error'; error: string }

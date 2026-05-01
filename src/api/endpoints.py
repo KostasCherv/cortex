@@ -178,6 +178,24 @@ def _raise_rag_validation_error(exc: RagValidationError) -> None:
     )
 
 
+def _build_rag_citations(chunks: list[dict] | None) -> list[dict]:
+    """Normalize retrieved RAG chunks into the stable citation API payload."""
+    if not chunks:
+        return []
+
+    citations: list[dict] = []
+    for chunk in chunks:
+        citations.append(
+            {
+                "source_title": chunk.get("source_title") or "resource",
+                "source_url": chunk.get("source_url") or "",
+                "chunk_id": chunk.get("chunk_id") or "",
+                "text": chunk.get("text") or "",
+            }
+        )
+    return citations
+
+
 # ---------------------------------------------------------------------------
 # Shared streaming logic
 # ---------------------------------------------------------------------------
@@ -877,13 +895,7 @@ async def rag_chat_with_agent(
         role="user",
         content=normalized_message,
     )
-    citations = [
-        {
-            "source_title": chunk.get("source_title") or "resource",
-            "source_url": chunk.get("source_url") or "",
-        }
-        for chunk in rag_context.chunks
-    ]
+    citations = _build_rag_citations(rag_context.chunks)
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -949,13 +961,7 @@ async def rag_chat_with_agent_stream(
         "Answer clearly and stay grounded in the retrieved context."
     )
 
-    citations = [
-        {
-            "source_title": chunk.get("source_title") or "resource",
-            "source_url": chunk.get("source_url") or "",
-        }
-        for chunk in rag_context.chunks
-    ]
+    citations = _build_rag_citations(rag_context.chunks)
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
         llm = get_llm(temperature=0.2)
