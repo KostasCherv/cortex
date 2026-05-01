@@ -2,7 +2,8 @@
 
 Production-grade AI research and RAG orchestration platform built with LangGraph, FastAPI, Inngest, and Supabase.
 
-![Kapture 2026-03-05 at 14 08 29](https://github.com/user-attachments/assets/08d4fcf9-855f-410c-8520-76a376f774fd)
+<img width="1726" height="906" alt="Kapture 2026-04-30 at 17 51 35" src="https://github.com/user-attachments/assets/2cadfba1-494e-40cd-9d68-c7125ee6dcdc" />
+
 
 ## What it does
 
