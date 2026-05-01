@@ -166,6 +166,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
         )
         setRunId(started.run_id)
         setRunStatus('running')
+        onSessionsChanged()
         startPolling(currentSessionId)
       } catch (streamError) {
         const message =
