@@ -11,12 +11,27 @@ from unittest.mock import AsyncMock
 
 def test_search_node_populates_results():
     with patch("src.graph.nodes.perform_search") as mock_search:
-        mock_search.return_value = [{"url": "https://a.com", "title": "A", "content": "..."}]
+        mock_search.return_value = [
+            {"url": "https://a.com", "title": "A", "content": "snippet", "raw_content": "full text"}
+        ]
         from src.graph.nodes import search_node
         state = asyncio.run(search_node({"query": "LangGraph", "error": None}))
 
     assert state["error"] is None
     assert len(state["search_results"]) == 1
+    assert len(state["retrieved_contents"]) == 1
+    assert state["retrieved_contents"][0]["raw_text"] == "full text"
+
+
+def test_search_node_falls_back_to_content_when_no_raw_content():
+    with patch("src.graph.nodes.perform_search") as mock_search:
+        mock_search.return_value = [
+            {"url": "https://a.com", "title": "A", "content": "snippet", "raw_content": ""}
+        ]
+        from src.graph.nodes import search_node
+        state = asyncio.run(search_node({"query": "LangGraph", "error": None}))
+
+    assert state["retrieved_contents"][0]["raw_text"] == "snippet"
 
 
 def test_search_node_sets_error_on_failure():
@@ -27,35 +42,69 @@ def test_search_node_sets_error_on_failure():
 
     assert state["error"] == "boom"
     assert state["search_results"] == []
+    assert state["retrieved_contents"] == []
 
 
 # ---------------------------------------------------------------------------
-# retrieve_node
+# search_and_memory_node
 # ---------------------------------------------------------------------------
 
-def test_retrieve_node_fetches_content():
-    with patch("src.graph.nodes.fetch_url_content", new=AsyncMock(return_value="fetched text")):
-        from src.graph.nodes import retrieve_node
-        state = asyncio.run(retrieve_node({
-            "query": "test",
-            "search_results": [{"url": "https://a.com", "title": "A", "content": "snippet"}],
-        }))
+def test_search_and_memory_node_runs_both_concurrently():
+    with (
+        patch("src.graph.nodes.perform_search") as mock_search,
+        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+    ):
+        mock_search.return_value = [
+            {"url": "https://a.com", "title": "A", "content": "c", "raw_content": "full"}
+        ]
+        mock_vs = MagicMock()
+        mock_vs.search_reports.return_value = [{"document": "old report"}]
+        mock_vs_cls.return_value = mock_vs
 
+        from src.graph.nodes import search_and_memory_node
+        state = asyncio.run(search_and_memory_node({"query": "LangGraph"}))
+
+    assert len(state["search_results"]) == 1
     assert len(state["retrieved_contents"]) == 1
-    assert state["retrieved_contents"][0]["raw_text"] == "fetched text"
+    assert "old report" in state["memory_context"]
+    assert state["error"] is None
 
 
-def test_retrieve_node_falls_back_to_snippet_on_failure():
-    from src.errors import FetchError
+def test_search_and_memory_node_propagates_search_error():
+    from src.errors import SearchError
+    with (
+        patch("src.graph.nodes.perform_search", side_effect=SearchError("no search")),
+        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+    ):
+        mock_vs = MagicMock()
+        mock_vs.search_reports.return_value = []
+        mock_vs_cls.return_value = mock_vs
 
-    with patch("src.graph.nodes.fetch_url_content", new=AsyncMock(side_effect=FetchError("no route"))):
-        from src.graph.nodes import retrieve_node
-        state = asyncio.run(retrieve_node({
-            "query": "test",
-            "search_results": [{"url": "https://a.com", "title": "A", "content": "snippet text"}],
-        }))
+        from src.graph.nodes import search_and_memory_node
+        state = asyncio.run(search_and_memory_node({"query": "fail"}))
 
-    assert state["retrieved_contents"][0]["raw_text"] == "snippet text"
+    assert state["error"] == "no search"
+    assert state["search_results"] == []
+
+
+def test_search_and_memory_node_continues_when_memory_fails():
+    with (
+        patch("src.graph.nodes.perform_search") as mock_search,
+        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+    ):
+        mock_search.return_value = [
+            {"url": "https://a.com", "title": "A", "content": "c", "raw_content": "text"}
+        ]
+        mock_vs = MagicMock()
+        mock_vs.search_reports.side_effect = RuntimeError("pinecone down")
+        mock_vs_cls.return_value = mock_vs
+
+        from src.graph.nodes import search_and_memory_node
+        state = asyncio.run(search_and_memory_node({"query": "LangGraph"}))
+
+    assert len(state["search_results"]) == 1
+    assert state["memory_context"] == ""
+    assert state["error"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +317,11 @@ def test_summarize_node_repairs_non_json_output_once():
 # ---------------------------------------------------------------------------
 
 def test_report_node_generates_report():
+    async def _fake_astream(*args, **kwargs):
+        yield MagicMock(content="# My Report\nContent here.")
+
     mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content="# My Report\nContent here."))
+    mock_llm.astream = _fake_astream
 
     with patch("src.graph.nodes.get_llm", return_value=mock_llm):
         from src.graph.nodes import report_node

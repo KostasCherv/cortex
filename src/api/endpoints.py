@@ -224,6 +224,11 @@ async def _stream_research(
         ),
     }
 
+    _GRAPH_NODES = {
+        "search_and_memory", "rerank", "summarize", "report",
+        "vector_store", "abort", "empty",
+    }
+
     with start_workflow_run(
         entrypoint="api",
         query=query,
@@ -231,19 +236,43 @@ async def _stream_research(
     ) as trace_ctx:
         final_node_state: dict | None = None
         try:
-            async for event in graph.astream(initial_state):
-                for node_name, node_state in event.items():
-                    final_node_state = node_state
-                    payload = {
-                        "workflow_id": trace_ctx.workflow_id,
-                        "node": node_name,
-                        "data": {
-                            k: v
-                            for k, v in node_state.items()
-                            if k in {"error", "report"}
-                        },
-                    }
-                    yield f"data: {json.dumps(payload)}\n\n"
+            async for event in graph.astream_events(initial_state, version="v2"):
+                event_type = event["event"]
+                meta = event.get("metadata", {})
+                langgraph_node = meta.get("langgraph_node")
+
+                # Forward LLM token chunks from the report node as they arrive
+                if event_type == "on_chat_model_stream" and meta.get("langgraph_node") == "report":
+                    chunk = event["data"].get("chunk")
+                    if chunk:
+                        content = chunk.content if hasattr(chunk, "content") else ""
+                        token = ""
+                        if isinstance(content, str):
+                            token = content
+                        elif isinstance(content, list):
+                            token = "".join(
+                                b.get("text", "") if isinstance(b, dict) else str(b)
+                                for b in content
+                            )
+                        if token:
+                            yield f"data: {json.dumps({'workflow_id': trace_ctx.workflow_id, 'node': 'report_stream', 'data': {'chunk': token}})}\n\n"
+
+                # Emit node-completion events (preserves existing SSE format).
+                # Use metadata.langgraph_node — the event ``name`` may differ from graph node ids.
+                elif event_type == "on_chain_end" and langgraph_node in _GRAPH_NODES:
+                    node_state = event["data"].get("output", {})
+                    if isinstance(node_state, dict):
+                        final_node_state = node_state
+                        payload = {
+                            "workflow_id": trace_ctx.workflow_id,
+                            "node": langgraph_node,
+                            "data": {
+                                k: v
+                                for k, v in node_state.items()
+                                if k in {"error", "report"}
+                            },
+                        }
+                        yield f"data: {json.dumps(payload)}\n\n"
 
             # Persist session state after a successful run
             if session is not None and run_id is not None and final_node_state and user_id:

@@ -36,8 +36,30 @@ def has_results(state: ResearchState) -> str:
     with start_step_span(
         name="edge.has_results",
         run_type="tool",
-        node_name="retrieve",
+        node_name="search",
         inputs={"result_count": len(state.get("search_results", []))},
         tags=["routing"],
     ):
         return "ok" if state.get("search_results") else "empty"
+
+
+def route_after_search(state: ResearchState) -> str:
+    """Route after search_and_memory_node: abort on error, empty if no results.
+
+    Returns:
+        ``"abort"`` on search error, ``"empty"`` if no results, ``"continue"`` otherwise.
+    """
+    with start_step_span(
+        name="edge.route_after_search",
+        run_type="tool",
+        node_name="search_and_memory",
+        inputs={
+            "has_error": bool(state.get("error")),
+            "result_count": len(state.get("search_results", [])),
+        },
+        tags=["routing"],
+    ):
+        if state.get("error"):
+            logger.warning("Pipeline aborting due to error: %s", state["error"])
+            return "abort"
+        return "continue" if state.get("search_results") else "empty"

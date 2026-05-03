@@ -69,7 +69,7 @@ def perform_search(query: str, max_results: int | None = None) -> list[dict]:
     client = TavilyClient(api_key=settings.tavily_api_key)
     n = max_results or settings.max_search_results
 
-    response = client.search(query=query, max_results=n, include_raw_content=False)
+    response = client.search(query=query, max_results=n, include_raw_content=True)
     results = response.get("results", [])
 
     return [
@@ -77,6 +77,7 @@ def perform_search(query: str, max_results: int | None = None) -> list[dict]:
             "url": r.get("url", ""),
             "title": r.get("title", ""),
             "content": r.get("content", ""),
+            "raw_content": r.get("raw_content") or "",
         }
         for r in results
     ]

@@ -11,9 +11,8 @@ from src.llm.factory import get_llm
 from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langsmith import start_step_span
 from src.tools.search import perform_search
-from src.tools.fetcher import fetch_url_content
 from src.tools.vector_store import VectorStoreManager
-from src.errors import SearchError, FetchError, LLMError
+from src.errors import SearchError, LLMError
 
 logger = logging.getLogger(__name__)
 
@@ -107,69 +106,28 @@ async def search_node(state: ResearchState) -> ResearchState:
             ):
                 results = await asyncio.to_thread(perform_search, query)
             logger.info("[search_node] got %d results", len(results))
-            return {**state, "search_results": results, "error": None}
+            retrieved_contents = [
+                {
+                    "url": r.get("url", ""),
+                    "title": r.get("title", ""),
+                    "raw_text": r.get("raw_content") or r.get("content", ""),
+                }
+                for r in results
+                if r.get("url")
+            ]
+            return {
+                **state,
+                "search_results": results,
+                "retrieved_contents": retrieved_contents,
+                "error": None,
+            }
         except SearchError as exc:
             logger.error("[search_node] %s", exc)
-            return {**state, "search_results": [], "error": str(exc)}
+            return {**state, "search_results": [], "retrieved_contents": [], "error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
-# Node 2: Retrieve
-# ---------------------------------------------------------------------------
-
-
-async def retrieve_node(state: ResearchState) -> ResearchState:
-    """Fetch full text for each search-result URL (up to 2 retries each).
-
-    Populates ``retrieved_contents``.
-    """
-    results = state.get("search_results", [])
-    with start_step_span(
-        name="retrieve_node",
-        run_type="chain",
-        node_name="retrieve",
-        inputs={"result_count": len(results)},
-    ):
-        logger.info("[retrieve_node] fetching %d URLs", len(results))
-
-        retrieved: list[dict] = []
-        for item in results:
-            url = item.get("url", "")
-            if not url:
-                continue
-            for attempt in range(1, 3):
-                try:
-                    with start_step_span(
-                        name="retrieve_node.fetch_url",
-                        run_type="tool",
-                        node_name="retrieve",
-                        inputs={"url": url, "attempt": attempt},
-                        tags=["external", "http"],
-                    ):
-                        text = await fetch_url_content(url)
-                    retrieved.append(
-                        {"url": url, "title": item.get("title", ""), "raw_text": text}
-                    )
-                    break
-                except FetchError as exc:
-                    logger.warning(
-                        "[retrieve_node] attempt %d failed for %s: %s", attempt, url, exc
-                    )
-                    if attempt == 2:
-                        # Fall back to the Tavily snippet
-                        retrieved.append(
-                            {
-                                "url": url,
-                                "title": item.get("title", ""),
-                                "raw_text": item.get("content", ""),
-                            }
-                        )
-
-        return {**state, "retrieved_contents": retrieved}
-
-
-# ---------------------------------------------------------------------------
-# Node 3: Rerank
+# Node 2: Rerank
 # ---------------------------------------------------------------------------
 
 
@@ -439,16 +397,32 @@ async def report_node(state: ResearchState) -> ResearchState:
 
         llm = get_llm(temperature=0.2)
         try:
-            response = await _invoke_llm(
-                prompt,
-                step_name="report",
-                llm=llm,
+            chunks: list[str] = []
+            with start_step_span(
+                name="report.llm_stream",
+                run_type="llm",
+                node_name="report",
+                inputs={"prompt": prompt},
                 metadata={"summary_count": len(summaries)},
-            )
-            report_text = (
-                str(response.content) if hasattr(response, "content") else str(response)
-            )
-            report_text = report_text.strip()
+                tags=["llm"],
+            ):
+                async for chunk in llm.astream(
+                    prompt,
+                    config={
+                        "tags": build_trace_tags(["llm"]),
+                        "metadata": build_trace_metadata({"summary_count": len(summaries)}),
+                    },
+                ):
+                    content = chunk.content if hasattr(chunk, "content") else str(chunk)
+                    if isinstance(content, str):
+                        chunks.append(content)
+                    elif isinstance(content, list):
+                        for block in content:
+                            if isinstance(block, str):
+                                chunks.append(block)
+                            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                                chunks.append(block["text"])
+            report_text = "".join(chunks).strip()
         except Exception as exc:
             raise LLMError(f"Report generation failed: {exc}") from exc
 
@@ -555,3 +529,27 @@ async def memory_context_node(state: ResearchState) -> ResearchState:
         except Exception as exc:
             logger.warning("[memory_context_node] could not generate context: %s", exc)
             return {**state, "memory_context": ""}
+
+
+# ---------------------------------------------------------------------------
+# Combined Node: Search + Memory (parallel)
+# ---------------------------------------------------------------------------
+
+
+async def search_and_memory_node(state: ResearchState) -> ResearchState:
+    """Run Tavily search and Pinecone memory lookup concurrently.
+
+    Combines search_node and memory_context_node via asyncio.gather so both
+    network calls happen in parallel. Joins their results before reranking.
+    """
+    search_result, memory_result = await asyncio.gather(
+        search_node(state),
+        memory_context_node(state),
+    )
+    return {
+        **state,
+        "search_results": search_result.get("search_results", []),
+        "retrieved_contents": search_result.get("retrieved_contents", []),
+        "error": search_result.get("error"),
+        "memory_context": memory_result.get("memory_context", ""),
+    }

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
-from src.api.endpoints import app
+from src.api.endpoints import _stream_research, app
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.rag import RagValidationError
 from src.sessions import Session, SessionRun
@@ -31,20 +31,23 @@ def test_health_returns_ok():
 
 
 def test_research_streams_events():
-    search_result = [{"url": "https://example.com", "title": "Example", "content": "Test"}]
+    search_result = [
+        {"url": "https://example.com", "title": "Example", "content": "Test", "raw_content": "Full text"}
+    ]
+
+    async def _fake_report_stream(*args, **kwargs):
+        yield MagicMock(content="# Report\nFinal output.")
+
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(
-        side_effect=[
-            MagicMock(
-                content='[{"url":"https://example.com","title":"Example","summary":"Summary text."}]'
-            ),
-            MagicMock(content="# Report\nFinal output."),
-        ]
+        return_value=MagicMock(
+            content='[{"url":"https://example.com","title":"Example","summary":"Summary text."}]'
+        )
     )
+    mock_llm.astream = _fake_report_stream
 
     with (
         patch("src.graph.nodes.perform_search", return_value=search_result),
-        patch("src.graph.nodes.fetch_url_content", new=AsyncMock(return_value="Page text")),
         patch("src.graph.nodes.get_llm", return_value=mock_llm),
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
@@ -54,7 +57,7 @@ def test_research_streams_events():
             {
                 "url": "https://example.com",
                 "title": "Example",
-                "raw_text": "Page text",
+                "raw_text": "Full text",
                 "score": 0.9,
             }
         ]
@@ -75,6 +78,40 @@ def test_research_streams_events():
 
     node_names = [e["node"] for e in events]
     assert "__end__" in node_names
+
+
+def test_stream_research_emits_node_completion_from_langgraph_node_metadata():
+    """astream_events may use a runnable ``name`` that differs from the graph node key."""
+
+    async def fake_astream_events(initial_state, version="v2"):
+        yield {
+            "event": "on_chain_end",
+            "name": "RunnableSequence",
+            "metadata": {"langgraph_node": "report"},
+            "data": {"output": {"report": "# From metadata", "error": None}},
+        }
+
+    mock_graph = MagicMock()
+    mock_graph.astream_events = fake_astream_events
+
+    async def collect():
+        lines: list[str] = []
+        async for line in _stream_research("q", False):
+            lines.append(line)
+        return lines
+
+    with patch("src.api.endpoints.build_graph", return_value=mock_graph):
+        raw_lines = asyncio.run(collect())
+
+    events = []
+    for line in raw_lines:
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+
+    report_events = [e for e in events if e.get("node") == "report"]
+    assert len(report_events) == 1
+    assert report_events[0]["data"]["report"] == "# From metadata"
+    assert any(e.get("node") == "__end__" for e in events)
 
 
 def test_research_bad_request_returns_422():

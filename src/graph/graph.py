@@ -6,15 +6,13 @@ from langgraph.graph import StateGraph, END
 
 from src.graph.state import ResearchState
 from src.graph.nodes import (
-    memory_context_node,
-    search_node,
-    retrieve_node,
+    search_and_memory_node,
     rerank_node,
     summarize_node,
     report_node,
     vector_store_node,
 )
-from src.graph.edges import should_abort, has_results
+from src.graph.edges import route_after_search
 from src.observability.langsmith import start_step_span
 
 logger = logging.getLogger(__name__)
@@ -55,35 +53,25 @@ def build_graph():
     builder = StateGraph(ResearchState)
 
     # Register all nodes
-    builder.add_node("search",       search_node)
-    builder.add_node("retrieve",     retrieve_node)
-    builder.add_node("memory_context", memory_context_node)
-    builder.add_node("rerank",       rerank_node)
-    builder.add_node("summarize",    summarize_node)
-    builder.add_node("report",       report_node)
-    builder.add_node("vector_store", vector_store_node)
-    builder.add_node("abort",        _abort_node)
-    builder.add_node("empty",        _empty_node)
+    builder.add_node("search_and_memory", search_and_memory_node)
+    builder.add_node("rerank",            rerank_node)
+    builder.add_node("summarize",         summarize_node)
+    builder.add_node("report",            report_node)
+    builder.add_node("vector_store",      vector_store_node)
+    builder.add_node("abort",             _abort_node)
+    builder.add_node("empty",             _empty_node)
 
-    # Entry point
-    builder.set_entry_point("search")
+    # Entry point: search + memory run in parallel inside one node
+    builder.set_entry_point("search_and_memory")
 
-    # After search: check for hard errors
+    # Route based on error / empty results
     builder.add_conditional_edges(
-        "search",
-        should_abort,
-        {"continue": "retrieve", "abort": "abort"},
-    )
-
-    # After retrieve: check we actually got results
-    builder.add_conditional_edges(
-        "retrieve",
-        has_results,
-        {"ok": "memory_context", "empty": "empty"},
+        "search_and_memory",
+        route_after_search,
+        {"continue": "rerank", "abort": "abort", "empty": "empty"},
     )
 
     # Linear tail of the pipeline
-    builder.add_edge("memory_context", "rerank")
     builder.add_edge("rerank",       "summarize")
     builder.add_edge("summarize",    "report")
     builder.add_edge("report",       "vector_store")
