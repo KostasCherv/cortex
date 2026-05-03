@@ -556,7 +556,7 @@ export async function chatWithRagAgent(
 
 type RagAgentChatStreamOptions = {
   signal?: AbortSignal
-  onSession: (sessionId: string) => void
+  onSession: (sessionId: string, webSearchEnabled?: boolean, webUsed?: boolean, webProvider?: string | null) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagCitation[]) => void
   onDone: () => void
@@ -594,6 +594,7 @@ export async function streamRagAgentChat(
   agentId: string,
   message: string,
   sessionId: string | null,
+  webSearchEnabled: boolean,
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
 ): Promise<void> {
@@ -604,7 +605,7 @@ export async function streamRagAgentChat(
       Accept: 'text/event-stream',
       ...authHeaders(accessToken),
     },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, session_id: sessionId, web_search_enabled: webSearchEnabled }),
     signal: options.signal,
   })
 
@@ -621,7 +622,7 @@ export async function streamRagAgentChat(
 
   const handleEvent = (parsed: RagChatStreamEvent): boolean => {
     if (parsed.type === 'session') {
-      options.onSession(parsed.session_id)
+      options.onSession(parsed.session_id, parsed.web_search_enabled, parsed.web_used, parsed.web_provider)
       return false
     }
     if (parsed.type === 'chunk') {
@@ -698,7 +699,7 @@ export async function getRagAgentChatSessionMessages(
   agentId: string,
   sessionId: string,
   accessToken: string | null,
-): Promise<{ session_id: string; agent_id: string; messages: RagChatMessage[] }> {
+): Promise<{ session_id: string; agent_id: string; web_search_enabled?: boolean; messages: RagChatMessage[] }> {
   const response = await fetch(
     `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/messages`,
     {
@@ -711,11 +712,13 @@ export async function getRagAgentChatSessionMessages(
   const parsed = (await response.json()) as {
     session_id: string
     agent_id: string
+    web_search_enabled?: boolean
     messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
   }
   return {
     session_id: parsed.session_id,
     agent_id: parsed.agent_id,
+    web_search_enabled: parsed.web_search_enabled,
     messages: parsed.messages.map((message) => ({
       ...message,
       citations: normalizeRagCitations(message.citations),

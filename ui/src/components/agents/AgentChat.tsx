@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { getRagAgentChatSessionMessages, streamRagAgentChat } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
@@ -85,6 +86,8 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
   const [chatting, setChatting] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+  const [webUsedLastReply, setWebUsedLastReply] = useState(false)
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
@@ -107,6 +110,8 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     setInput('')
     setStreamingText('')
     setError(null)
+    setWebSearchEnabled(false)
+    setWebUsedLastReply(false)
   }, [agent.agent_id])
 
   // Scroll to bottom on new messages
@@ -124,6 +129,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
         loadedSessionRef.current = res.session_id
         setSessionId(res.session_id)
         setMessages(res.messages)
+        setWebSearchEnabled(Boolean(res.web_search_enabled))
         setError(null)
       } catch (err) {
         if (requestId === messagesRequestRef.current && currentAgentIdRef.current === agent.agent_id) {
@@ -176,13 +182,17 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     let finalCitations: RagChatMessage['citations'] = []
     let streamFailed = false
     try {
-      await streamRagAgentChat(agent.agent_id, question, sessionId, accessToken, {
+      await streamRagAgentChat(agent.agent_id, question, sessionId, webSearchEnabled, accessToken, {
         signal: controller.signal,
-        onSession: (nextSessionId) => {
+        onSession: (nextSessionId, nextWebSearchEnabled, webUsed) => {
           if (requestId !== messagesRequestRef.current || currentAgentIdRef.current !== agent.agent_id) return
           streamedSessionId = nextSessionId
           loadedSessionRef.current = nextSessionId
           setSessionId(nextSessionId)
+          if (typeof nextWebSearchEnabled === 'boolean') {
+            setWebSearchEnabled(nextWebSearchEnabled)
+          }
+          setWebUsedLastReply(Boolean(webUsed))
           if (!sessionId) {
             onSessionActivated(nextSessionId)
           }
@@ -253,7 +263,21 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
             <p className="text-xs text-muted-foreground truncate max-w-md">{agent.description}</p>
           )}
         </div>
-        <span className="shrink-0 text-xs text-muted-foreground">{agent.linked_resource_ids.length} resources</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Web search</span>
+            <Switch
+              checked={webSearchEnabled}
+              onCheckedChange={setWebSearchEnabled}
+              disabled={chatting}
+              aria-label="Enable web search"
+            />
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {agent.linked_resource_ids.length} resources
+          </span>
+          {webUsedLastReply && <Badge variant="outline">Web used</Badge>}
+        </div>
       </div>
 
       {/* Messages */}

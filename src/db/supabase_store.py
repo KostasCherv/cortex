@@ -907,6 +907,7 @@ class SupabaseSessionStore:
             "workspace_id": payload["workspace_id"],
             "agent_id": payload["agent_id"],
             "title": payload.get("title") or "New chat",
+            "web_search_enabled": bool(payload.get("web_search_enabled", False)),
             "created_at": datetime.now(UTC).isoformat(),
         }
         await self._request("POST", "rag_chat_sessions", json_body=body)
@@ -922,7 +923,7 @@ class SupabaseSessionStore:
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,title,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,title,web_search_enabled,created_at",
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
                 "agent_id": f"eq.{agent_id}",
@@ -939,6 +940,7 @@ class SupabaseSessionStore:
             "workspace_id": row["workspace_id"],
             "agent_id": row["agent_id"],
             "title": row.get("title") or "New chat",
+            "web_search_enabled": bool(row.get("web_search_enabled", False)),
             "created_at": row.get("created_at"),
         }
 
@@ -952,7 +954,7 @@ class SupabaseSessionStore:
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,title,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,title,web_search_enabled,created_at",
                 "owner_id": f"eq.{owner_id}",
                 "agent_id": f"eq.{agent_id}",
                 "order": "created_at.desc",
@@ -990,6 +992,7 @@ class SupabaseSessionStore:
                     "workspace_id": row["workspace_id"],
                     "agent_id": row["agent_id"],
                     "title": row.get("title") or "New chat",
+                    "web_search_enabled": bool(row.get("web_search_enabled", False)),
                     "created_at": row.get("created_at"),
                     "last_message_at": latest.get("created_at") or row.get("created_at"),
                     "last_message_preview": preview,
@@ -1019,6 +1022,28 @@ class SupabaseSessionStore:
                 "agent_id": f"eq.{agent_id}",
             },
             json_body={"title": title},
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        return bool(rows)
+
+    async def update_rag_chat_session_web_search_enabled(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        agent_id: str,
+        web_search_enabled: bool,
+    ) -> bool:
+        response = await self._request(
+            "PATCH",
+            "rag_chat_sessions",
+            params={
+                "id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "agent_id": f"eq.{agent_id}",
+            },
+            json_body={"web_search_enabled": web_search_enabled},
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()

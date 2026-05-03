@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Search
     tavily_api_key: str = Field(default="", description="Tavily search API key")
     max_search_results: int = Field(default=5, description="Max Tavily search results")
+    web_search_provider: str = Field(
+        default="tavily",
+        description="Active web search provider for agent chat tool calls.",
+    )
 
     # Vector store (Pinecone)
     pinecone_api_key: str = Field(default="", description="Pinecone API key")

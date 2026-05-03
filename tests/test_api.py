@@ -12,7 +12,8 @@ from src.auth import AuthenticatedUser, get_authenticated_user
 from src.rag import RagValidationError
 from src.sessions import Session, SessionRun
 
-client = TestClient(app)
+with patch("src.api.endpoints.validate_web_search_provider_health"):
+    client = TestClient(app)
 
 
 def _auth_override() -> AuthenticatedUser:
@@ -479,6 +480,7 @@ def test_session_endpoints_require_auth():
 
 def test_startup_validation_does_not_fail_without_supabase_configuration():
     with (
+        patch("src.api.endpoints.validate_web_search_provider_health"),
         patch("src.api.endpoints.settings.supabase_url", ""),
         patch("src.api.endpoints.settings.supabase_service_role_key", ""),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
@@ -491,6 +493,7 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
 
 def test_startup_validation_checks_rag_storage_when_supabase_configured():
     with (
+        patch("src.api.endpoints.validate_web_search_provider_health"),
         patch("src.api.endpoints.settings.supabase_url", "https://example.supabase.co"),
         patch("src.api.endpoints.settings.supabase_service_role_key", "service-role"),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
@@ -698,6 +701,7 @@ def test_rag_chat_returns_agent_reply():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -745,6 +749,7 @@ def test_rag_chat_stream_returns_rich_citations():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -771,6 +776,242 @@ def test_rag_chat_stream_returns_rich_citations():
             "text": "Retrieved chunk text.",
         }
     ]
+
+
+def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context."
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://web.example", "title": "Web", "content": "Fact"}]
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(True, "fresh query"))),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "Need latest info", "web_search_enabled": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["web_used"] is True
+    mock_tool.search.assert_called_once()
+
+
+def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context is enough."
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "Summarize my docs", "web_search_enabled": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["web_used"] is False
+    mock_tool.search.assert_not_called()
+
+
+def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context."
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://example.com", "title": "Page", "content": "Body"}]
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={
+                "message": "Please fetch this URL: https://aws.amazon.com/certification/",
+                "web_search_enabled": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["web_used"] is True
+    assert payload["web_provider"] == "direct_fetch"
+    mock_tool.search.assert_not_called()
+
+
+def test_rag_chat_uses_prior_url_reference_for_direct_fetch():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context."
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    prior_msg = MagicMock()
+    prior_msg.role = "user"
+    prior_msg.content = "Use this URL next: https://aws.amazon.com/certification/"
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[prior_msg])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Fetched page content")),
+        patch("src.api.endpoints.get_web_search_tool") as mock_get_tool,
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={
+                "message": "Fetch the content from the url i provided",
+                "web_search_enabled": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["web_used"] is True
+    assert payload["web_provider"] == "direct_fetch"
+    mock_get_tool.assert_not_called()
+
+
+def test_rag_chat_repairs_url_access_refusal_when_web_content_exists():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context."
+    mock_context.chunks = []
+    bad = MagicMock()
+    bad.content = (
+        "I currently don't have the capability to directly fetch or retrieve "
+        "content from external URLs."
+    )
+    repaired = MagicMock()
+    repaired.content = "I fetched the URL content. Here is the summary."
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[bad, repaired])
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Fetched text")),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={
+                "message": "fetch this url https://aws.amazon.com/certification/",
+                "web_search_enabled": True,
+            },
+        )
+
+    assert response.status_code == 200
+    reply = response.json()["reply"]["content"].lower()
+    assert "don't have the capability" not in reply
+    assert "cannot access" not in reply
+
+
+def test_rag_chat_stream_repairs_url_access_refusal_when_web_content_exists():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "RAG context."
+    mock_context.chunks = []
+    bad = MagicMock()
+    bad.content = (
+        "I currently don't have the capability to directly fetch or retrieve "
+        "content from external URLs."
+    )
+    repaired = MagicMock()
+    repaired.content = "I fetched the URL content. Here is the summary."
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=[bad, repaired])
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Fetched text")),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={
+                "message": "fetch this url https://aws.amazon.com/certification/",
+                "web_search_enabled": True,
+            },
+        )
+
+    assert response.status_code == 200
+    lines = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    chunks = [evt["text"] for evt in lines if evt.get("type") == "chunk"]
+    final_text = "".join(chunks).lower()
+    assert "don't have the capability" not in final_text
+    assert "cannot access" not in final_text
 
 
 def test_rag_chat_sessions_returns_agent_scoped_summaries():

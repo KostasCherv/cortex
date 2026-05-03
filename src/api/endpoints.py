@@ -37,6 +37,8 @@ from src.sessions import (
     get_session_run,
 )
 from src.tools.vector_store import VectorStoreManager
+from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
+from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
 from src import outbox
 from src.rag import (
@@ -57,6 +59,7 @@ from src.rag import (
     list_chat_sessions as list_rag_chat_sessions,
     list_resources as list_rag_resources_records,
     retrieve_context_for_query,
+    update_chat_session_web_search_enabled,
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
 )
@@ -85,7 +88,10 @@ _inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_resea
 
 @app.on_event("startup")
 async def validate_session_store_configuration() -> None:
-    """Warn when session persistence is unavailable, but keep API bootable."""
+    """Validate critical runtime dependencies and session persistence wiring."""
+    validate_web_search_provider_health()
+
+    # Session persistence is optional for non-session routes.
     has_url = bool(settings.supabase_url)
     has_key = bool(settings.supabase_service_role_key)
 
@@ -157,6 +163,7 @@ class RagAgentLinkRequest(BaseModel):
 class RagChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    web_search_enabled: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +206,148 @@ def _build_rag_citations(chunks: list[dict] | None) -> list[dict]:
             }
         )
     return citations
+
+
+def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict]:
+    if not results:
+        return []
+    citations: list[dict] = []
+    for index, row in enumerate(results):
+        citations.append(
+            {
+                "source_title": row.get("title") or f"{provider} result {index + 1}",
+                "source_url": row.get("url") or "",
+                "chunk_id": f"{provider}-web-{index + 1}",
+                "text": row.get("raw_content") or row.get("content") or "",
+            }
+        )
+    return citations
+
+
+def _extract_llm_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part if isinstance(part, str) else str(part.get("text", ""))
+            for part in content
+            if isinstance(part, (str, dict))
+        )
+    return str(content)
+
+
+def _extract_urls(text: str) -> list[str]:
+    return re.findall(r"https?://\S+", text or "")
+
+
+def _is_explicit_url_fetch_intent(message: str) -> bool:
+    lower = message.lower()
+    asks_to_fetch = any(
+        phrase in lower
+        for phrase in ("fetch", "retrieve", "read", "summarize", "open")
+    )
+    mentions_urlish = any(
+        phrase in lower
+        for phrase in ("url", "link", "http://", "https://", "provided")
+    )
+    return asks_to_fetch and mentions_urlish
+
+
+def _claims_no_web_access(answer: str) -> bool:
+    lower = answer.lower()
+    return any(
+        phrase in lower
+        for phrase in (
+            "don't have the capability",
+            "do not have the capability",
+            "can't access external urls",
+            "cannot access external urls",
+            "can't retrieve content from external urls",
+            "cannot retrieve content from external urls",
+            "cannot browse",
+            "can't browse",
+        )
+    )
+
+
+async def _repair_url_access_refusal_if_needed(
+    *,
+    answer: str,
+    normalized_message: str,
+    rag_context: str,
+    web_results: list[dict],
+    llm,
+) -> str:
+    if not _claims_no_web_access(answer):
+        return answer
+
+    if not web_results:
+        return answer
+
+    repair_prompt = (
+        "You already have retrieved web content below.\n"
+        "Write a direct helpful answer for the user request.\n"
+        "Do NOT say you cannot access URLs or browse.\n\n"
+        f"User request:\n{normalized_message}\n\n"
+        f"Retrieved web content:\n{json.dumps(web_results)}\n\n"
+        f"Retrieved RAG context:\n{rag_context or 'None'}"
+    )
+    repair = await llm.ainvoke(repair_prompt)
+    repaired_text = _extract_llm_text(
+        repair.content if hasattr(repair, "content") else repair
+    ).strip()
+    if repaired_text and not _claims_no_web_access(repaired_text):
+        return repaired_text
+
+    first = web_results[0]
+    source = first.get("url") or "provided URL"
+    snippet = (first.get("raw_content") or first.get("content") or "").strip()
+    snippet = snippet[:1000]
+    return (
+        f"I fetched content from {source}. "
+        f"Here is a concise summary based on the retrieved page text:\n\n{snippet}"
+    ).strip()
+
+
+async def _should_use_web_search(
+    *,
+    message: str,
+    rag_context: str,
+    history_block: str,
+) -> tuple[bool, str]:
+    message_lower = message.lower()
+    message_urls = _extract_urls(message)
+    asks_to_fetch = _is_explicit_url_fetch_intent(message)
+    refers_to_prior_url = any(
+        phrase in message_lower
+        for phrase in ("url i provided", "that url", "the url", "this link", "that link")
+    )
+    if asks_to_fetch and message_urls:
+        return True, message_urls[0]
+    if asks_to_fetch and refers_to_prior_url:
+        history_urls = _extract_urls(history_block)
+        if history_urls:
+            return True, history_urls[-1]
+
+    llm = get_llm(temperature=0.0)
+    decision_prompt = (
+        "You decide if a web search tool is required for the next user request.\n"
+        "Return strict JSON only with keys: use_web_search (boolean), reason (string), query (string).\n"
+        "Use web search when freshness/current events/live facts/external facts are needed, or when RAG context is insufficient.\n"
+        "If RAG context is enough, set use_web_search to false.\n\n"
+        f"Conversation history:\n{history_block or 'None'}\n\n"
+        f"Retrieved RAG context:\n{rag_context or 'None'}\n\n"
+        f"User message:\n{message}"
+    )
+    result = await llm.ainvoke(decision_prompt)
+    raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return False, ""
+    use_web = bool(parsed.get("use_web_search", False))
+    query = str(parsed.get("query") or "").strip()
+    return use_web, query
 
 
 # ---------------------------------------------------------------------------
@@ -1056,18 +1205,84 @@ async def rag_chat_with_agent(
         agent_id=agent_id,
         session_id=body.session_id,
         initial_message=normalized_message,
+        web_search_enabled=bool(body.web_search_enabled),
     )
+    if body.web_search_enabled is not None:
+        await update_chat_session_web_search_enabled(
+            session_id=chat_session_id,
+            agent_id=agent_id,
+            user_id=current_user.user_id,
+            web_search_enabled=body.web_search_enabled,
+        )
+    chat_session = await get_rag_chat_session(
+        session_id=chat_session_id,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    effective_web_search_enabled = bool((chat_session or {}).get("web_search_enabled", False))
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
 
     history_block = "\n".join(
         f"{m.role.upper()}: {m.content}"
         for m in history[-10:]
     )
+    web_provider = settings.web_search_provider.lower()
+    web_used = False
+    web_results: list[dict] = []
+    if effective_web_search_enabled:
+        should_use_web, decision_query = await _should_use_web_search(
+            message=normalized_message,
+            rag_context=rag_context.context or "",
+            history_block=history_block,
+        )
+        if should_use_web:
+            try:
+                web_query = decision_query or normalized_message
+                direct_urls = _extract_urls(web_query) or _extract_urls(normalized_message) or _extract_urls(history_block)
+                if direct_urls:
+                    url = direct_urls[0]
+                    fetched = await fetch_url_content(url)
+                    web_results = [
+                        {
+                            "url": url,
+                            "title": url,
+                            "content": fetched,
+                            "raw_content": fetched,
+                        }
+                    ]
+                    web_used = True
+                    web_provider = "direct_fetch"
+                else:
+                    tool = get_web_search_tool()
+                    web_results = await asyncio.to_thread(
+                        tool.search,
+                        web_query,
+                        settings.max_search_results,
+                    )
+                    web_used = True
+                    web_provider = tool.provider_name
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "web_search_unavailable",
+                        "message": (
+                            "Web search is required for this request but the provider failed. "
+                            "Retry with web search disabled for this session."
+                        ),
+                        "provider": web_provider,
+                        "error": str(exc),
+                    },
+                ) from exc
+
     prompt = (
         "You are a custom RAG assistant.\n\n"
+        "Important: You can use provided web search context when available. "
+        "Do not claim you cannot access URLs or browse the web.\n\n"
         f"System instructions:\n{agent.system_instructions or 'None'}\n\n"
         f"Conversation history:\n{history_block or 'None'}\n\n"
         f"Retrieved context:\n{rag_context.context or 'No context returned.'}\n\n"
+        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
         f"User question:\n{normalized_message}\n\n"
         "Answer clearly and stay grounded in the retrieved context."
     )
@@ -1080,6 +1295,14 @@ async def rag_chat_with_agent(
             for part in content
         )
     answer = content.strip()
+    if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+        answer = await _repair_url_access_refusal_if_needed(
+            answer=answer,
+            normalized_message=normalized_message,
+            rag_context=rag_context.context or "",
+            web_results=web_results,
+            llm=llm,
+        )
 
     user_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
@@ -1089,7 +1312,7 @@ async def rag_chat_with_agent(
         role="user",
         content=normalized_message,
     )
-    citations = _build_rag_citations(rag_context.chunks)
+    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -1106,6 +1329,9 @@ async def rag_chat_with_agent(
     return {
         "session_id": chat_session_id,
         "agent_id": agent_id,
+        "web_search_enabled": effective_web_search_enabled,
+        "web_used": web_used,
+        "web_provider": web_provider if web_used else None,
         "reply": assistant_msg.to_dict(),
         "messages": [m.to_dict() for m in updated_history],
     }
@@ -1143,43 +1369,123 @@ async def rag_chat_with_agent_stream(
         agent_id=agent_id,
         session_id=body.session_id,
         initial_message=normalized_message,
+        web_search_enabled=bool(body.web_search_enabled),
     )
+    if body.web_search_enabled is not None:
+        await update_chat_session_web_search_enabled(
+            session_id=chat_session_id,
+            agent_id=agent_id,
+            user_id=current_user.user_id,
+            web_search_enabled=body.web_search_enabled,
+        )
+    chat_session = await get_rag_chat_session(
+        session_id=chat_session_id,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    effective_web_search_enabled = bool((chat_session or {}).get("web_search_enabled", False))
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    web_provider = settings.web_search_provider.lower()
+    web_used = False
+    web_results: list[dict] = []
+    if effective_web_search_enabled:
+        should_use_web, decision_query = await _should_use_web_search(
+            message=normalized_message,
+            rag_context=rag_context.context or "",
+            history_block=history_block,
+        )
+        if should_use_web:
+            try:
+                web_query = decision_query or normalized_message
+                direct_urls = _extract_urls(web_query) or _extract_urls(normalized_message) or _extract_urls(history_block)
+                if direct_urls:
+                    url = direct_urls[0]
+                    fetched = await fetch_url_content(url)
+                    web_results = [
+                        {
+                            "url": url,
+                            "title": url,
+                            "content": fetched,
+                            "raw_content": fetched,
+                        }
+                    ]
+                    web_used = True
+                    web_provider = "direct_fetch"
+                else:
+                    tool = get_web_search_tool()
+                    web_results = await asyncio.to_thread(
+                        tool.search,
+                        web_query,
+                        settings.max_search_results,
+                    )
+                    web_used = True
+                    web_provider = tool.provider_name
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "web_search_unavailable",
+                        "message": (
+                            "Web search is required for this request but the provider failed. "
+                            "Retry with web search disabled for this session."
+                        ),
+                        "provider": web_provider,
+                        "error": str(exc),
+                    },
+                ) from exc
     prompt = (
         "You are a custom RAG assistant.\n\n"
+        "Important: You can use provided web search context when available. "
+        "Do not claim you cannot access URLs or browse the web.\n\n"
         f"System instructions:\n{agent.system_instructions or 'None'}\n\n"
         f"Conversation history:\n{history_block or 'None'}\n\n"
         f"Retrieved context:\n{rag_context.context or 'No context returned.'}\n\n"
+        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
         f"User question:\n{normalized_message}\n\n"
         "Answer clearly and stay grounded in the retrieved context."
     )
 
-    citations = _build_rag_citations(rag_context.chunks)
+    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
         llm = get_llm(temperature=0.2)
         answer_parts: list[str] = []
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
-            async for chunk in llm.astream(prompt):
-                content = chunk.content if hasattr(chunk, "content") else chunk
-                token = ""
-                if isinstance(content, str):
-                    token = content
-                elif isinstance(content, list):
-                    token = "".join(
-                        part if isinstance(part, str) else part.get("text", "")
-                        for part in content
-                    )
-                elif content is not None:
-                    token = str(content)
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': web_used, 'web_provider': web_provider if web_used else None})}\n\n"
+            explicit_url_fetch = _is_explicit_url_fetch_intent(normalized_message)
+            if web_used and explicit_url_fetch:
+                result = await llm.ainvoke(prompt)
+                answer = _extract_llm_text(
+                    result.content if hasattr(result, "content") else result
+                ).strip()
+                answer = await _repair_url_access_refusal_if_needed(
+                    answer=answer,
+                    normalized_message=normalized_message,
+                    rag_context=rag_context.context or "",
+                    web_results=web_results,
+                    llm=llm,
+                )
+                if answer:
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
+            else:
+                async for chunk in llm.astream(prompt):
+                    content = chunk.content if hasattr(chunk, "content") else chunk
+                    token = ""
+                    if isinstance(content, str):
+                        token = content
+                    elif isinstance(content, list):
+                        token = "".join(
+                            part if isinstance(part, str) else part.get("text", "")
+                            for part in content
+                        )
+                    elif content is not None:
+                        token = str(content)
 
-                if token:
-                    answer_parts.append(token)
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
-
-            answer = "".join(answer_parts).strip()
+                    if token:
+                        answer_parts.append(token)
+                        yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
+                answer = "".join(answer_parts).strip()
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
                 session_id=chat_session_id,
@@ -1246,6 +1552,7 @@ async def list_rag_agent_chat_session_messages(
     return {
         "session_id": session_id,
         "agent_id": agent_id,
+        "web_search_enabled": bool(session.get("web_search_enabled", False)),
         "messages": [m.to_dict() for m in messages],
     }
 
