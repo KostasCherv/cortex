@@ -10,6 +10,7 @@ import type {
   RagResource,
   ResearchRequest,
   ResearchStreamEvent,
+  SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
 } from '../types'
@@ -19,6 +20,12 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
 type StreamOptions = {
   signal?: AbortSignal
   onEvent: (event: ResearchStreamEvent) => void
+  onDone?: () => void
+}
+
+type SessionRunStreamOptions = {
+  signal?: AbortSignal
+  onEvent: (event: SessionRunStreamEvent) => void
   onDone?: () => void
 }
 
@@ -260,6 +267,57 @@ export async function startSessionResearch(
     throw new Error(`Session research failed: ${response.status}`)
   }
   return (await response.json()) as { run_id: string; status: string }
+}
+
+export async function streamSessionRun(
+  sessionId: string,
+  runId: string,
+  accessToken: string | null,
+  options: SessionRunStreamOptions,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/sessions/${sessionId}/runs/${runId}/stream`, {
+    method: 'GET',
+    headers: {
+      Accept: 'text/event-stream',
+      ...authHeaders(accessToken),
+    },
+    signal: options.signal,
+  })
+  if (!response.ok) {
+    throw new Error(`Session run stream failed: ${response.status}`)
+  }
+  if (!response.body) {
+    throw new Error('Streaming not supported by this browser response.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() ?? ''
+
+    for (const chunk of chunks) {
+      const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'))
+      if (!dataLine) continue
+      let parsed: SessionRunStreamEvent
+      try {
+        parsed = JSON.parse(dataLine.replace(/^data:\s?/, '')) as SessionRunStreamEvent
+      } catch {
+        continue
+      }
+      options.onEvent(parsed)
+      if (parsed.type === 'done' || parsed.type === 'error') {
+        options.onDone?.()
+        return
+      }
+    }
+  }
+  options.onDone?.()
 }
 
 export async function streamResearch(

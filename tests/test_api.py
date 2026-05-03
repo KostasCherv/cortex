@@ -243,13 +243,20 @@ def test_execute_research_run_marks_completed_and_records():
     from src.api.endpoints import _execute_research_run
 
     class FakeGraph:
-        async def astream(self, _initial_state):
+        async def astream_events(self, _initial_state, version="v2"):
+            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
+            yield {"event": "on_chat_model_stream", "metadata": {"langgraph_node": "report"}, "data": {"chunk": MagicMock(content="Final ")}}
+            yield {"event": "on_chat_model_stream", "metadata": {"langgraph_node": "report"}, "data": {"chunk": MagicMock(content="report")}}
             yield {
-                "report_node": {
-                    "report": "Final report",
-                    "retrieved_contents": [{"url": "https://example.com", "title": "Example", "content": "Chunk"}],
-                    "summaries": [],
-                }
+                "event": "on_chain_end",
+                "metadata": {"langgraph_node": "report"},
+                "data": {
+                    "output": {
+                        "report": "Final report",
+                        "retrieved_contents": [{"url": "https://example.com", "title": "Example", "content": "Chunk"}],
+                        "summaries": [],
+                    }
+                },
             }
 
     @contextmanager
@@ -278,17 +285,10 @@ def test_execute_research_run_marks_completed_and_records():
             )
         )
 
-    mock_update.assert_awaited_once_with(
-        run_id="run-1",
-        user_id="user-1",
-        session_id="session-1",
-        patch={
-            "query": "What is LangGraph?",
-            "source_urls": ["https://example.com"],
-            "report": "Final report",
-            "status": "completed",
-            "error_details": None,
-        },
+    assert any(
+        call.kwargs.get("patch", {}).get("status") == "completed"
+        and call.kwargs.get("patch", {}).get("report") == "Final report"
+        for call in mock_update.await_args_list
     )
     mock_manager.save_source_chunks.assert_called_once()
 
@@ -297,7 +297,7 @@ def test_execute_research_run_marks_failed_on_error():
     from src.api.endpoints import _execute_research_run
 
     class FailingGraph:
-        async def astream(self, _initial_state):
+        async def astream_events(self, _initial_state, version="v2"):
             raise RuntimeError("graph failure")
             yield  # pragma: no cover
 
@@ -328,12 +328,58 @@ def test_execute_research_run_marks_failed_on_error():
         except RuntimeError:
             pass
 
-    mock_update.assert_awaited_once_with(
-        run_id="run-1",
-        user_id="user-1",
-        session_id="session-1",
-        patch={"status": "failed", "error_details": "graph failure"},
+    assert any(
+        call.kwargs.get("patch", {}).get("status") == "failed"
+        and call.kwargs.get("patch", {}).get("error_details") == "graph failure"
+        for call in mock_update.await_args_list
     )
+
+
+def test_execute_research_run_ignores_live_state_persist_errors():
+    from src.api.endpoints import _execute_research_run
+
+    class FakeGraph:
+        async def astream_events(self, _initial_state, version="v2"):
+            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
+            yield {
+                "event": "on_chain_end",
+                "metadata": {"langgraph_node": "report"},
+                "data": {"output": {"report": "Final report", "retrieved_contents": [], "summaries": []}},
+            }
+
+    @contextmanager
+    def _mock_trace_ctx(**_kwargs):
+        yield MagicMock(workflow_id="wf-1")
+
+    session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
+    calls = {"n": 0}
+
+    async def flaky_update(**kwargs):
+        patch = kwargs.get("patch", {})
+        if patch.get("status") in {"completed", "failed"}:
+            return True
+        calls["n"] += 1
+        raise RuntimeError("temporary db outage")
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
+        patch("src.api.endpoints.build_graph", return_value=FakeGraph()),
+        patch("src.api.endpoints.update_session_run", new=AsyncMock(side_effect=flaky_update)),
+        patch("src.api.endpoints._record_session_run", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run"),
+    ):
+        asyncio.run(
+            _execute_research_run(
+                session_id="session-1",
+                run_id="run-1",
+                user_id="user-1",
+                query="What is LangGraph?",
+                use_vector_store=False,
+            )
+        )
+
+    assert calls["n"] > 0
 
 
 def test_execute_research_runs_can_overlap_in_time():
@@ -343,17 +389,22 @@ def test_execute_research_runs_can_overlap_in_time():
     ends: list[tuple[str, float]] = []
 
     class SlowGraph:
-        async def astream(self, initial_state):
+        async def astream_events(self, initial_state, version="v2"):
             run_id = initial_state["run_id"]
             starts.append((run_id, time.perf_counter()))
             await asyncio.sleep(0.05)
             ends.append((run_id, time.perf_counter()))
+            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
             yield {
-                "report_node": {
-                    "report": f"Final report {run_id}",
-                    "retrieved_contents": [],
-                    "summaries": [],
-                }
+                "event": "on_chain_end",
+                "metadata": {"langgraph_node": "report"},
+                "data": {
+                    "output": {
+                        "report": f"Final report {run_id}",
+                        "retrieved_contents": [],
+                        "summaries": [],
+                    }
+                },
             }
 
     @contextmanager
@@ -365,6 +416,7 @@ def test_execute_research_runs_can_overlap_in_time():
     with (
         patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
         patch("src.api.endpoints.build_graph", return_value=SlowGraph()),
+        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints._record_session_run", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),

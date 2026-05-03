@@ -40,22 +40,28 @@ const PIPELINE_PHASES = [
 const VISIBLE_PHASES = PIPELINE_PHASES
 
 type Props = {
-  events: ResearchStreamEvent[]
+  events?: ResearchStreamEvent[]
+  latestNode?: string | null
+  status?: 'idle' | 'running' | 'completed' | 'failed'
   isStreaming: boolean
 }
 
-export function ResearchProgress({ events, isStreaming }: Props) {
+export function ResearchProgress({ events = [], latestNode = null, status = 'idle', isStreaming }: Props) {
   if (events.length === 0 && !isStreaming) return null
 
-  const normalizedNodes = events.map((e) => NODE_ALIASES[e.node] ?? e.node)
+  const normalizedLatestNode = latestNode ? NODE_ALIASES[latestNode] ?? latestNode : null
+  const normalizedNodes = [
+    ...events.map((e) => NODE_ALIASES[e.node] ?? e.node),
+    ...(normalizedLatestNode ? [normalizedLatestNode] : []),
+  ]
   const seenNodes = new Set(normalizedNodes)
   const latestVisibleNode = [...normalizedNodes].reverse().find((node) => VISIBLE_PHASES.includes(node)) ?? null
   const furthestKnownPhaseIndex = normalizedNodes.reduce((max, node) => {
     const idx = PIPELINE_PHASES.indexOf(node)
     return idx > max ? idx : max
   }, -1)
-  const hasError = seenNodes.has('__error__')
-  const ended = seenNodes.has('__end__')
+  const hasError = status === 'failed' || seenNodes.has('__error__')
+  const ended = status === 'completed' || seenNodes.has('__end__')
   const hasCurrent = isStreaming && !ended && !hasError
 
   return (

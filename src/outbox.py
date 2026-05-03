@@ -64,13 +64,19 @@ async def dispatch_outbox_events(limit: int = 50) -> int:
     """Send pending outbox events to Inngest. Returns the number successfully dispatched."""
     import inngest
     from src.inngest_client import inngest_client
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     store = _get_store()
 
-    # Recover rows stuck in dispatching state from a previous crashed dispatcher
-    await store.reset_stuck_dispatching_events()
-
-    rows = await store.fetch_pending_outbox_events(limit=limit)
+    try:
+        # Recover rows stuck in dispatching state from a previous crashed dispatcher
+        await store.reset_stuck_dispatching_events()
+        rows = await store.fetch_pending_outbox_events(limit=limit)
+    except Exception as exc:
+        logger.warning("[outbox] pre-dispatch fetch failed: %s", exc)
+        return 0
     dispatched = 0
 
     for row in rows:

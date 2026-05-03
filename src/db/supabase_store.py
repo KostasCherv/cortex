@@ -133,7 +133,10 @@ class SupabaseSessionStore:
             "GET",
             "session_runs",
             params={
-                "select": "id,query,source_urls,report,status,error_details,created_at",
+                "select": (
+                    "id,query,source_urls,report,status,error_details,"
+                    "latest_node,latest_event_at,partial_report,created_at"
+                ),
                 "session_id": f"eq.{session_id}",
                 "user_id": f"eq.{user_id}",
                 "order": "created_at.asc",
@@ -148,6 +151,9 @@ class SupabaseSessionStore:
                 report=row.get("report", ""),
                 status=row.get("status", "completed"),
                 error_details=row.get("error_details"),
+                latest_node=row.get("latest_node"),
+                latest_event_at=row.get("latest_event_at"),
+                partial_report=row.get("partial_report") or "",
                 created_at=row.get("created_at", ""),
             )
             for row in run_rows
@@ -239,6 +245,9 @@ class SupabaseSessionStore:
             "report": run.report,
             "status": run.status,
             "error_details": run.error_details,
+            "latest_node": run.latest_node,
+            "latest_event_at": run.latest_event_at,
+            "partial_report": run.partial_report,
             "created_at": run.created_at,
         }
         await self._request("POST", "session_runs", json_body=payload)
@@ -259,6 +268,9 @@ class SupabaseSessionStore:
             "report": run.report,
             "status": run.status,
             "error_details": run.error_details,
+            "latest_node": run.latest_node,
+            "latest_event_at": run.latest_event_at,
+            "partial_report": run.partial_report,
             "created_at": run.created_at,
         }
         await self._request("POST", "session_runs", json_body=payload)
@@ -285,6 +297,46 @@ class SupabaseSessionStore:
         )
         rows = response.json()
         return bool(rows)
+
+    async def get_session_run(
+        self,
+        *,
+        run_id: str,
+        user_id: str,
+        session_id: str,
+    ) -> SessionRun | None:
+        from src.sessions import SessionRun
+
+        response = await self._request(
+            "GET",
+            "session_runs",
+            params={
+                "select": (
+                    "id,query,source_urls,report,status,error_details,"
+                    "latest_node,latest_event_at,partial_report,created_at"
+                ),
+                "id": f"eq.{run_id}",
+                "user_id": f"eq.{user_id}",
+                "session_id": f"eq.{session_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        row = rows[0]
+        return SessionRun(
+            run_id=row["id"],
+            query=row.get("query", ""),
+            source_urls=row.get("source_urls") or [],
+            report=row.get("report", ""),
+            status=row.get("status", "completed"),
+            error_details=row.get("error_details"),
+            latest_node=row.get("latest_node"),
+            latest_event_at=row.get("latest_event_at"),
+            partial_report=row.get("partial_report") or "",
+            created_at=row.get("created_at", ""),
+        )
 
     async def append_turn(
         self,

@@ -16,6 +16,9 @@ class SessionRun:
     report: str = ""
     status: str = "completed"
     error_details: str | None = None
+    latest_node: str | None = None
+    latest_event_at: str | None = None
+    partial_report: str = ""
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
@@ -26,6 +29,9 @@ class SessionRun:
             "report": self.report,
             "status": self.status,
             "error_details": self.error_details,
+            "latest_node": self.latest_node,
+            "latest_event_at": self.latest_event_at,
+            "partial_report": self.partial_report,
             "created_at": self.created_at,
         }
 
@@ -142,6 +148,15 @@ async def update_session_run(
         user_id=user_id,
         session_id=session_id,
         patch=patch,
+    )
+
+
+async def get_session_run(*, run_id: str, user_id: str, session_id: str) -> SessionRun | None:
+    """Return a single run by ID scoped to the owning user/session."""
+    return await _get_store().get_session_run(
+        run_id=run_id,
+        user_id=user_id,
+        session_id=session_id,
     )
 
 

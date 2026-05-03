@@ -28,6 +28,9 @@ export type SessionRun = {
   report: string
   status: 'running' | 'completed' | 'failed'
   error_details?: string | null
+  latest_node?: string | null
+  latest_event_at?: string | null
+  partial_report?: string
   created_at: string
 }
 
@@ -69,6 +72,12 @@ export type FollowupStreamEvent =
   | { type: 'chunk'; text: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'suggestions'; suggestions: string[] }
+  | { type: 'done' }
+  | { type: 'error'; error: string }
+
+export type SessionRunStreamEvent =
+  | { type: 'progress'; node: string | null; status: 'running' | 'completed' | 'failed'; updated_at: string | null }
+  | { type: 'report_chunk'; text: string }
   | { type: 'done' }
   | { type: 'error'; error: string }
 

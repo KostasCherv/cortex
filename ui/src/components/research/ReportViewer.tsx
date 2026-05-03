@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 
 type Props = {
   report: string
+  streamingReport?: string
   query: string
   isStreaming: boolean
   error: string | null
@@ -24,10 +25,11 @@ function toSafeFileStem(value: string): string {
   )
 }
 
-export function ReportViewer({ report, query, isStreaming, error }: Props) {
+export function ReportViewer({ report, streamingReport = '', query, isStreaming, error }: Props) {
+  const visibleReport = report || (isStreaming ? streamingReport : '')
   const download = useCallback(() => {
-    if (!report.trim()) return
-    const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' })
+    if (!visibleReport.trim()) return
+    const blob = new Blob([visibleReport], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -36,13 +38,13 @@ export function ReportViewer({ report, query, isStreaming, error }: Props) {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }, [query, report])
+  }, [query, visibleReport])
 
-  if (!report && !error && !isStreaming) return null
+  if (!visibleReport && !error && !isStreaming) return null
 
   return (
     <div className="space-y-3">
-      {report && (
+      {visibleReport && (
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-muted-foreground truncate max-w-[70%]">{query}</h2>
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={download}>
@@ -56,15 +58,15 @@ export function ReportViewer({ report, query, isStreaming, error }: Props) {
           {error}
         </p>
       )}
-      {!error && !report && isStreaming && (
+      {!error && !visibleReport && isStreaming && (
         <p className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
           Drafting final report...
         </p>
       )}
-      {report && (
+      {visibleReport && (
         <div className="overflow-x-auto">
           <article className="prose prose-sm dark:prose-invert max-w-none prose-table:my-2 prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleReport}</ReactMarkdown>
           </article>
         </div>
       )}

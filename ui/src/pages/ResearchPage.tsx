@@ -4,10 +4,12 @@ import {
   createSession,
   getSession,
   startSessionResearch,
+  streamSessionRun,
 } from '@/api/client'
 import { FollowupChat } from '@/components/research/FollowupChat'
 import { InlineProgress } from '@/components/research/InlineProgress'
 import { QueryComposer } from '@/components/research/QueryComposer'
+import { ResearchProgress } from '@/components/research/ResearchProgress'
 import { ReportViewer } from '@/components/research/ReportViewer'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ConversationTurn, SessionDetail } from '@/types'
@@ -24,12 +26,15 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   const [report, setReport] = useState('')
   const [lastQuery, setLastQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [latestNode, setLatestNode] = useState<string | null>(null)
+  const [streamingReport, setStreamingReport] = useState('')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [conversation, setConversation] = useState<ConversationTurn[]>([])
 
   const loadedSessionRef = useRef<string | null>(null)
   const pollTimerRef = useRef<number | null>(null)
+  const runStreamAbortRef = useRef<AbortController | null>(null)
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
@@ -38,15 +43,23 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
     }
   }, [])
 
+  const stopRunStream = useCallback(() => {
+    runStreamAbortRef.current?.abort()
+    runStreamAbortRef.current = null
+  }, [])
+
   const resetViewState = useCallback(() => {
     setSessionId(null)
     setRunId(null)
     setConversation([])
     setReport('')
+    setStreamingReport('')
+    setLatestNode(null)
     setLastQuery('')
     setRunStatus('idle')
     setError(null)
-  }, [])
+    stopRunStream()
+  }, [stopRunStream])
 
   const syncFromSessionDetail = useCallback(
     (detail: SessionDetail) => {
@@ -57,7 +70,19 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       setRunId(latestRun?.run_id ?? null)
       setConversation(detail.conversation)
       setLastQuery(latestRun?.query ?? '')
-      setReport(latestRun?.report ?? '')
+      setReport((prev) => {
+        const nextReport = latestRun?.report ?? ''
+        // Never replace a non-empty rendered report with an empty polling snapshot.
+        if (!nextReport && prev) return prev
+        return nextReport
+      })
+      setStreamingReport((prev) => {
+        const nextPartial = latestRun?.partial_report ?? ''
+        if (!nextPartial) return prev
+        // Keep the longest/latest partial text to avoid visual rewinds.
+        return nextPartial.length >= prev.length ? nextPartial : prev
+      })
+      setLatestNode(latestRun?.latest_node ?? null)
       setRunStatus(nextStatus)
       setError(nextStatus === 'failed' ? latestRun?.error_details ?? 'Research failed.' : null)
       if (nextStatus !== 'running') {
@@ -84,15 +109,66 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
     [authSession, stopPolling, syncFromSessionDetail],
   )
 
+  const startRunStream = useCallback(
+    (nextSessionId: string, nextRunId: string) => {
+      if (!authSession?.access_token) return
+      stopRunStream()
+      const controller = new AbortController()
+      runStreamAbortRef.current = controller
+      void streamSessionRun(nextSessionId, nextRunId, authSession.access_token, {
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.type === 'progress') {
+            setLatestNode(event.node ?? null)
+            if (event.status === 'completed') setRunStatus('completed')
+            if (event.status === 'failed') setRunStatus('failed')
+            return
+          }
+          if (event.type === 'report_chunk') {
+            setStreamingReport((prev) => prev + event.text)
+            return
+          }
+          if (event.type === 'done') {
+            setRunStatus('completed')
+            void getSession(nextSessionId, authSession.access_token)
+              .then((detail) => syncFromSessionDetail(detail))
+              .catch(() => {})
+            return
+          }
+          if (event.type === 'error') {
+            setError(event.error)
+            setRunStatus('failed')
+          }
+        },
+        onDone: () => {
+          runStreamAbortRef.current = null
+          void getSession(nextSessionId, authSession.access_token)
+            .then((detail) => syncFromSessionDetail(detail))
+            .catch(() => startPolling(nextSessionId))
+        },
+      }).catch(() => {
+        if (runStreamAbortRef.current === controller) {
+          runStreamAbortRef.current = null
+          startPolling(nextSessionId)
+        }
+      })
+    },
+    [authSession, startPolling, stopRunStream, syncFromSessionDetail],
+  )
+
   useEffect(() => {
     return () => {
       stopPolling()
+      stopRunStream()
     }
-  }, [stopPolling])
+  }, [stopPolling, stopRunStream])
 
   const openSession = useCallback(
     async (selectedSessionId: string) => {
       if (!authSession?.access_token) return
+      setStreamingReport('')
+      setLatestNode(null)
+      setReport('')
       try {
         const detail = await getSession(selectedSessionId, authSession.access_token)
         syncFromSessionDetail(detail)
@@ -143,6 +219,10 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       setConversation([])
       setRunId(null)
       setRunStatus('running')
+      setLatestNode('queued')
+      setStreamingReport('')
+      stopRunStream()
+      stopPolling()
 
       let currentSessionId: string
       try {
@@ -167,7 +247,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
         setRunId(started.run_id)
         setRunStatus('running')
         onSessionsChanged()
-        startPolling(currentSessionId)
+        startRunStream(currentSessionId, started.run_id)
       } catch (streamError) {
         const message =
           streamError instanceof Error ? streamError.message : 'Unable to start background research run.'
@@ -175,7 +255,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
         setRunStatus('failed')
       }
     },
-    [authSession, onSessionActivated, onSessionsChanged, startPolling],
+    [authSession, onSessionActivated, onSessionsChanged, startRunStream, stopPolling, stopRunStream],
   )
 
   const hasContent = !!(report || runStatus === 'running' || runStatus === 'failed' || error)
@@ -207,7 +287,16 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
               <InlineProgress status={runStatus} error={error} />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
-              <ReportViewer report={report} query={lastQuery} isStreaming={runStatus === 'running'} error={error} />
+              <ResearchProgress latestNode={latestNode} status={runStatus} isStreaming={runStatus === 'running'} />
+            </div>
+            <div className="mx-auto max-w-2xl px-6 max-md:px-4">
+              <ReportViewer
+                report={report}
+                streamingReport={streamingReport}
+                query={lastQuery}
+                isStreaming={runStatus === 'running'}
+                error={error}
+              />
             </div>
             {report && sessionId && (
               <div className="w-full px-6 max-md:px-4">

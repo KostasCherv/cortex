@@ -1,9 +1,12 @@
 """FastAPI application — /health, /research (SSE), and session endpoints."""
 
+import asyncio
 import json
 import logging
 import re
+import time
 import uuid
+from datetime import UTC, datetime
 from typing import AsyncGenerator
 
 import inngest.fast_api as _inngest_fast_api
@@ -31,6 +34,7 @@ from src.sessions import (
     update_session_run,
     update_session_title,
     ensure_store_initialized,
+    get_session_run,
 )
 from src.tools.vector_store import VectorStoreManager
 from src.llm.factory import get_llm
@@ -60,6 +64,7 @@ from src.inngest_client import handle_rag_ingestion, handle_research_run, innges
 from src.storage import ensure_rag_storage_ready
 
 logger = logging.getLogger(__name__)
+_LIVE_REPORT_FLUSH_SECONDS = 0.3
 
 app = FastAPI(
     title="Research Agent API",
@@ -387,6 +392,42 @@ async def _execute_research_run(
         "conversation_history": [t.to_dict() for t in session.conversation],
     }
 
+    graph_nodes = {
+        "search_and_memory", "rerank", "summarize", "report",
+        "vector_store", "abort", "empty",
+    }
+    partial_report = ""
+    last_report_flush_at = 0.0
+
+    async def _flush_live_state(
+        *,
+        node: str | None = None,
+        force_report_flush: bool = False,
+    ) -> None:
+        nonlocal last_report_flush_at
+        patch: dict[str, str] = {"latest_event_at": datetime.now(UTC).isoformat()}
+        if node is not None:
+            patch["latest_node"] = node
+        if force_report_flush:
+            patch["partial_report"] = partial_report
+            last_report_flush_at = time.monotonic()
+        try:
+            await update_session_run(
+                run_id=run_id,
+                user_id=user_id,
+                session_id=session.session_id,
+                patch=patch,
+            )
+        except Exception as exc:
+            # Live progress is best-effort and must not abort the research run.
+            logger.warning(
+                "[run] live-state update failed run_id=%s session_id=%s node=%s error=%s",
+                run_id,
+                session.session_id,
+                node,
+                exc,
+            )
+
     with start_workflow_run(
         entrypoint="background",
         query=query,
@@ -394,13 +435,44 @@ async def _execute_research_run(
     ) as trace_ctx:
         final_node_state: dict | None = None
         try:
-            async for event in graph.astream(initial_state):
-                for _node_name, node_state in event.items():
-                    final_node_state = node_state
+            await _flush_live_state(node="queued", force_report_flush=True)
+            async for event in graph.astream_events(initial_state, version="v2"):
+                event_type = event.get("event", "")
+                meta = event.get("metadata", {})
+                langgraph_node = meta.get("langgraph_node")
+
+                if event_type == "on_chain_start" and langgraph_node in graph_nodes:
+                    await _flush_live_state(node=str(langgraph_node))
+
+                elif event_type == "on_chain_end" and langgraph_node in graph_nodes:
+                    node_state = event.get("data", {}).get("output", {})
+                    if isinstance(node_state, dict):
+                        final_node_state = node_state
+                    await _flush_live_state(node=str(langgraph_node))
+
+                elif event_type == "on_chat_model_stream" and langgraph_node == "report":
+                    chunk = event.get("data", {}).get("chunk")
+                    if not chunk:
+                        continue
+                    content = chunk.content if hasattr(chunk, "content") else ""
+                    token = ""
+                    if isinstance(content, str):
+                        token = content
+                    elif isinstance(content, list):
+                        token = "".join(
+                            b.get("text", "") if isinstance(b, dict) else str(b)
+                            for b in content
+                        )
+                    if token:
+                        partial_report += token
+                        now = time.monotonic()
+                        if (now - last_report_flush_at) >= _LIVE_REPORT_FLUSH_SECONDS:
+                            await _flush_live_state(force_report_flush=True)
 
             if not final_node_state:
                 raise RuntimeError("Research run produced no final state.")
 
+            await _flush_live_state(node="report", force_report_flush=True)
             await _record_session_run(session, user_id, run_id, query, final_node_state)
             logger.info("[run] end run_id=%s status=completed", run_id)
             end_workflow_run(
@@ -413,18 +485,82 @@ async def _execute_research_run(
                 },
             )
         except Exception as exc:
-            await update_session_run(
-                run_id=run_id,
-                user_id=user_id,
-                session_id=session.session_id,
-                patch={
-                    "status": "failed",
-                    "error_details": str(exc),
-                },
-            )
+            try:
+                await update_session_run(
+                    run_id=run_id,
+                    user_id=user_id,
+                    session_id=session.session_id,
+                    patch={
+                        "status": "failed",
+                        "error_details": str(exc),
+                        "latest_node": "abort",
+                        "latest_event_at": datetime.now(UTC).isoformat(),
+                    },
+                )
+            except Exception as persist_exc:
+                logger.exception(
+                    "[run] failed to persist terminal failure run_id=%s error=%s persist_error=%s",
+                    run_id,
+                    exc,
+                    persist_exc,
+                )
             logger.exception("[run] end run_id=%s status=failed error=%s", run_id, exc)
             end_workflow_run(trace_ctx, status="error", error=str(exc))
             raise
+
+
+async def _stream_session_run(
+    *,
+    session_id: str,
+    run_id: str,
+    user_id: str,
+) -> AsyncGenerator[str, None]:
+    last_node: str | None = None
+    last_partial_len = 0
+    last_event_at: str | None = None
+    while True:
+        try:
+            run = await get_session_run(run_id=run_id, user_id=user_id, session_id=session_id)
+        except Exception as exc:
+            error_payload = {
+                "type": "error",
+                "error": f"Could not refresh run state: {exc}",
+            }
+            yield f"data: {json.dumps(error_payload)}\n\n"
+            return
+        if run is None:
+            error_payload = {"type": "error", "error": f"Run '{run_id}' not found."}
+            yield f"data: {json.dumps(error_payload)}\n\n"
+            return
+
+        if run.latest_node != last_node or run.latest_event_at != last_event_at:
+            progress_payload = {
+                "type": "progress",
+                "node": run.latest_node,
+                "status": run.status,
+                "updated_at": run.latest_event_at,
+            }
+            yield f"data: {json.dumps(progress_payload)}\n\n"
+            last_node = run.latest_node
+            last_event_at = run.latest_event_at
+
+        partial_report = run.partial_report or ""
+        if len(partial_report) > last_partial_len:
+            chunk = partial_report[last_partial_len:]
+            chunk_payload = {"type": "report_chunk", "text": chunk}
+            yield f"data: {json.dumps(chunk_payload)}\n\n"
+            last_partial_len = len(partial_report)
+
+        if run.status in {"completed", "failed"}:
+            terminal_payload = (
+                {"type": "done"}
+                if run.status == "completed"
+                else {"type": "error", "error": run.error_details or "Research failed."}
+            )
+            yield f"data: {json.dumps(terminal_payload)}\n\n"
+            return
+
+        await asyncio.sleep(_LIVE_REPORT_FLUSH_SECONDS)
 
 
 async def _generate_suggestions(query: str, answer: str, context: str) -> list[str]:
@@ -680,6 +816,9 @@ async def session_research(
         report="",
         status="running",
         error_details=None,
+        latest_node="queued",
+        latest_event_at=datetime.now(UTC).isoformat(),
+        partial_report="",
     )
     await create_session_run(
         user_id=current_user.user_id,
@@ -698,6 +837,32 @@ async def session_research(
     )
     background_tasks.add_task(outbox.dispatch_outbox_events, limit=10)
     return {"run_id": run_id, "status": "running"}
+
+
+@app.get("/sessions/{session_id}/runs/{run_id}/stream", tags=["Sessions"])
+async def stream_session_run(
+    session_id: str,
+    run_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    session = await get_session(session_id, current_user.user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    run = session.get_run(run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run '{run_id}' not found in session '{session_id}'.",
+        )
+    return StreamingResponse(
+        _stream_session_run(
+            session_id=session_id,
+            run_id=run_id,
+            user_id=current_user.user_id,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/sessions/{session_id}/followup", tags=["Sessions"])
