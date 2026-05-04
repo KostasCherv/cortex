@@ -127,6 +127,7 @@ class RagChatMessage:
     role: str
     content: str
     citations: list[dict] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
@@ -138,6 +139,7 @@ class RagChatMessage:
             "role": self.role,
             "content": self.content,
             "citations": self.citations,
+            "suggestions": self.suggestions,
             "created_at": self.created_at,
         }
 

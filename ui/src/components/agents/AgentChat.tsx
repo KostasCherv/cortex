@@ -88,6 +88,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
   const [error, setError] = useState<string | null>(null)
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
+  const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
@@ -112,6 +113,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     setError(null)
     setWebSearchEnabled(false)
     setWebUsedLastReply(false)
+    setLatestSuggestions([])
   }, [agent.agent_id])
 
   // Scroll to bottom on new messages
@@ -153,9 +155,10 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     void openSession(activeSessionId)
   }, [activeSessionId, openSession])
 
-  const send = async () => {
-    if (!input.trim() || chatting) return
-    const question = input.trim()
+  const send = async (overrideText?: string) => {
+    const text = overrideText ?? input
+    if (!text.trim() || chatting) return
+    const question = text.trim()
     const requestId = ++messagesRequestRef.current
     const optimisticUserMessage: RagChatMessage = {
       message_id: `tmp-user-${requestId}`,
@@ -172,6 +175,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     setStreamingText('')
     setChatting(true)
     setError(null)
+    setLatestSuggestions([])
 
     chatAbortRef.current?.abort()
     const controller = new AbortController()
@@ -180,6 +184,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
     let streamedSessionId = sessionId
     let accumulated = ''
     let finalCitations: RagChatMessage['citations'] = []
+    let pendingSuggestions: string[] = []
     let streamFailed = false
     try {
       await streamRagAgentChat(agent.agent_id, question, sessionId, webSearchEnabled, accessToken, {
@@ -208,6 +213,12 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
           if (controller.signal.aborted) return
           finalCitations = citations
         },
+        onSuggestions: (suggestions) => {
+          if (requestId !== messagesRequestRef.current || currentAgentIdRef.current !== agent.agent_id) return
+          if (controller.signal.aborted) return
+          pendingSuggestions = suggestions
+          setLatestSuggestions(suggestions)
+        },
         onDone: () => {
           if (requestId !== messagesRequestRef.current || currentAgentIdRef.current !== agent.agent_id) return
           const finalSessionId = streamedSessionId ?? sessionId ?? 'pending'
@@ -219,6 +230,7 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
             role: 'assistant',
             content: accumulated.trim(),
             citations: finalCitations,
+            suggestions: pendingSuggestions,
             created_at: new Date().toISOString(),
           }
           loadedSessionRef.current = finalSessionId
@@ -252,6 +264,11 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
       }
     }
   }
+
+  const suggestions =
+    latestSuggestions.length > 0
+      ? latestSuggestions
+      : ([...messages].reverse().find((m) => m.role === 'assistant')?.suggestions ?? [])
 
   return (
     <div className="flex h-dvh flex-col max-md:h-full">
@@ -296,14 +313,33 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
                 </div>
               </div>
             ) : (
-              <div key={m.message_id} className="flex gap-2 items-start">
-                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
-                  AI
+              <div key={m.message_id} className="flex flex-col gap-2">
+                <div className="flex gap-2 items-start">
+                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
+                    AI
+                  </div>
+                  <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm max-md:max-w-[86%]">
+                    <MarkdownMessage content={m.content} />
+                    <CitationMarkers citations={m.citations} />
+                  </div>
                 </div>
-                <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm max-md:max-w-[86%]">
-                  <MarkdownMessage content={m.content} />
-                  <CitationMarkers citations={m.citations} />
-                </div>
+                {messages.at(-1)?.message_id === m.message_id && suggestions.length > 0 && (
+                  <div className="ml-9 flex max-w-[75%] flex-wrap gap-2 max-md:max-w-[86%]">
+                    {suggestions.map((text) => (
+                      <Button
+                        key={text}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => void send(text)}
+                        disabled={chatting}
+                      >
+                        {text}
+                      </Button>
+                    ))}
+                  </div>
+                )}
               </div>
             ),
           )}

@@ -543,13 +543,14 @@ export async function chatWithRagAgent(
   }
   const parsed = (await response.json()) as {
     session_id: string
-    messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
+    messages: Array<Omit<RagChatMessage, 'citations' | 'suggestions'> & { citations?: unknown; suggestions?: unknown }>
   }
   return {
     session_id: parsed.session_id,
     messages: parsed.messages.map((message) => ({
       ...message,
       citations: normalizeRagCitations(message.citations),
+      suggestions: normalizeSuggestions(message.suggestions),
     })),
   }
 }
@@ -559,6 +560,7 @@ type RagAgentChatStreamOptions = {
   onSession: (sessionId: string, webSearchEnabled?: boolean, webUsed?: boolean, webProvider?: string | null) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagCitation[]) => void
+  onSuggestions?: (suggestions: string[]) => void
   onDone: () => void
   onError?: (error: string) => void
 }
@@ -588,6 +590,13 @@ function normalizeRagCitations(citations: unknown): RagCitation[] {
     const normalized = normalizeRagCitation(citation as Partial<RagCitation>)
     return normalized ? [normalized] : []
   })
+}
+
+function normalizeSuggestions(suggestions: unknown): string[] {
+  if (!Array.isArray(suggestions)) {
+    return []
+  }
+  return suggestions.filter((value): value is string => typeof value === 'string')
 }
 
 export async function streamRagAgentChat(
@@ -631,6 +640,10 @@ export async function streamRagAgentChat(
     }
     if (parsed.type === 'citations') {
       options.onCitations(normalizeRagCitations(parsed.citations))
+      return false
+    }
+    if (parsed.type === 'suggestions') {
+      options.onSuggestions?.(parsed.suggestions)
       return false
     }
     if (parsed.type === 'done') {
@@ -722,6 +735,7 @@ export async function getRagAgentChatSessionMessages(
     messages: parsed.messages.map((message) => ({
       ...message,
       citations: normalizeRagCitations(message.citations),
+      suggestions: normalizeSuggestions(message.suggestions),
     })),
   }
 }

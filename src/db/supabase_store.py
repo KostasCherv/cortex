@@ -1078,6 +1078,7 @@ class SupabaseSessionStore:
             "role": payload["role"],
             "content": payload["content"],
             "citations": payload.get("citations") or [],
+            "suggestions": payload.get("suggestions") or [],
             "created_at": payload["created_at"],
         }
         await self._request("POST", "rag_chat_messages", json_body=body)
@@ -1087,7 +1088,7 @@ class SupabaseSessionStore:
             "GET",
             "rag_chat_messages",
             params={
-                "select": "id,session_id,agent_id,owner_id,role,content,citations,created_at",
+                "select": "id,session_id,agent_id,owner_id,role,content,citations,suggestions,created_at",
                 "session_id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
                 "order": "created_at.asc",
@@ -1103,6 +1104,7 @@ class SupabaseSessionStore:
                 "role": row["role"],
                 "content": row["content"],
                 "citations": row.get("citations") or [],
+                "suggestions": row.get("suggestions") or [],
                 "created_at": row.get("created_at"),
             }
             for row in rows

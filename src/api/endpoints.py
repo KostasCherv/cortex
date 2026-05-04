@@ -1303,6 +1303,11 @@ async def rag_chat_with_agent(
             web_results=web_results,
             llm=llm,
         )
+    suggestions = await _generate_suggestions(
+        normalized_message,
+        answer,
+        rag_context.context or "",
+    )
 
     user_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
@@ -1321,6 +1326,7 @@ async def rag_chat_with_agent(
         role="assistant",
         content=answer,
         citations=citations,
+        suggestions=suggestions,
     )
     await append_chat_message(user_msg)
     await append_chat_message(assistant_msg)
@@ -1486,6 +1492,11 @@ async def rag_chat_with_agent_stream(
                         answer_parts.append(token)
                         yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
                 answer = "".join(answer_parts).strip()
+            suggestions = await _generate_suggestions(
+                normalized_message,
+                answer,
+                rag_context.context or "",
+            )
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
                 session_id=chat_session_id,
@@ -1502,10 +1513,13 @@ async def rag_chat_with_agent_stream(
                 role="assistant",
                 content=answer,
                 citations=citations,
+                suggestions=suggestions,
             )
             await append_chat_message(user_msg)
             await append_chat_message(assistant_msg)
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+            if suggestions:
+                yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"

@@ -117,6 +117,7 @@ export type RagChatMessage = {
   role: 'user' | 'assistant'
   content: string
   citations: RagCitation[]
+  suggestions?: string[]
   created_at: string
 }
 
@@ -141,5 +142,6 @@ export type RagChatStreamEvent =
     }
   | { type: 'chunk'; text: string }
   | { type: 'citations'; citations: RagCitation[] }
+  | { type: 'suggestions'; suggestions: string[] }
   | { type: 'done' }
   | { type: 'error'; error: string }

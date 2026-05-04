@@ -778,6 +778,86 @@ def test_rag_chat_stream_returns_rich_citations():
     ]
 
 
+def test_rag_chat_stream_includes_suggestions_event_before_done():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = "Keep it concise."
+
+    mock_context = MagicMock()
+    mock_context.context = "Relevant context."
+    mock_context.chunks = []
+
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch(
+            "src.api.endpoints._generate_suggestions",
+            new=AsyncMock(return_value=["Follow-up one?", "Follow-up two?", "Follow-up three?"]),
+        ),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={"message": "Hello", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    event_types = [event["type"] for event in events]
+    assert "suggestions" in event_types
+    suggestions_idx = event_types.index("suggestions")
+    done_idx = event_types.index("done")
+    assert suggestions_idx < done_idx
+    suggestions_event = next(event for event in events if event["type"] == "suggestions")
+    assert suggestions_event["suggestions"] == ["Follow-up one?", "Follow-up two?", "Follow-up three?"]
+
+
+def test_rag_chat_persists_suggestions_on_assistant_message():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = "Keep it concise."
+
+    mock_context = MagicMock()
+    mock_context.context = "Relevant context."
+    mock_context.chunks = []
+
+    llm_result = MagicMock()
+    llm_result.content = "Answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    append_chat = AsyncMock(return_value=None)
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=append_chat),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch(
+            "src.api.endpoints._generate_suggestions",
+            new=AsyncMock(return_value=["Next question?", "Another question?"]),
+        ),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "Hello", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    assistant_message = append_chat.await_args_list[1].args[0]
+    assert assistant_message.role == "assistant"
+    assert assistant_message.suggestions == ["Next question?", "Another question?"]
+
+
 def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
     mock_agent = MagicMock()
     mock_agent.system_instructions = ""
