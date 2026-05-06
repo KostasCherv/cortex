@@ -9,6 +9,7 @@ Set these environment variables to enable LangFuse:
 - `LANGFUSE_SECRET_KEY=sk-lf-...`
 - `LANGFUSE_HOST=https://cloud.langfuse.com`
 - `LANGFUSE_RELEASE=<optional app version>`
+- `LANGFUSE_ENV=<optional env: dev|staging|prod>`
 
 ## Ownership
 
@@ -34,7 +35,8 @@ Request body:
 Rules:
 
 - Only one feedback submission is allowed per run in this iteration.
-- The run must have LangFuse trace metadata persisted on it.
+- The run must be `completed`.
+- The run must have LangFuse trace metadata persisted on it. If missing, backend attempts an on-demand LangFuse anchor linkage first.
 - Comments are optional, trimmed, and limited to 500 characters.
 
 The research UI shows a simple thumbs up/down control for the latest visible completed run. A thumbs down reveals an optional comment box.

@@ -1058,6 +1058,11 @@ async def submit_run_feedback(
 
     if run.feedback_submitted_at:
         raise HTTPException(status_code=409, detail="Feedback has already been submitted for this run.")
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Feedback can only be submitted for completed runs.",
+        )
     trace_id = run.langfuse_trace_id
     observation_id = run.langfuse_observation_id
     if not trace_id:
@@ -1073,7 +1078,7 @@ async def submit_run_feedback(
             raise HTTPException(status_code=502, detail=f"Could not link run to LangFuse: {exc}")
         if not trace_id:
             raise HTTPException(status_code=502, detail="Could not link run to LangFuse.")
-        await update_session_run(
+        linkage_updated = await update_session_run(
             run_id=run_id,
             user_id=current_user.user_id,
             session_id=session_id,
@@ -1082,6 +1087,11 @@ async def submit_run_feedback(
                 "langfuse_observation_id": observation_id,
             },
         )
+        if not linkage_updated:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Run '{run_id}' not found in session '{session_id}'.",
+            )
 
     comment: str | None = None
     if body.comment is not None:

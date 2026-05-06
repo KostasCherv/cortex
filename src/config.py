@@ -121,6 +121,10 @@ class Settings(BaseSettings):
         default="",
         description="Optional application release/version attached to LangFuse traces.",
     )
+    langfuse_env: str = Field(
+        default="",
+        description="Optional LangFuse environment label (for example dev, staging, prod).",
+    )
 
     # RAG Agent
     rag_max_file_size_mb: int = Field(

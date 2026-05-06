@@ -127,12 +127,15 @@ def _start_generation(
                 trace_id=trace_id,
             )
         except TypeError:
-            return start_generation(
-                name=name,
-                model=model,
-                input=prompt,
-                metadata=metadata,
-            )
+            try:
+                return start_generation(
+                    name=name,
+                    model=model,
+                    input=prompt,
+                    metadata=metadata,
+                )
+            except Exception:
+                return None
         except Exception:
             return None
 
@@ -169,12 +172,18 @@ def observe_llm_generation(
         return
 
     trace_id = _build_trace_id(client, metadata)
+    enriched_metadata = dict(metadata)
+    if settings.langfuse_release:
+        enriched_metadata.setdefault("release", settings.langfuse_release)
+    if settings.langfuse_env:
+        enriched_metadata.setdefault("environment", settings.langfuse_env)
+
     generation = _start_generation(
         client,
         name=f"{step_name}.generation",
         model=model,
         prompt=prompt,
-        metadata=metadata,
+        metadata=enriched_metadata,
         trace_id=trace_id,
     )
     if generation is None:
@@ -228,17 +237,23 @@ def create_feedback_anchor_for_run(
     """Create a minimal LangFuse observation so legacy runs can accept feedback."""
     client = require_client()
     trace_id = create_trace_id_for_workflow(run_id) or None
+    anchor_metadata: dict[str, object] = {
+        "run_id": run_id,
+        "session_id": session_id,
+        "user_id": user_id,
+        "backfilled": True,
+    }
+    if settings.langfuse_env:
+        anchor_metadata["environment"] = settings.langfuse_env
+    if settings.langfuse_release:
+        anchor_metadata["release"] = settings.langfuse_release
+
     generation = _start_generation(
         client,
         name="legacy_run.feedback_anchor",
         model="n/a",
         prompt={"query": query},
-        metadata={
-            "run_id": run_id,
-            "session_id": session_id,
-            "user_id": user_id,
-            "backfilled": True,
-        },
+        metadata=anchor_metadata,
         trace_id=trace_id,
     )
     if generation is None:

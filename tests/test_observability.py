@@ -127,3 +127,45 @@ def test_langfuse_submit_score_forwards_expected_payload(monkeypatch):
         comment="Useful answer",
     )
     flush.assert_called_once()
+
+
+def test_langfuse_start_generation_returns_none_on_typeerror_fallback_failure():
+    from src.observability import langfuse as lf
+
+    client = MagicMock()
+    client.start_generation.side_effect = [TypeError("bad args"), RuntimeError("still bad")]
+
+    observed = lf._start_generation(  # noqa: SLF001 - intentional direct helper test
+        client,
+        name="summarize.generation",
+        model="gpt-4o-mini",
+        prompt="hello",
+        metadata={},
+        trace_id="trace-1",
+    )
+    assert observed is None
+
+
+def test_langfuse_generation_includes_env_and_release_metadata(monkeypatch):
+    from src.observability import langfuse as lf
+
+    generation = MagicMock(trace_id="trace-1", id="obs-1")
+    client = MagicMock()
+    client.start_generation.return_value = generation
+
+    monkeypatch.setattr(lf, "get_client", lambda: client)
+    monkeypatch.setattr(lf.settings, "langfuse_enabled", True)
+    monkeypatch.setattr(lf.settings, "langfuse_env", "staging")
+    monkeypatch.setattr(lf.settings, "langfuse_release", "2026.05.06")
+
+    with lf.observe_llm_generation(
+        step_name="summarize",
+        model="gpt-4o-mini",
+        prompt="hello",
+        metadata={"run_id": "run-1"},
+    ):
+        pass
+
+    called_metadata = client.start_generation.call_args.kwargs["metadata"]
+    assert called_metadata["environment"] == "staging"
+    assert called_metadata["release"] == "2026.05.06"

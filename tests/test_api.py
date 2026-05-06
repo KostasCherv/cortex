@@ -343,6 +343,57 @@ def test_submit_run_feedback_rejects_duplicate_submission():
     assert response.status_code == 409
 
 
+def test_submit_run_feedback_rejects_non_completed_run():
+    mock_session = Session(
+        session_id="session-1",
+        runs=[
+            SessionRun(
+                run_id="run-1",
+                query="q",
+                source_urls=[],
+                report="",
+                status="running",
+                created_at="2026",
+                langfuse_trace_id="trace-1",
+                langfuse_observation_id="obs-1",
+            )
+        ],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+        response = client.post(
+            "/sessions/session-1/runs/run-1/feedback",
+            json={"helpful": True},
+        )
+
+    assert response.status_code == 409
+
+
+def test_submit_run_feedback_returns_404_when_backfill_linkage_persist_fails():
+    mock_session = Session(
+        session_id="session-1",
+        runs=[SessionRun(run_id="run-1", query="q", source_urls=[], report="", created_at="2026")],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.endpoints.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
+        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=False)),
+        patch("src.api.endpoints.submit_user_feedback_score") as mock_score,
+    ):
+        response = client.post(
+            "/sessions/session-1/runs/run-1/feedback",
+            json={"helpful": True},
+        )
+
+    assert response.status_code == 404
+    mock_score.assert_not_called()
+
+
 def test_execute_research_run_marks_completed_and_records():
     from src.api.endpoints import _execute_research_run
 

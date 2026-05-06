@@ -23,6 +23,18 @@ _RERANK_CANDIDATE_LIMIT = 10
 _RERANK_MAX_DOC_CHARS = 1200
 
 
+def _sanitize_model_name(raw_model: object) -> str:
+    if raw_model is None:
+        return "unknown"
+    model = str(raw_model).strip()
+    if not model:
+        return "unknown"
+    lowered = model.lower()
+    if "magicmock" in lowered or "<mock" in lowered:
+        return "unknown"
+    return model
+
+
 def _extract_llm_text(response: object) -> str:
     """Extract plain text from provider-specific LLM response shapes."""
     content = response.content if hasattr(response, "content") else response
@@ -68,11 +80,10 @@ async def _invoke_llm(
     state: ResearchState | None = None,
 ):
     trace_metadata = build_trace_metadata(metadata or {})
-    model_name = str(
+    model_name = _sanitize_model_name(
         getattr(llm, "model_name", "")
         or getattr(llm, "model", "")
         or getattr(llm, "model_id", "")
-        or "unknown"
     )
     with start_step_span(
         name=f"{step_name}.llm_invoke",
