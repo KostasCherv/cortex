@@ -1,0 +1,20 @@
+[
+  {
+    "id": "langgraph-overview",
+    "input": {
+      "query": "What is LangGraph?"
+    },
+    "rubric": {
+      "must_include": [
+        "LangGraph is for stateful or multi-step LLM workflows",
+        "It supports graph-style orchestration with nodes and edges"
+      ],
+      "must_not": [
+        "confuse LangGraph with LangSmith"
+      ]
+    },
+    "tags": ["baseline", "definition"],
+    "difficulty": "easy",
+    "notes": "Seed example for production-ready eval sync."
+  }
+]

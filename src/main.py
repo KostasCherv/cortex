@@ -1,6 +1,7 @@
 """CLI entry point using Typer + Rich."""
 
 import asyncio
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -152,6 +153,31 @@ def rag_process_job(
         console.print(f"[green]Processed RAG ingestion job {job_id}[/green]")
     else:
         console.print(f"[yellow]Job {job_id} already claimed or terminal — skipped.[/yellow]")
+
+
+@app.command()
+def langfuse_sync_dataset(
+    dataset_name: str = typer.Option(
+        "research-agent/golden-queries",
+        "--dataset-name",
+        help="LangFuse dataset name to create or update.",
+    ),
+    source: str = typer.Option(
+        "tests/fixtures/langfuse_golden_queries.json",
+        "--source",
+        help="Path to the checked-in golden-query artifact.",
+    ),
+):
+    """Sync the checked-in golden-query artifact into a LangFuse dataset."""
+    from src.observability.langfuse_datasets import sync_golden_queries_dataset
+
+    synced = sync_golden_queries_dataset(
+        dataset_name=dataset_name,
+        source_path=Path(source),
+    )
+    console.print(
+        f"[green]Synced {synced} golden-query item(s) to LangFuse dataset[/green] {dataset_name}"
+    )
 
 
 if __name__ == "__main__":

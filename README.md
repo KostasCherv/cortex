@@ -27,7 +27,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
 - Auth, sessions, and storage: `Supabase` (Postgres, Auth, Storage)
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
-- Observability: `LangSmith`
+- Observability: `LangSmith`, `LangFuse`
 - Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`
 
 ## Architecture
@@ -115,6 +115,7 @@ Key endpoints:
 - `POST /sessions` - create authenticated session.
 - `GET /sessions` - list authenticated user sessions.
 - `POST /sessions/{id}/research` - run research in-session with SSE streaming.
+- `POST /sessions/{id}/runs/{run_id}/feedback` - submit thumbs feedback (optional comment) for a completed run.
 - `POST /sessions/{id}/followup` - grounded follow-up chat over run sources.
 
 Example research request:
@@ -133,6 +134,12 @@ curl -N -X POST http://localhost:8000/research \
 - Auth-scoped session boundaries for data isolation across users.
 - Stream-first API design for long-running AI workflows.
 - Structured observability across orchestration nodes and dependency calls.
+
+## LangFuse integration
+
+Cortex keeps `LangSmith` for graph/workflow-level tracing and adds `LangFuse` for generation-level observability, user scoring, and evaluation datasets.
+
+Check more on [LANGFUSE.md](LANGFUSE.md).
 
 ## Development checks
 

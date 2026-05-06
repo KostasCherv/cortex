@@ -17,6 +17,11 @@ from pydantic import BaseModel
 
 from src.graph.graph import build_graph
 from src.errors import ResearchAgentError
+from src.observability.langfuse import (
+    create_feedback_anchor_for_run,
+    create_trace_id_for_workflow,
+    submit_user_feedback_score,
+)
 from src.observability import end_workflow_run, start_workflow_run
 from src.config import settings
 from src.auth import AuthenticatedUser, get_authenticated_user
@@ -135,6 +140,11 @@ class CreateSessionRequest(BaseModel):
 
 class UpdateSessionTitleRequest(BaseModel):
     title: str
+
+
+class RunFeedbackRequest(BaseModel):
+    helpful: bool
+    comment: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -373,6 +383,7 @@ async def _stream_research(
         "error": None,
         "session_id": session.session_id if session else None,
         "run_id": run_id,
+        "user_id": user_id,
         "conversation_history": (
             [t.to_dict() for t in session.conversation] if session else []
         ),
@@ -430,6 +441,10 @@ async def _stream_research(
 
             # Persist session state after a successful run
             if session is not None and run_id is not None and final_node_state and user_id:
+                if not final_node_state.get("langfuse_trace_id"):
+                    fallback_trace_id = create_trace_id_for_workflow(trace_ctx.workflow_id)
+                    if fallback_trace_id:
+                        final_node_state["langfuse_trace_id"] = fallback_trace_id
                 await _record_session_run(session, user_id, run_id, query, final_node_state)
 
             end_workflow_run(
@@ -477,6 +492,8 @@ async def _record_session_run(
             "report": final_state.get("report", ""),
             "status": "completed",
             "error_details": None,
+            "langfuse_trace_id": final_state.get("langfuse_trace_id"),
+            "langfuse_observation_id": final_state.get("langfuse_observation_id"),
         },
     )
     if not finalized:
@@ -538,6 +555,7 @@ async def _execute_research_run(
         "error": None,
         "session_id": session.session_id,
         "run_id": run_id,
+        "user_id": user_id,
         "conversation_history": [t.to_dict() for t in session.conversation],
     }
 
@@ -620,6 +638,11 @@ async def _execute_research_run(
 
             if not final_node_state:
                 raise RuntimeError("Research run produced no final state.")
+
+            if not final_node_state.get("langfuse_trace_id"):
+                fallback_trace_id = create_trace_id_for_workflow(trace_ctx.workflow_id)
+                if fallback_trace_id:
+                    final_node_state["langfuse_trace_id"] = fallback_trace_id
 
             await _flush_live_state(node="report", force_report_flush=True)
             await _record_session_run(session, user_id, run_id, query, final_node_state)
@@ -1012,6 +1035,95 @@ async def stream_session_run(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/sessions/{session_id}/runs/{run_id}/feedback", tags=["Sessions"])
+async def submit_run_feedback(
+    session_id: str,
+    run_id: str,
+    body: RunFeedbackRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    """Record simple user feedback for a completed run in LangFuse."""
+    session = await get_session(session_id, current_user.user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+    run = session.get_run(run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run '{run_id}' not found in session '{session_id}'.",
+        )
+
+    if run.feedback_submitted_at:
+        raise HTTPException(status_code=409, detail="Feedback has already been submitted for this run.")
+    trace_id = run.langfuse_trace_id
+    observation_id = run.langfuse_observation_id
+    if not trace_id:
+        try:
+            trace_id, observation_id = create_feedback_anchor_for_run(
+                run_id=run.run_id,
+                session_id=session_id,
+                user_id=current_user.user_id,
+                query=run.query,
+                report=run.report,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Could not link run to LangFuse: {exc}")
+        if not trace_id:
+            raise HTTPException(status_code=502, detail="Could not link run to LangFuse.")
+        await update_session_run(
+            run_id=run_id,
+            user_id=current_user.user_id,
+            session_id=session_id,
+            patch={
+                "langfuse_trace_id": trace_id,
+                "langfuse_observation_id": observation_id,
+            },
+        )
+
+    comment: str | None = None
+    if body.comment is not None:
+        trimmed = " ".join(body.comment.strip().split())
+        if not trimmed:
+            raise HTTPException(status_code=400, detail="Feedback comment cannot be empty.")
+        if len(trimmed) > 500:
+            raise HTTPException(status_code=400, detail="Feedback comment is too long.")
+        comment = trimmed
+
+    try:
+        submit_user_feedback_score(
+            trace_id=trace_id,
+            observation_id=observation_id,
+            helpful=body.helpful,
+            comment=comment,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not submit LangFuse feedback: {exc}")
+
+    submitted_at = datetime.now(UTC).isoformat()
+    updated = await update_session_run(
+        run_id=run_id,
+        user_id=current_user.user_id,
+        session_id=session_id,
+        patch={
+            "feedback_submitted_at": submitted_at,
+            "feedback_helpful": body.helpful,
+        },
+    )
+    if not updated:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Run '{run_id}' not found in session '{session_id}'.",
+        )
+
+    return {
+        "session_id": session_id,
+        "run_id": run_id,
+        "feedback_submitted_at": submitted_at,
+        "feedback_helpful": body.helpful,
+    }
 
 
 @app.post("/sessions/{session_id}/followup", tags=["Sessions"])

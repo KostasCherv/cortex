@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -12,6 +13,8 @@ from src.config import settings
 
 if TYPE_CHECKING:
     from src.sessions import ConversationTurn, Session, SessionRun
+
+logger = logging.getLogger(__name__)
 
 
 class SupabaseSessionStore:
@@ -28,6 +31,35 @@ class SupabaseSessionStore:
             "Authorization": f"Bearer {settings.supabase_service_role_key}",
             "Content-Type": "application/json",
         }
+        self._session_run_extended_fields_supported: bool | None = None
+
+    _SESSION_RUN_BASE_SELECT = (
+        "id,query,source_urls,report,status,error_details,"
+        "latest_node,latest_event_at,partial_report,created_at"
+    )
+    _SESSION_RUN_EXTENDED_SELECT = (
+        "id,query,source_urls,report,status,error_details,"
+        "latest_node,latest_event_at,partial_report,"
+        "langfuse_trace_id,langfuse_observation_id,"
+        "feedback_submitted_at,feedback_helpful,created_at"
+    )
+    _SESSION_RUN_OPTIONAL_FIELDS = {
+        "langfuse_trace_id",
+        "langfuse_observation_id",
+        "feedback_submitted_at",
+        "feedback_helpful",
+    }
+    _SESSION_RUN_NON_BASE_FIELDS = {
+        "status",
+        "error_details",
+        "latest_node",
+        "latest_event_at",
+        "partial_report",
+        "langfuse_trace_id",
+        "langfuse_observation_id",
+        "feedback_submitted_at",
+        "feedback_helpful",
+    }
 
     async def _request(
         self,
@@ -51,6 +83,157 @@ class SupabaseSessionStore:
             )
         response.raise_for_status()
         return response
+
+    @staticmethod
+    def _is_missing_session_run_column_error(exc: httpx.HTTPStatusError) -> bool:
+        if exc.response.status_code != 400:
+            return False
+        try:
+            payload = exc.response.json()
+        except Exception:
+            payload = {}
+        message = str(payload.get("message", "")).lower()
+        code = str(payload.get("code", "")).upper()
+        if "does not exist" in message and (
+            "session_runs" in message
+            or "langfuse_" in message
+            or "feedback_" in message
+        ):
+            return True
+        return code.startswith("PGRST")
+
+    def _session_run_select(self) -> str:
+        if self._session_run_extended_fields_supported is False:
+            return self._SESSION_RUN_BASE_SELECT
+        return self._SESSION_RUN_EXTENDED_SELECT
+
+    def _strip_optional_session_run_fields(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if key not in self._SESSION_RUN_OPTIONAL_FIELDS
+        }
+
+    def _strip_non_base_session_run_fields(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if key not in self._SESSION_RUN_NON_BASE_FIELDS
+        }
+
+    @staticmethod
+    def _is_bad_request(exc: httpx.HTTPStatusError) -> bool:
+        return exc.response.status_code == 400
+
+    @staticmethod
+    def _session_run_from_row(row: dict[str, Any]) -> "SessionRun":
+        from src.sessions import SessionRun
+
+        return SessionRun(
+            run_id=row["id"],
+            query=row.get("query", ""),
+            source_urls=row.get("source_urls") or [],
+            report=row.get("report", ""),
+            status=row.get("status", "completed"),
+            error_details=row.get("error_details"),
+            latest_node=row.get("latest_node"),
+            latest_event_at=row.get("latest_event_at"),
+            partial_report=row.get("partial_report") or "",
+            langfuse_trace_id=row.get("langfuse_trace_id"),
+            langfuse_observation_id=row.get("langfuse_observation_id"),
+            feedback_submitted_at=row.get("feedback_submitted_at"),
+            feedback_helpful=row.get("feedback_helpful"),
+            created_at=row.get("created_at", ""),
+        )
+
+    async def _request_session_runs(
+        self,
+        *,
+        params: dict[str, Any],
+    ) -> httpx.Response:
+        request_params = dict(params)
+        request_params["select"] = self._session_run_select()
+        try:
+            response = await self._request("GET", "session_runs", params=request_params)
+            self._session_run_extended_fields_supported = True
+            return response
+        except httpx.HTTPStatusError as exc:
+            if (
+                self._session_run_extended_fields_supported is False
+                or not self._is_missing_session_run_column_error(exc)
+            ):
+                raise
+            self._session_run_extended_fields_supported = False
+            fallback_params = dict(params)
+            fallback_params["select"] = self._SESSION_RUN_BASE_SELECT
+            return await self._request("GET", "session_runs", params=fallback_params)
+
+    async def _write_session_run_payload(
+        self,
+        *,
+        method: str,
+        params: dict[str, Any] | None,
+        payload: dict[str, Any],
+        extra_headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        request_payload = (
+            self._strip_optional_session_run_fields(payload)
+            if self._session_run_extended_fields_supported is False
+            else payload
+        )
+        try:
+            response = await self._request(
+                method,
+                "session_runs",
+                params=params,
+                json_body=request_payload,
+                extra_headers=extra_headers,
+            )
+            self._session_run_extended_fields_supported = True
+            return response
+        except httpx.HTTPStatusError as exc:
+            # If we are already in legacy mode, or this is not a schema-like 400,
+            # fail fast and surface the original error.
+            if self._session_run_extended_fields_supported is False:
+                raise
+            if not self._is_bad_request(exc) and not self._is_missing_session_run_column_error(exc):
+                raise
+
+            fallback_payload = self._strip_optional_session_run_fields(payload)
+            fallback_base_payload = self._strip_non_base_session_run_fields(payload)
+
+            # Try progressively older payload shapes:
+            # 1) no LangFuse/feedback fields
+            # 2) base schema only (for older DBs missing run status/live progress columns)
+            candidates: list[dict[str, Any]] = []
+            if fallback_payload != request_payload:
+                candidates.append(fallback_payload)
+            if fallback_base_payload != request_payload and fallback_base_payload != fallback_payload:
+                candidates.append(fallback_base_payload)
+            if not candidates:
+                raise
+
+            self._session_run_extended_fields_supported = False
+            last_exc: httpx.HTTPStatusError = exc
+            for candidate in candidates:
+                try:
+                    return await self._request(
+                        method,
+                        "session_runs",
+                        params=params,
+                        json_body=candidate,
+                        extra_headers=extra_headers,
+                    )
+                except httpx.HTTPStatusError as retry_exc:
+                    last_exc = retry_exc
+                    if not self._is_bad_request(retry_exc):
+                        raise
+
+            logger.warning(
+                "[sessions] session_runs %s fallback retries exhausted; re-raising last 400 response.",
+                method,
+            )
+            raise last_exc
 
     async def create_session(self, user_id: str, title: str) -> Session:
         from src.sessions import Session
@@ -129,35 +312,15 @@ class SupabaseSessionStore:
         if not session_rows:
             return None
 
-        runs_resp = await self._request(
-            "GET",
-            "session_runs",
+        runs_resp = await self._request_session_runs(
             params={
-                "select": (
-                    "id,query,source_urls,report,status,error_details,"
-                    "latest_node,latest_event_at,partial_report,created_at"
-                ),
                 "session_id": f"eq.{session_id}",
                 "user_id": f"eq.{user_id}",
                 "order": "created_at.asc",
-            },
+            }
         )
         run_rows = runs_resp.json()
-        runs = [
-            SessionRun(
-                run_id=row["id"],
-                query=row.get("query", ""),
-                source_urls=row.get("source_urls") or [],
-                report=row.get("report", ""),
-                status=row.get("status", "completed"),
-                error_details=row.get("error_details"),
-                latest_node=row.get("latest_node"),
-                latest_event_at=row.get("latest_event_at"),
-                partial_report=row.get("partial_report") or "",
-                created_at=row.get("created_at", ""),
-            )
-            for row in run_rows
-        ]
+        runs = [self._session_run_from_row(row) for row in run_rows]
 
         turns_resp = await self._request(
             "GET",
@@ -248,9 +411,17 @@ class SupabaseSessionStore:
             "latest_node": run.latest_node,
             "latest_event_at": run.latest_event_at,
             "partial_report": run.partial_report,
+            "langfuse_trace_id": run.langfuse_trace_id,
+            "langfuse_observation_id": run.langfuse_observation_id,
+            "feedback_submitted_at": run.feedback_submitted_at,
+            "feedback_helpful": run.feedback_helpful,
             "created_at": run.created_at,
         }
-        await self._request("POST", "session_runs", json_body=payload)
+        await self._write_session_run_payload(
+            method="POST",
+            params=None,
+            payload=payload,
+        )
 
     async def create_session_run(
         self,
@@ -271,9 +442,17 @@ class SupabaseSessionStore:
             "latest_node": run.latest_node,
             "latest_event_at": run.latest_event_at,
             "partial_report": run.partial_report,
+            "langfuse_trace_id": run.langfuse_trace_id,
+            "langfuse_observation_id": run.langfuse_observation_id,
+            "feedback_submitted_at": run.feedback_submitted_at,
+            "feedback_helpful": run.feedback_helpful,
             "created_at": run.created_at,
         }
-        await self._request("POST", "session_runs", json_body=payload)
+        await self._write_session_run_payload(
+            method="POST",
+            params=None,
+            payload=payload,
+        )
 
     async def update_session_run(
         self,
@@ -284,15 +463,14 @@ class SupabaseSessionStore:
         patch: dict[str, Any],
     ) -> bool:
         update_body = dict(patch)
-        response = await self._request(
-            "PATCH",
-            "session_runs",
+        response = await self._write_session_run_payload(
+            method="PATCH",
             params={
                 "id": f"eq.{run_id}",
                 "user_id": f"eq.{user_id}",
                 "session_id": f"eq.{session_id}",
             },
-            json_body=update_body,
+            payload=update_body,
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
@@ -305,38 +483,18 @@ class SupabaseSessionStore:
         user_id: str,
         session_id: str,
     ) -> SessionRun | None:
-        from src.sessions import SessionRun
-
-        response = await self._request(
-            "GET",
-            "session_runs",
+        response = await self._request_session_runs(
             params={
-                "select": (
-                    "id,query,source_urls,report,status,error_details,"
-                    "latest_node,latest_event_at,partial_report,created_at"
-                ),
                 "id": f"eq.{run_id}",
                 "user_id": f"eq.{user_id}",
                 "session_id": f"eq.{session_id}",
                 "limit": "1",
-            },
+            }
         )
         rows = response.json()
         if not rows:
             return None
-        row = rows[0]
-        return SessionRun(
-            run_id=row["id"],
-            query=row.get("query", ""),
-            source_urls=row.get("source_urls") or [],
-            report=row.get("report", ""),
-            status=row.get("status", "completed"),
-            error_details=row.get("error_details"),
-            latest_node=row.get("latest_node"),
-            latest_event_at=row.get("latest_event_at"),
-            partial_report=row.get("partial_report") or "",
-            created_at=row.get("created_at", ""),
-        )
+        return self._session_run_from_row(rows[0])
 
     async def append_turn(
         self,

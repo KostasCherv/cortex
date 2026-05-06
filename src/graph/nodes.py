@@ -9,6 +9,7 @@ from datetime import datetime, UTC
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
 from src.observability.context import build_trace_metadata, build_trace_tags
+from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
 from src.tools.search import perform_search
 from src.tools.vector_store import VectorStoreManager
@@ -59,8 +60,20 @@ def _extract_json_candidate(text: str) -> str:
 
 
 async def _invoke_llm(
-    prompt: str, *, step_name: str, llm, metadata: dict[str, object] | None = None
+    prompt: str,
+    *,
+    step_name: str,
+    llm,
+    metadata: dict[str, object] | None = None,
+    state: ResearchState | None = None,
 ):
+    trace_metadata = build_trace_metadata(metadata or {})
+    model_name = str(
+        getattr(llm, "model_name", "")
+        or getattr(llm, "model", "")
+        or getattr(llm, "model_id", "")
+        or "unknown"
+    )
     with start_step_span(
         name=f"{step_name}.llm_invoke",
         run_type="llm",
@@ -69,13 +82,45 @@ async def _invoke_llm(
         metadata=metadata or {},
         tags=["llm"],
     ):
-        return await llm.ainvoke(
-            prompt,
-            config={
-                "tags": build_trace_tags(["llm"]),
-                "metadata": build_trace_metadata(metadata or {}),
-            },
-        )
+        with observe_llm_generation(
+            step_name=step_name,
+            model=model_name,
+            prompt=prompt,
+            metadata=trace_metadata,
+        ) as generation:
+            try:
+                response = await llm.ainvoke(
+                    prompt,
+                    config={
+                        "tags": build_trace_tags(["llm"]),
+                        "metadata": trace_metadata,
+                    },
+                )
+            except Exception as exc:
+                generation.mark_error(exc)
+                raise
+
+            generation.mark_output(_extract_llm_text(response))
+            if state is not None:
+                state["langfuse_trace_id"] = generation.trace_id
+                state["langfuse_observation_id"] = generation.observation_id
+            return response
+
+
+def _llm_metadata_for_state(
+    state: ResearchState,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    if state.get("session_id"):
+        metadata["session_id"] = state["session_id"]
+    if state.get("run_id"):
+        metadata["run_id"] = state["run_id"]
+    if state.get("user_id"):
+        metadata["user_id"] = state["user_id"]
+    if extra:
+        metadata.update(extra)
+    return metadata
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +333,11 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                 prompt,
                 step_name="summarize",
                 llm=llm,
-                metadata={"source_count": len(source_blocks), "query": query},
+                metadata=_llm_metadata_for_state(
+                    state,
+                    {"source_count": len(source_blocks), "query": query},
+                ),
+                state=state,
             )
             response_text = _extract_llm_text(response)
             parsed = None
@@ -318,7 +367,11 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                         repair_prompt,
                         step_name="summarize_repair",
                         llm=llm,
-                        metadata={"source_count": len(source_blocks), "query": query},
+                        metadata=_llm_metadata_for_state(
+                            state,
+                            {"source_count": len(source_blocks), "query": query},
+                        ),
+                        state=state,
                     )
                     response_text = _extract_llm_text(repair_response)
 
