@@ -209,7 +209,6 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       return
     }
     if (activeSessionId === loadedSessionRef.current) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void openSession(activeSessionId)
   }, [activeSessionId, openSession, resetViewState, stopPolling])
 
@@ -305,7 +304,8 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
     [authSession, onSessionsChanged, runId, sessionId],
   )
 
-  const hasContent = !!(report || runStatus === 'running' || runStatus === 'failed' || error)
+  const awaitingFinalReport = runStatus === 'completed' && !report && !error
+  const hasContent = !!(report || runStatus === 'running' || runStatus === 'failed' || error || awaitingFinalReport)
   const feedbackUnavailableReason = report && runStatus === 'completed' && !feedbackAvailable
     ? 'Feedback is not available for this run.'
     : null
@@ -337,14 +337,18 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
               <InlineProgress status={runStatus} error={error} />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
-              <ResearchProgress latestNode={latestNode} status={runStatus} isStreaming={runStatus === 'running'} />
+              <ResearchProgress
+                latestNode={latestNode}
+                status={runStatus}
+                isStreaming={runStatus === 'running' || awaitingFinalReport}
+              />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
               <ReportViewer
                 report={report}
                 streamingReport={streamingReport}
                 query={lastQuery}
-                isStreaming={runStatus === 'running'}
+                isStreaming={runStatus === 'running' || awaitingFinalReport}
                 error={error}
                 feedbackEnabled={Boolean(report && sessionId && runId && runStatus === 'completed' && feedbackAvailable)}
                 feedbackUnavailableReason={feedbackUnavailableReason}
