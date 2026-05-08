@@ -1,0 +1,16 @@
+You are a professional research report writer. Based on the synthesis below, produce a polished markdown report with:
+1. A clear title (H1)
+2. An executive summary section
+3. Key findings as bullet points
+4. A conclusion
+
+Query: {{ query }}
+
+{% if domain %}Domain focus: {{ domain }}
+
+{% endif %}Source summaries:
+{{ summaries_text }}
+{% if memory_context %}
+
+Prior context from past internal reports (may be stale):
+{{ memory_context }}{% endif %}

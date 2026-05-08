@@ -6,14 +6,15 @@ import logging
 import re
 from datetime import datetime, UTC
 
+from src.errors import SearchError, LLMError
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
 from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
+from src.prompts.registry import prompt_registry
 from src.tools.search import perform_search
 from src.tools.vector_store import VectorStoreManager
-from src.errors import SearchError, LLMError
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ async def _invoke_llm(
     metadata: dict[str, object] | None = None,
     state: ResearchState | None = None,
 ):
-    trace_metadata = build_trace_metadata(metadata or {})
+    metadata = metadata or {}
+    trace_metadata = build_trace_metadata(metadata)
     model_name = _sanitize_model_name(
         getattr(llm, "model_name", "")
         or getattr(llm, "model", "")
@@ -90,7 +92,7 @@ async def _invoke_llm(
         run_type="llm",
         node_name=step_name,
         inputs={"prompt": prompt},
-        metadata=metadata or {},
+        metadata=metadata,
         tags=["llm"],
     ):
         with observe_llm_generation(
@@ -325,18 +327,13 @@ async def summarize_node(state: ResearchState) -> ResearchState:
         if not source_blocks:
             return {**state, "summaries": []}
 
-        prompt = (
-            "You are a research assistant. Create high-coverage source summaries relevant "
-            f"to the query '{query}'.\n"
-            "Return ONLY valid JSON with this exact schema:\n"
-            '[{"url":"<source-url>","title":"<source-title>","summary":"<3-5 sentences>"}]\n\n'
-            "Rules:\n"
-            "- Include one object per source provided.\n"
-            "- Preserve each source URL exactly as provided.\n"
-            "- Focus on facts and claims relevant to the query.\n"
-            "- Do not include markdown fences or extra text.\n\n"
-            "Sources:\n\n"
-            + "\n\n---\n\n".join(source_blocks)
+        prompt, prompt_version = prompt_registry.render(
+            "summarize",
+            {
+                "query": query,
+                "source_blocks": "\n\n---\n\n".join(source_blocks),
+                "domain": state.get("domain", ""),
+            },
         )
 
         try:
@@ -346,7 +343,11 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                 llm=llm,
                 metadata=_llm_metadata_for_state(
                     state,
-                    {"source_count": len(source_blocks), "query": query},
+                    {
+                        "source_count": len(source_blocks),
+                        "query": query,
+                        "prompt_version": prompt_version,
+                    },
                 ),
                 state=state,
             )
@@ -380,7 +381,11 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                         llm=llm,
                         metadata=_llm_metadata_for_state(
                             state,
-                            {"source_count": len(source_blocks), "query": query},
+                            {
+                                "source_count": len(source_blocks),
+                                "query": query,
+                                "prompt_version": prompt_version,
+                            },
                         ),
                         state=state,
                     )
@@ -447,34 +452,36 @@ async def report_node(state: ResearchState) -> ResearchState:
             f"Source: {s.get('title', '')} ({s.get('url', '')})\n{s.get('summary', '')}"
             for s in summaries
         )
-        prompt = (
-            f"You are a professional research report writer. Based on the synthesis below, "
-            f"produce a polished markdown report with:\n"
-            f"1. A clear title (H1)\n"
-            f"2. An executive summary section\n"
-            f"3. Key findings as bullet points\n"
-            f"4. A conclusion\n\n"
-            f"Query: {query}\n\n"
-            f"Source summaries:\n{summaries_text}\n\n"
-            f"Prior context from past internal reports (may be stale):\n{memory_context}"
+        prompt, prompt_version = prompt_registry.render(
+            "report",
+            {
+                "query": query,
+                "summaries_text": summaries_text,
+                "memory_context": memory_context,
+                "domain": state.get("domain", ""),
+            },
         )
 
         llm = get_llm(temperature=0.2)
         try:
             chunks: list[str] = []
+            trace_metadata = _llm_metadata_for_state(
+                state,
+                {"summary_count": len(summaries), "prompt_version": prompt_version},
+            )
             with start_step_span(
                 name="report.llm_stream",
                 run_type="llm",
                 node_name="report",
                 inputs={"prompt": prompt},
-                metadata={"summary_count": len(summaries)},
+                metadata=trace_metadata,
                 tags=["llm"],
             ):
                 async for chunk in llm.astream(
                     prompt,
                     config={
                         "tags": build_trace_tags(["llm"]),
-                        "metadata": build_trace_metadata({"summary_count": len(summaries)}),
+                        "metadata": build_trace_metadata(trace_metadata),
                     },
                 ):
                     content = chunk.content if hasattr(chunk, "content") else str(chunk)
