@@ -28,6 +28,10 @@ dependencies = [
     "langfuse>=2.0.0",
     "PyJWT[crypto]>=2.10.1",
     "inngest>=0.5.18",
+    "llama-index-core>=0.12.0",
+    "llama-index-embeddings-openai>=0.3.0",
+    "llama-index-embeddings-ollama>=0.3.0",
+    "llama-index-vector-stores-pinecone>=0.4.0",
 ]
 
 [project.optional-dependencies]
