@@ -1,0 +1,82 @@
+[
+  {
+    "query": "What refund window does the store offer for shoes that do not fit?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/returns",
+        "title": "Store Returns Policy",
+        "raw_text": "Customers can return unworn shoes within 30 days of delivery for a full refund. Exchanges are free when inventory is available."
+      },
+      {
+        "url": "https://example.com/help",
+        "title": "Support FAQ",
+        "raw_text": "The support team recommends starting a return from the orders page. Refunds are sent to the original payment method after the warehouse receives the shoes."
+      }
+    ],
+    "expected_answer": "The store offers a 30-day refund window for unworn shoes, and customers can start the return from the orders page."
+  },
+  {
+    "query": "How long can F-1 students stay in the U.S. after graduation?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/f1-visa",
+        "title": "F-1 Visa Grace Period",
+        "raw_text": "Students on F-1 visas are generally allowed to remain in the United States for up to 60 days after completing their academic program, unless they begin approved OPT or transfer to another school."
+      },
+      {
+        "url": "https://example.com/international-office",
+        "title": "University International Office Guidance",
+        "raw_text": "The post-completion grace period gives graduates time to prepare for departure, transfer schools, or change immigration status."
+      }
+    ],
+    "expected_answer": "F-1 students can usually stay for up to 60 days after graduation, unless they move into another approved immigration path such as OPT or a school transfer."
+  },
+  {
+    "query": "What are the main health benefits of regular walking?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/walking-benefits",
+        "title": "Walking and Heart Health",
+        "raw_text": "Regular walking can improve cardiovascular fitness, help manage weight, and lower the risk of high blood pressure. It also supports better endurance over time."
+      },
+      {
+        "url": "https://example.com/mental-health",
+        "title": "Movement and Mood",
+        "raw_text": "Light aerobic activity such as walking can reduce stress and improve mood, especially when done consistently."
+      }
+    ],
+    "expected_answer": "Regular walking supports heart health, weight management, blood pressure control, endurance, and better mood."
+  },
+  {
+    "query": "Why do teams use feature flags in software delivery?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/feature-flags",
+        "title": "Feature Flag Overview",
+        "raw_text": "Feature flags let teams release code to production without exposing it to all users immediately. This makes it easier to test gradually, limit blast radius, and roll back by toggling configuration instead of redeploying."
+      },
+      {
+        "url": "https://example.com/release-strategies",
+        "title": "Release Strategy Notes",
+        "raw_text": "Teams often pair feature flags with canary releases so they can gather feedback before a full launch."
+      }
+    ],
+    "expected_answer": "Teams use feature flags to decouple deployment from release, enable gradual rollouts, reduce risk, and roll back quickly without a redeploy."
+  },
+  {
+    "query": "What causes the sky to appear blue during the day?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/rayleigh-scattering",
+        "title": "Rayleigh Scattering Explained",
+        "raw_text": "Sunlight contains many wavelengths of light. Molecules in Earth's atmosphere scatter shorter blue wavelengths more strongly than longer red wavelengths, which makes the sky appear blue to human observers."
+      },
+      {
+        "url": "https://example.com/sunset-colors",
+        "title": "Why Sunsets Look Red",
+        "raw_text": "At sunrise and sunset, sunlight passes through more atmosphere, so more blue light is scattered away before it reaches your eyes."
+      }
+    ],
+    "expected_answer": "The daytime sky looks blue because atmospheric molecules scatter short blue wavelengths of sunlight more strongly than longer red wavelengths."
+  }
+]

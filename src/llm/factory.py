@@ -1,4 +1,4 @@
-"""LLM factory — returns the configured chat model (Ollama or OpenAI)."""
+"""LLM factory — returns the configured chat model (Ollama, OpenAI, or OpenRouter)."""
 
 import os
 
@@ -51,6 +51,19 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
             **common_kwargs,
         )
 
+    if provider == "openrouter":
+        if not settings.openrouter_api_key:
+            raise ConfigurationError("OPENROUTER_API_KEY is not set.")
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=settings.openrouter_model,
+            temperature=temperature,
+            api_key=settings.openrouter_api_key,  # type: ignore[arg-type]
+            base_url="https://openrouter.ai/api/v1",
+            **common_kwargs,
+        )
+
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
@@ -62,5 +75,5 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         )
 
     raise ConfigurationError(
-        f"Unknown LLM_PROVIDER '{provider}'. Choose 'openai' or 'ollama'."
+        f"Unknown LLM_PROVIDER '{provider}'. Choose 'openai', 'ollama', or 'openrouter'."
     )

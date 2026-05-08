@@ -21,7 +21,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 
 - Orchestration: `LangGraph`
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
-- LLM and agent layer: `LangChain`, `OpenAI`, `Ollama`
+- LLM and agent layer: `LangChain`, `OpenAI`, `OpenRouter`, `Ollama`
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
 - Retrieval and reranking: `Pinecone`
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
@@ -82,6 +82,13 @@ uv sync
 cp .env.example .env
 ```
 
+Relevant LLM settings:
+
+- `LLM_PROVIDER=openai|openrouter|ollama`
+- `OPENAI_API_KEY` and `OPENAI_MODEL` for direct OpenAI usage
+- `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for OpenRouter-hosted models
+- `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for local Ollama usage
+
 2) Start backend API:
 
 ```bash
@@ -141,3 +148,21 @@ uv run pytest -v
 uv run ruff check src
 uv run mypy src
 ```
+
+## Model evaluation
+
+The repo includes a standalone summarize-only comparison script at
+`src/evals/model_comparison.py`.
+
+- It loads sample cases from `src/evals/golden_set.json`
+- It runs `summarize_node` directly for each configured OpenRouter model slug
+- It scores outputs with DeepEval faithfulness and answer relevancy metrics
+- It writes results to `src/evals/results.csv`
+
+Run it with:
+
+```bash
+uv run python3 src/evals/model_comparison.py
+```
+
+This script requires `OPENROUTER_API_KEY` to be set before execution.
