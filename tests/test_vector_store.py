@@ -49,6 +49,20 @@ def test_save_report_calls_index_insert_nodes():
     manager._get_index_for_namespace.assert_called_once_with("reports")
 
 
+def test_save_report_truncates_inserted_text_to_metadata_limit():
+    manager, _, _ = _make_manager_with_mocks()
+    mock_llama_index = MagicMock()
+    manager._get_index_for_namespace = MagicMock(return_value=mock_llama_index)
+
+    long_report = "A" * 50000
+    manager.save_report(query="LangGraph", report=long_report)
+
+    node = mock_llama_index.insert_nodes.call_args.args[0][0]
+    assert len(node.text) == 8000
+    assert len(node.metadata["document"]) == 38000
+    assert node.text == node.metadata["text"]
+
+
 def test_save_report_raises_vector_store_error_on_failure():
     manager, _, _ = _make_manager_with_mocks()
     mock_llama_index = MagicMock()

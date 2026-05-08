@@ -23,6 +23,8 @@ _NAMESPACE_REPORTS = "reports"
 _NAMESPACE_CHUNKS = "source_chunks"
 # Pinecone metadata value size limit (bytes); truncate document text to stay under 40KB
 _META_TEXT_LIMIT = 38_000
+# Embed a smaller report slice than we store in metadata to stay under model context limits.
+_REPORT_EMBED_TEXT_LIMIT = 8_000
 
 
 class VectorStoreManager:
@@ -162,17 +164,24 @@ class VectorStoreManager:
             self._validate_index_dimension()
             doc_id = f"report_{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
             doc_text = report[:_META_TEXT_LIMIT]
+            embed_text = report[:_REPORT_EMBED_TEXT_LIMIT]
             if len(report) > _META_TEXT_LIMIT:
                 logger.warning(
                     "[vector_store] report truncated from %d to %d chars for metadata storage.",
                     len(report),
                     _META_TEXT_LIMIT,
                 )
+            if len(report) > _REPORT_EMBED_TEXT_LIMIT:
+                logger.warning(
+                    "[vector_store] report truncated from %d to %d chars for embedding.",
+                    len(report),
+                    _REPORT_EMBED_TEXT_LIMIT,
+                )
             meta = {
                 "query": query[:512],
                 "generated_at": datetime.now(UTC).isoformat(),
                 "document": doc_text,
-                "text": doc_text,
+                "text": embed_text,
                 **(metadata or {}),
             }
             index = self._get_index_for_namespace(_NAMESPACE_REPORTS)
@@ -180,7 +189,7 @@ class VectorStoreManager:
                 [
                     TextNode(
                         id_=doc_id,
-                        text=report,
+                        text=embed_text,
                         metadata=meta,
                     )
                 ]
