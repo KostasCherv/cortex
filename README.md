@@ -155,9 +155,12 @@ The repo includes a standalone summarize-only comparison script at
 `src/evals/model_comparison.py`.
 
 - It loads sample cases from `src/evals/golden_set.json`
-- It runs `summarize_node` directly for each configured OpenRouter model slug
+- It runs `summarize_node` directly for each configured `{provider, model}` entry
 - It scores outputs with DeepEval faithfulness and answer relevancy metrics
 - It writes results to `src/evals/results.csv`
+
+Edit the `MODEL_CONFIGS` list in `src/evals/model_comparison.py` to choose which
+OpenAI and Ollama models to compare.
 
 Run it with:
 
@@ -165,4 +168,5 @@ Run it with:
 uv run python3 src/evals/model_comparison.py
 ```
 
-This script requires `OPENROUTER_API_KEY` to be set before execution.
+This script requires the credentials and local runtime for whichever providers
+you list in `MODEL_CONFIGS`.

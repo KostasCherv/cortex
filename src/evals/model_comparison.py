@@ -1,5 +1,7 @@
 """Run summarize-node model comparisons against a local golden set."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import asyncio
@@ -12,14 +14,17 @@ from typing import Iterator
 import pandas as pd
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
 from deepeval.test_case import LLMTestCase
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.config import settings
 from src.graph.nodes import summarize_node
 from src.graph.state import ResearchState
 
-MODEL_SLUGS = [
-    "openai/gpt-4o-mini",
-    "anthropic/claude-3-haiku",
+MODEL_CONFIGS = [
+    {"provider": "openai", "model": "gpt-4o-mini"},
+    {"provider": "ollama", "model": "gemma4:31b-cloud"},
 ]
 
 EVALS_DIR = Path(__file__).resolve().parent
@@ -27,17 +32,30 @@ GOLDEN_SET_PATH = EVALS_DIR / "golden_set.json"
 RESULTS_PATH = EVALS_DIR / "results.csv"
 
 
+PROVIDER_MODEL_SETTING = {
+    "openai": "openai_model",
+    "ollama": "ollama_model",
+}
+
+
 @contextmanager
-def temporary_openrouter_settings(model_slug: str) -> Iterator[None]:
+def temporary_provider_settings(provider: str, model: str) -> Iterator[None]:
+    if provider not in PROVIDER_MODEL_SETTING:
+        supported = ", ".join(sorted(PROVIDER_MODEL_SETTING))
+        raise ValueError(
+            f"Unsupported provider '{provider}'. Choose one of: {supported}."
+        )
+
+    model_setting = PROVIDER_MODEL_SETTING[provider]
     original_provider = settings.llm_provider
-    original_model = settings.openrouter_model
-    settings.llm_provider = "openrouter"
-    settings.openrouter_model = model_slug
+    original_model = getattr(settings, model_setting)
+    settings.llm_provider = provider
+    setattr(settings, model_setting, model)
     try:
         yield
     finally:
         settings.llm_provider = original_provider
-        settings.openrouter_model = original_model
+        setattr(settings, model_setting, original_model)
 
 
 def load_golden_set() -> list[dict]:
@@ -59,13 +77,15 @@ def build_test_case(case: dict, actual_output: str) -> LLMTestCase:
     )
 
 
-async def run_case(model_slug: str, case: dict) -> dict[str, object]:
+async def run_case(model_config: dict[str, str], case: dict) -> dict[str, object]:
     state: ResearchState = {
         "query": case["query"],
         "retrieved_contents": case["retrieved_contents"],
     }
+    provider = model_config["provider"]
+    model = model_config["model"]
 
-    with temporary_openrouter_settings(model_slug):
+    with temporary_provider_settings(provider, model):
         started_at = time.perf_counter()
         result = await summarize_node(state)
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
@@ -81,7 +101,7 @@ async def run_case(model_slug: str, case: dict) -> dict[str, object]:
     faithfulness.measure(test_case)
 
     return {
-        "model": model_slug,
+        "model": model,
         "query": case["query"],
         "faithfulness": faithfulness.score,
         "relevancy": answer_relevancy.score,
@@ -93,9 +113,9 @@ async def main() -> None:
     golden_set = load_golden_set()
     rows: list[dict[str, object]] = []
 
-    for model_slug in MODEL_SLUGS:
+    for model_config in MODEL_CONFIGS:
         for case in golden_set:
-            rows.append(await run_case(model_slug, case))
+            rows.append(await run_case(model_config, case))
 
     dataframe = pd.DataFrame(
         rows,
