@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     )
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
+    openrouter_api_key: str = Field(default="", description="OpenRouter API key")
+    openrouter_model: str = Field(
+        default="openai/gpt-4o-mini", description="OpenRouter model slug"
+    )
     ollama_base_url: str = Field(
         default="http://localhost:11434", description="Ollama base URL"
     )

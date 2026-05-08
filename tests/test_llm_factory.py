@@ -31,6 +31,30 @@ def test_get_llm_openai_raises_without_api_key():
             get_llm()
 
 
+def test_get_llm_openrouter_returns_chat_openai():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "openrouter"
+        mock_settings.openrouter_api_key = "or-test"
+        mock_settings.openrouter_model = "openai/gpt-4o-mini"
+
+        from src.llm.factory import get_llm
+
+        llm = get_llm()
+        assert llm is not None
+        assert hasattr(llm, "invoke")
+
+
+def test_get_llm_openrouter_raises_without_api_key():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "openrouter"
+        mock_settings.openrouter_api_key = ""
+
+        from src.llm.factory import get_llm
+
+        with pytest.raises(ConfigurationError, match="OPENROUTER_API_KEY"):
+            get_llm()
+
+
 def test_get_llm_ollama_returns_chat_ollama():
     with patch("src.llm.factory.settings") as mock_settings:
         mock_settings.llm_provider = "ollama"
@@ -54,5 +78,7 @@ def test_get_llm_unknown_provider_raises():
 
         from src.llm.factory import get_llm
 
-        with pytest.raises(ConfigurationError, match="groq"):
+        with pytest.raises(
+            ConfigurationError, match="groq.*openai.*ollama.*openrouter"
+        ):
             get_llm()

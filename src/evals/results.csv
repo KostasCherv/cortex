@@ -1,0 +1,11 @@
+model,query,faithfulness,relevancy,latency_ms
+gpt-4o-mini,What refund window does the store offer for shoes that do not fit?,1.0,1.0,2723.62
+gpt-4o-mini,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,2436.71
+gpt-4o-mini,What are the main health benefits of regular walking?,1.0,1.0,2120.44
+gpt-4o-mini,Why do teams use feature flags in software delivery?,1.0,1.0,2413.77
+gpt-4o-mini,What causes the sky to appear blue during the day?,1.0,1.0,3180.46
+gemma4:31b-cloud,What refund window does the store offer for shoes that do not fit?,1.0,1.0,1412.11
+gemma4:31b-cloud,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,1199.73
+gemma4:31b-cloud,What are the main health benefits of regular walking?,1.0,1.0,1061.13
+gemma4:31b-cloud,Why do teams use feature flags in software delivery?,1.0,1.0,3703.85
+gemma4:31b-cloud,What causes the sky to appear blue during the day?,1.0,1.0,1235.72
