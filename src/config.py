@@ -110,6 +110,26 @@ class Settings(BaseSettings):
         description="Fraction of runs to trace (0.0 to 1.0).",
     )
 
+    # Observability (LangFuse)
+    langfuse_enabled: bool = Field(
+        default=True,
+        description="Enable LangFuse generation tracing and scoring.",
+    )
+    langfuse_public_key: str = Field(default="", description="LangFuse public key")
+    langfuse_secret_key: str = Field(default="", description="LangFuse secret key")
+    langfuse_host: str = Field(
+        default="https://cloud.langfuse.com",
+        description="LangFuse base URL.",
+    )
+    langfuse_release: str = Field(
+        default="",
+        description="Optional application release/version attached to LangFuse traces.",
+    )
+    langfuse_env: str = Field(
+        default="",
+        description="Optional LangFuse environment label (for example dev, staging, prod).",
+    )
+
     # RAG Agent
     rag_max_file_size_mb: int = Field(
         default=25,

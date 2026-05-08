@@ -257,6 +257,10 @@ def test_summarize_node_makes_single_call_for_multiple_sources():
 
     assert mock_llm.ainvoke.await_count == 1
     assert len(state["summaries"]) == 2
+    prompt_arg = mock_llm.ainvoke.await_args.args[0]
+    metadata = mock_llm.ainvoke.await_args.kwargs["config"]["metadata"]
+    assert "Create high-coverage source summaries relevant to the query 'LangGraph'." in prompt_arg
+    assert metadata["prompt_version"]
 
 
 def test_summarize_node_parses_markdown_fenced_json():
@@ -334,6 +338,61 @@ def test_report_node_generates_report():
     assert "# My Report" in state["report"]
     assert "report_metadata" in state
     assert state["report_metadata"]["title"] == "LangGraph"
+
+
+def test_report_node_omits_memory_context_section_when_empty():
+    captured = {}
+
+    async def _fake_astream(prompt, **kwargs):
+        captured["prompt"] = prompt
+        captured["config"] = kwargs.get("config", {})
+        yield MagicMock(content="# My Report\nContent here.")
+
+    mock_llm = MagicMock()
+    mock_llm.astream = _fake_astream
+
+    with patch("src.graph.nodes.get_llm", return_value=mock_llm):
+        from src.graph.nodes import report_node
+
+        asyncio.run(
+            report_node(
+                {
+                    "query": "LangGraph",
+                    "summaries": [{"url": "https://a.com", "title": "A", "summary": "x"}],
+                    "memory_context": "",
+                }
+            )
+        )
+
+    assert "Prior context from past internal reports" not in captured["prompt"]
+    assert captured["config"]["metadata"]["prompt_version"]
+
+
+def test_report_node_includes_domain_section_when_present():
+    captured = {}
+
+    async def _fake_astream(prompt, **kwargs):
+        captured["prompt"] = prompt
+        yield MagicMock(content="# My Report\nContent here.")
+
+    mock_llm = MagicMock()
+    mock_llm.astream = _fake_astream
+
+    with patch("src.graph.nodes.get_llm", return_value=mock_llm):
+        from src.graph.nodes import report_node
+
+        asyncio.run(
+            report_node(
+                {
+                    "query": "LangGraph",
+                    "summaries": [{"url": "https://a.com", "title": "A", "summary": "x"}],
+                    "memory_context": "",
+                    "domain": "enterprise software",
+                }
+            )
+        )
+
+    assert "Domain focus: enterprise software" in captured["prompt"]
 
 
 # ---------------------------------------------------------------------------

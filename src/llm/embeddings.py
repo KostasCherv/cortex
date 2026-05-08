@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import httpx
-
 from src.config import settings
 from src.errors import ConfigurationError, VectorStoreError
 
@@ -11,61 +9,52 @@ from src.errors import ConfigurationError, VectorStoreError
 class EmbeddingClient:
     """Embed text batches using the configured provider."""
 
-    def __init__(self, openai_client: object | None = None, http_client: object | None = None) -> None:
-        self._openai_client = openai_client
-        self._http_client = http_client or httpx.Client()
+    def __init__(self, embed_model: object | None = None) -> None:
+        self._embed_model = embed_model
 
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Return vectors for *texts* using the configured embedding provider."""
+    def _get_embed_model(self):
+        if self._embed_model is not None:
+            return self._embed_model
+
         provider = settings.embedding_provider.lower()
 
         if provider == "openai":
-            return self._embed_with_openai(texts)
+            if not settings.openai_api_key:
+                raise ConfigurationError("OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai.")
+
+            from llama_index.embeddings.openai import OpenAIEmbedding
+
+            self._embed_model = OpenAIEmbedding(
+                model=settings.embedding_model,
+                api_key=settings.openai_api_key,
+            )
+            return self._embed_model
+
         if provider == "ollama":
-            return self._embed_with_ollama(texts)
+            base_url = settings.embedding_base_url.rstrip("/")
+            if not base_url:
+                raise ConfigurationError(
+                    "EMBEDDING_BASE_URL is required when EMBEDDING_PROVIDER=ollama."
+                )
+
+            from llama_index.embeddings.ollama import OllamaEmbedding
+
+            self._embed_model = OllamaEmbedding(
+                model_name=settings.embedding_model,
+                base_url=base_url,
+            )
+            return self._embed_model
 
         raise ConfigurationError(
             f"Unknown EMBEDDING_PROVIDER '{provider}'. Choose 'openai' or 'ollama'."
         )
 
-    def _embed_with_openai(self, texts: list[str]) -> list[list[float]]:
-        if not settings.openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY is required when EMBEDDING_PROVIDER=openai.")
-
-        if self._openai_client is None:
-            from openai import OpenAI
-
-            self._openai_client = OpenAI(api_key=settings.openai_api_key)
-
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Return vectors for *texts* using the configured embedding provider."""
         try:
-            response = self._openai_client.embeddings.create(
-                input=texts,
-                model=settings.embedding_model,
-            )
+            model = self._get_embed_model()
+            return model.get_text_embedding_batch(texts)
+        except ConfigurationError:
+            raise
         except Exception as exc:
             raise VectorStoreError(f"Embedding request failed: {exc}") from exc
-
-        return [item.embedding for item in response.data]
-
-    def _embed_with_ollama(self, texts: list[str]) -> list[list[float]]:
-        base_url = settings.embedding_base_url.rstrip("/")
-        if not base_url:
-            raise ConfigurationError(
-                "EMBEDDING_BASE_URL is required when EMBEDDING_PROVIDER=ollama."
-            )
-
-        try:
-            response = self._http_client.post(
-                f"{base_url}/api/embed",
-                json={"model": settings.embedding_model, "input": texts},
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except Exception as exc:
-            raise VectorStoreError(f"Embedding request failed: {exc}") from exc
-
-        embeddings = payload.get("embeddings")
-        if not isinstance(embeddings, list):
-            raise VectorStoreError("Embedding request failed: Ollama response missing embeddings.")
-        return embeddings

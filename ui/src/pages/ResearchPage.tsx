@@ -5,6 +5,7 @@ import {
   getSession,
   startSessionResearch,
   streamSessionRun,
+  submitRunFeedback,
 } from '@/api/client'
 import { FollowupChat } from '@/components/research/FollowupChat'
 import { InlineProgress } from '@/components/research/InlineProgress'
@@ -31,6 +32,11 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [conversation, setConversation] = useState<ConversationTurn[]>([])
+  const [feedbackSubmittedAt, setFeedbackSubmittedAt] = useState<string | null>(null)
+  const [feedbackHelpful, setFeedbackHelpful] = useState<boolean | null>(null)
+  const [feedbackPending, setFeedbackPending] = useState(false)
+  const [feedbackError, setFeedbackError] = useState<string | null>(null)
+  const [feedbackAvailable, setFeedbackAvailable] = useState(false)
 
   const loadedSessionRef = useRef<string | null>(null)
   const pollTimerRef = useRef<number | null>(null)
@@ -56,8 +62,13 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
     setStreamingReport('')
     setLatestNode(null)
     setLastQuery('')
-    setRunStatus('idle')
-    setError(null)
+      setRunStatus('idle')
+      setError(null)
+      setFeedbackSubmittedAt(null)
+    setFeedbackHelpful(null)
+    setFeedbackPending(false)
+    setFeedbackError(null)
+    setFeedbackAvailable(false)
     stopRunStream()
   }, [stopRunStream])
 
@@ -85,6 +96,11 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       setLatestNode(latestRun?.latest_node ?? null)
       setRunStatus(nextStatus)
       setError(nextStatus === 'failed' ? latestRun?.error_details ?? 'Research failed.' : null)
+      setFeedbackSubmittedAt(latestRun?.feedback_submitted_at ?? null)
+      setFeedbackHelpful(latestRun?.feedback_helpful ?? null)
+      setFeedbackPending(false)
+      setFeedbackError(null)
+      setFeedbackAvailable(Boolean(latestRun && latestRun.status === 'completed'))
       if (nextStatus !== 'running') {
         stopPolling()
       }
@@ -193,7 +209,6 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       return
     }
     if (activeSessionId === loadedSessionRef.current) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void openSession(activeSessionId)
   }, [activeSessionId, openSession, resetViewState, stopPolling])
 
@@ -221,6 +236,11 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       setRunStatus('running')
       setLatestNode('queued')
       setStreamingReport('')
+      setFeedbackSubmittedAt(null)
+      setFeedbackHelpful(null)
+      setFeedbackPending(false)
+      setFeedbackError(null)
+      setFeedbackAvailable(false)
       stopRunStream()
       stopPolling()
 
@@ -258,7 +278,37 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
     [authSession, onSessionActivated, onSessionsChanged, startRunStream, stopPolling, stopRunStream],
   )
 
-  const hasContent = !!(report || runStatus === 'running' || runStatus === 'failed' || error)
+  const handleFeedbackSubmit = useCallback(
+    async (helpful: boolean, comment: string | null) => {
+      if (!sessionId || !runId || !authSession?.access_token) return
+      setFeedbackPending(true)
+      setFeedbackError(null)
+      try {
+        const result = await submitRunFeedback(
+          sessionId,
+          runId,
+          { helpful, comment },
+          authSession.access_token,
+        )
+        setFeedbackSubmittedAt(result.feedback_submitted_at)
+        setFeedbackHelpful(result.feedback_helpful)
+        onSessionsChanged()
+      } catch (submitError) {
+        setFeedbackError(
+          submitError instanceof Error ? submitError.message : 'Failed to submit feedback.',
+        )
+      } finally {
+        setFeedbackPending(false)
+      }
+    },
+    [authSession, onSessionsChanged, runId, sessionId],
+  )
+
+  const awaitingFinalReport = runStatus === 'completed' && !report && !error
+  const hasContent = !!(report || runStatus === 'running' || runStatus === 'failed' || error || awaitingFinalReport)
+  const feedbackUnavailableReason = report && runStatus === 'completed' && !feedbackAvailable
+    ? 'Feedback is not available for this run.'
+    : null
 
   return (
     <div className="flex h-dvh flex-col max-md:h-full">
@@ -287,15 +337,26 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
               <InlineProgress status={runStatus} error={error} />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
-              <ResearchProgress latestNode={latestNode} status={runStatus} isStreaming={runStatus === 'running'} />
+              <ResearchProgress
+                latestNode={latestNode}
+                status={runStatus}
+                isStreaming={runStatus === 'running' || awaitingFinalReport}
+              />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
               <ReportViewer
                 report={report}
                 streamingReport={streamingReport}
                 query={lastQuery}
-                isStreaming={runStatus === 'running'}
+                isStreaming={runStatus === 'running' || awaitingFinalReport}
                 error={error}
+                feedbackEnabled={Boolean(report && sessionId && runId && runStatus === 'completed' && feedbackAvailable)}
+                feedbackUnavailableReason={feedbackUnavailableReason}
+                feedbackSubmittedAt={feedbackSubmittedAt}
+                feedbackHelpful={feedbackHelpful}
+                feedbackPending={feedbackPending}
+                feedbackError={feedbackError}
+                onFeedbackSubmit={handleFeedbackSubmit}
               />
             </div>
             {report && sessionId && (

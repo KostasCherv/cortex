@@ -10,6 +10,7 @@ import type {
   RagResource,
   ResearchRequest,
   ResearchStreamEvent,
+  RunFeedbackRequest,
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
@@ -318,6 +319,42 @@ export async function streamSessionRun(
     }
   }
   options.onDone?.()
+}
+
+export async function submitRunFeedback(
+  sessionId: string,
+  runId: string,
+  payload: RunFeedbackRequest,
+  accessToken: string | null,
+): Promise<{ session_id: string; run_id: string; feedback_submitted_at: string; feedback_helpful: boolean }> {
+  const response = await fetch(`${API_BASE}/sessions/${sessionId}/runs/${runId}/feedback`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    let detail = `Failed to submit feedback: ${response.status}`
+    try {
+      const body = (await response.json()) as { detail?: string }
+      if (body.detail) {
+        detail = body.detail
+      }
+    } catch {
+      // Keep the default error message if the response is not JSON.
+    }
+    throw new Error(detail)
+  }
+
+  return (await response.json()) as {
+    session_id: string
+    run_id: string
+    feedback_submitted_at: string
+    feedback_helpful: boolean
+  }
 }
 
 export async function streamResearch(

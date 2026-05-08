@@ -33,8 +33,11 @@ class ResearchState(TypedDict, total=False):
     # Session context (populated by API layer when running inside a session)
     session_id: str | None          # Parent session ID
     run_id: str | None              # This run's unique ID
+    user_id: str | None             # Authenticated user ID when available
     active_source_urls: list[str]   # URLs retrieved in this run
     conversation_history: list[dict] # [{role, content, run_id}] prior turns
+    langfuse_trace_id: str | None
+    langfuse_observation_id: str | None
 
     # Control flow
     error: str | None               # Set on unrecoverable errors

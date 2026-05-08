@@ -31,7 +31,16 @@ export type SessionRun = {
   latest_node?: string | null
   latest_event_at?: string | null
   partial_report?: string
+  langfuse_trace_id?: string | null
+  langfuse_observation_id?: string | null
+  feedback_submitted_at?: string | null
+  feedback_helpful?: boolean | null
   created_at: string
+}
+
+export type RunFeedbackRequest = {
+  helpful: boolean
+  comment?: string | null
 }
 
 export type Citation = {

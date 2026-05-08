@@ -19,6 +19,10 @@ class SessionRun:
     latest_node: str | None = None
     latest_event_at: str | None = None
     partial_report: str = ""
+    langfuse_trace_id: str | None = None
+    langfuse_observation_id: str | None = None
+    feedback_submitted_at: str | None = None
+    feedback_helpful: bool | None = None
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
@@ -32,6 +36,10 @@ class SessionRun:
             "latest_node": self.latest_node,
             "latest_event_at": self.latest_event_at,
             "partial_report": self.partial_report,
+            "langfuse_trace_id": self.langfuse_trace_id,
+            "langfuse_observation_id": self.langfuse_observation_id,
+            "feedback_submitted_at": self.feedback_submitted_at,
+            "feedback_helpful": self.feedback_helpful,
             "created_at": self.created_at,
         }
 
