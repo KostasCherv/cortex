@@ -71,6 +71,43 @@ class VectorStoreManager:
             embed_model=self._get_embed_model(),
         )
 
+    def _extract_match_metadata(self, match: object) -> dict[str, Any]:
+        if isinstance(match, dict):
+            metadata = match.get("metadata")
+            return metadata if isinstance(metadata, dict) else {}
+
+        metadata = getattr(match, "metadata", None)
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _extract_match_id(self, match: object) -> str:
+        if isinstance(match, dict):
+            value = match.get("id", "")
+            return str(value) if value else ""
+
+        value = getattr(match, "id", "")
+        return str(value) if value else ""
+
+    def _search_reports_via_pinecone_query(self, query: str, n_results: int) -> list[dict]:
+        query_vector = self._embedding_client.embed_texts([query])[0]
+        response = self._ensure_index().query(
+            vector=query_vector,
+            top_k=n_results,
+            namespace=_NAMESPACE_REPORTS,
+            include_metadata=True,
+        )
+        matches = response.get("matches", []) if isinstance(response, dict) else getattr(response, "matches", [])
+        rows: list[dict] = []
+        for match in matches or []:
+            metadata = self._extract_match_metadata(match)
+            rows.append(
+                {
+                    "id": self._extract_match_id(match),
+                    "document": metadata.get("document") or metadata.get("text", ""),
+                    "metadata": metadata,
+                }
+            )
+        return rows
+
     def _extract_index_dimension(self, index_info: object) -> int | None:
         """Best-effort extraction of a Pinecone index dimension from SDK responses."""
         if hasattr(index_info, "dimension"):
@@ -135,6 +172,7 @@ class VectorStoreManager:
                 "query": query[:512],
                 "generated_at": datetime.now(UTC).isoformat(),
                 "document": doc_text,
+                "text": doc_text,
                 **(metadata or {}),
             }
             index = self._get_index_for_namespace(_NAMESPACE_REPORTS)
@@ -161,11 +199,22 @@ class VectorStoreManager:
             retriever = self._get_index_for_namespace(_NAMESPACE_REPORTS).as_retriever(
                 similarity_top_k=n_results
             )
-            results = retriever.retrieve(query)
+            try:
+                results = retriever.retrieve(query)
+            except KeyError as exc:
+                if exc.args != ("text",):
+                    raise
+                logger.info(
+                    "[vector_store] falling back to raw report query for legacy metadata shape"
+                )
+                if self._embedding_client is None:
+                    self._embedding_client = EmbeddingClient()
+                return self._search_reports_via_pinecone_query(query, n_results)
             return [
                 {
                     "id": getattr(match.node, "id_", ""),
-                    "document": (match.node.metadata or {}).get("document", ""),
+                    "document": (match.node.metadata or {}).get("document", "")
+                    or (match.node.metadata or {}).get("text", ""),
                     "metadata": match.node.metadata or {},
                 }
                 for match in results

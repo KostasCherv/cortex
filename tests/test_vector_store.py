@@ -44,6 +44,7 @@ def test_save_report_calls_index_insert_nodes():
     assert node.id_ == doc_id
     assert node.metadata["query"] == "LangGraph"
     assert node.metadata["document"] == "# Report"
+    assert node.metadata["text"] == "# Report"
     assert doc_id.startswith("report_")
     manager._get_index_for_namespace.assert_called_once_with("reports")
 
@@ -93,6 +94,46 @@ def test_search_reports_raises_on_failure():
 
     with pytest.raises(VectorStoreError, match="query failed"):
         manager.search_reports("anything")
+
+
+def test_search_reports_falls_back_to_raw_pinecone_query_on_missing_text():
+    manager, mock_index, _ = _make_manager_with_mocks()
+
+    retriever = MagicMock()
+    retriever.retrieve.side_effect = KeyError("text")
+    mock_llama_index = MagicMock()
+    mock_llama_index.as_retriever.return_value = retriever
+    manager._get_index_for_namespace = MagicMock(return_value=mock_llama_index)
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed_texts.return_value = [[0.1, 0.2, 0.3]]
+    manager._embedding_client = mock_embedder
+
+    match = MagicMock()
+    match.id = "report_legacy"
+    match.metadata = {
+        "query": "LangGraph",
+        "generated_at": "2026-01-01",
+        "document": "# Legacy Report",
+    }
+    query_response = MagicMock()
+    query_response.matches = [match]
+    mock_index.query.return_value = query_response
+
+    results = manager.search_reports("LangGraph")
+
+    assert results == [
+        {
+            "id": "report_legacy",
+            "document": "# Legacy Report",
+            "metadata": {
+                "query": "LangGraph",
+                "generated_at": "2026-01-01",
+                "document": "# Legacy Report",
+            },
+        }
+    ]
+    mock_index.query.assert_called_once()
 
 
 def test_save_source_chunks_calls_insert_nodes():
