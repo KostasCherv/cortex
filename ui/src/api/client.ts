@@ -3,13 +3,13 @@ import type {
   FollowupStreamEvent,
   HealthResponse,
   RagAgent,
+  BillingUsageSummary,
   RagCitation,
   RagChatStreamEvent,
   RagChatMessage,
   RagChatSessionSummary,
   RagResource,
   ResearchRequest,
-  ResearchStreamEvent,
   RunFeedbackRequest,
   SessionRunStreamEvent,
   SessionDetail,
@@ -17,12 +17,6 @@ import type {
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-
-type StreamOptions = {
-  signal?: AbortSignal
-  onEvent: (event: ResearchStreamEvent) => void
-  onDone?: () => void
-}
 
 type SessionRunStreamOptions = {
   signal?: AbortSignal
@@ -37,31 +31,42 @@ function authHeaders(accessToken: string | null): HeadersInit {
   return { Authorization: `Bearer ${accessToken}` }
 }
 
+async function parseApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as {
+      detail?:
+        | string
+        | {
+            code?: string
+            message?: string
+            limit_type?: string
+            limit?: number
+            used?: number
+          }
+    }
+    if (typeof body.detail === 'string' && body.detail.trim()) return body.detail
+    if (body.detail && typeof body.detail === 'object') {
+      if (body.detail.code === 'quota_exceeded') {
+        const limitType =
+          body.detail.limit_type === 'research_daily' ? 'daily research queries' : 'daily questions'
+        const used = typeof body.detail.used === 'number' ? body.detail.used : 0
+        const limit = typeof body.detail.limit === 'number' ? body.detail.limit : 0
+        return `Quota reached for ${limitType} (${used}/${limit}). Upgrade to Pro or wait for reset.`
+      }
+      if (typeof body.detail.message === 'string' && body.detail.message.trim()) return body.detail.message
+    }
+  } catch {
+    // Keep fallback.
+  }
+  return fallback
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
   const response = await fetch(`${API_BASE}/health`)
   if (!response.ok) {
     throw new Error(`Health check failed: ${response.status}`)
   }
   return (await response.json()) as HealthResponse
-}
-
-function parseEventBlock(block: string): ResearchStreamEvent | null {
-  const dataLines = block
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.replace(/^data:\s?/, ''))
-
-  if (dataLines.length === 0) {
-    return null
-  }
-
-  const rawData = dataLines.join('\n')
-  const parsed = JSON.parse(rawData) as ResearchStreamEvent
-  if (!parsed?.node || typeof parsed.data !== 'object') {
-    return null
-  }
-  return parsed
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +270,7 @@ export async function startSessionResearch(
   })
 
   if (!response.ok) {
-    throw new Error(`Session research failed: ${response.status}`)
+    throw new Error(await parseApiError(response, `Session research failed: ${response.status}`))
   }
   return (await response.json()) as { run_id: string; status: string }
 }
@@ -355,63 +360,6 @@ export async function submitRunFeedback(
     feedback_submitted_at: string
     feedback_helpful: boolean
   }
-}
-
-export async function streamResearch(
-  payload: ResearchRequest,
-  options: StreamOptions,
-): Promise<void> {
-  const response = await fetch(`${API_BASE}/research`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify(payload),
-    signal: options.signal,
-  })
-
-  if (!response.ok) {
-    throw new Error(`Research request failed: ${response.status}`)
-  }
-  if (!response.body) {
-    throw new Error('Streaming not supported by this browser response.')
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) {
-      break
-    }
-
-    buffer += decoder.decode(value, { stream: true })
-    const chunks = buffer.split('\n\n')
-    buffer = chunks.pop() ?? ''
-
-    for (const chunk of chunks) {
-      const event = parseEventBlock(chunk)
-      if (!event) {
-        continue
-      }
-      options.onEvent(event)
-      if (event.node === '__end__') {
-        options.onDone?.()
-        return
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    const event = parseEventBlock(buffer)
-    if (event) {
-      options.onEvent(event)
-    }
-  }
-  options.onDone?.()
 }
 
 // ---------------------------------------------------------------------------
@@ -576,7 +524,7 @@ export async function chatWithRagAgent(
     body: JSON.stringify({ message, session_id: sessionId }),
   })
   if (!response.ok) {
-    throw new Error(`Failed to chat with RAG agent: ${response.status}`)
+    throw new Error(await parseApiError(response, `Failed to chat with RAG agent: ${response.status}`))
   }
   const parsed = (await response.json()) as {
     session_id: string
@@ -656,7 +604,7 @@ export async function streamRagAgentChat(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to stream RAG agent chat: ${response.status}`)
+    throw new Error(await parseApiError(response, `Failed to stream RAG agent chat: ${response.status}`))
   }
   if (!response.body) {
     throw new Error('Streaming not supported.')
@@ -810,4 +758,40 @@ export async function deleteRagAgentChatSession(
     throw new Error(`Failed to delete RAG chat session: ${response.status}`)
   }
   return (await response.json()) as { session_id: string; deleted: boolean }
+}
+
+export async function getBillingUsage(accessToken: string | null): Promise<BillingUsageSummary> {
+  const response = await fetch(`${API_BASE}/api/billing/usage`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to load billing usage: ${response.status}`))
+  }
+  return (await response.json()) as BillingUsageSummary
+}
+
+export async function createCheckoutSession(accessToken: string | null): Promise<{ url: string }> {
+  const response = await fetch(`${API_BASE}/api/billing/checkout-session`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({}),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to create checkout session: ${response.status}`))
+  }
+  return (await response.json()) as { url: string }
+}
+
+export async function createPortalSession(accessToken: string | null): Promise<{ url: string }> {
+  const response = await fetch(`${API_BASE}/api/billing/portal-session`, {
+    method: 'POST',
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to create portal session: ${response.status}`))
+  }
+  return (await response.json()) as { url: string }
 }

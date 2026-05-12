@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
-import { createRagAgent, deleteRagAgent, listRagAgents, listRagResources } from '@/api/client'
+import {
+  createCheckoutSession,
+  createRagAgent,
+  deleteRagAgent,
+  getBillingUsage,
+  listRagAgents,
+  listRagResources,
+} from '@/api/client'
 import { AgentCard } from '@/components/agents/AgentCard'
 import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { Button } from '@/components/ui/button'
-import type { RagAgent, RagResource } from '@/types'
+import type { BillingUsageSummary, RagAgent, RagResource } from '@/types'
 
 export function AgentsPage({ authSession }: { authSession: Session | null }) {
   const [agents, setAgents] = useState<RagAgent[]>([])
@@ -13,6 +20,7 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [billingUsage, setBillingUsage] = useState<BillingUsageSummary | null>(null)
 
   const readyResources = useMemo(() => resources.filter((r) => r.state === 'ready'), [resources])
 
@@ -37,6 +45,13 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!authSession?.access_token) return
+    void getBillingUsage(authSession.access_token)
+      .then(setBillingUsage)
+      .catch(() => {})
+  }, [authSession?.access_token])
 
   const handleCreate = async (payload: {
     name: string
@@ -76,6 +91,27 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
           </Button>
         )}
       </div>
+      {authSession && billingUsage && (
+        <div className="rounded-md border bg-card p-3 text-xs text-muted-foreground">
+          <div>
+            Plan: <span className="font-medium">{billingUsage.plan}</span> · Questions:{' '}
+            {billingUsage.usage.total_questions_count}/{billingUsage.limits.total_questions_daily}
+          </div>
+          {billingUsage.plan === 'free' && (
+            <button
+              type="button"
+              className="mt-2 text-primary underline"
+              onClick={() => {
+                void createCheckoutSession(authSession.access_token).then((res) => {
+                  window.location.href = res.url
+                })
+              }}
+            >
+              Upgrade to Pro
+            </button>
+          )}
+        </div>
+      )}
       {error && <p className="text-destructive text-sm">{error}</p>}
       {!authSession ? (
         <p className="text-muted-foreground text-sm">Sign in to create and manage agents.</p>

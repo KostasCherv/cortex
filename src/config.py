@@ -152,5 +152,22 @@ class Settings(BaseSettings):
         description="TTL in seconds for Supabase signed download URLs passed to sidecar.",
     )
 
+    # Billing / Stripe
+    stripe_secret_key: str = Field(default="", description="Stripe secret key.")
+    stripe_webhook_secret: str = Field(default="", description="Stripe webhook signing secret.")
+    stripe_pro_price_id: str = Field(default="", description="Stripe price id for the pro plan.")
+    stripe_success_url: str = Field(
+        default="http://localhost:5173/billing/success",
+        description="Redirect URL after successful checkout.",
+    )
+    stripe_cancel_url: str = Field(
+        default="http://localhost:5173/billing/cancel",
+        description="Redirect URL after canceled checkout.",
+    )
+    stripe_portal_return_url: str = Field(
+        default="http://localhost:5173",
+        description="Return URL from Stripe customer portal.",
+    )
+
 
 settings = Settings()

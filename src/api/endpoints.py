@@ -12,7 +12,7 @@ from typing import AsyncGenerator
 import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.graph.graph import build_graph
@@ -70,6 +70,9 @@ from src.rag import (
 )
 from src.inngest_client import handle_rag_ingestion, handle_research_run, inngest_client
 from src.storage import ensure_rag_storage_ready
+from src.billing.application import BillingService, UsageIncrement
+from src.billing.domain import BillingSyncError, QuotaExceededError
+from src.billing.interfaces.http import build_billing_service, usage_summary_to_response
 
 logger = logging.getLogger(__name__)
 _LIVE_REPORT_FLUSH_SECONDS = 0.3
@@ -176,6 +179,10 @@ class RagChatRequest(BaseModel):
     web_search_enabled: bool | None = None
 
 
+class BillingCheckoutRequest(BaseModel):
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
@@ -198,6 +205,38 @@ def _raise_rag_validation_error(exc: RagValidationError) -> None:
         status_code=status_by_code.get(exc.code, 400),
         detail={"code": exc.code, "message": str(exc)},
     )
+
+
+_billing_service: BillingService | None = None
+
+
+def _get_billing_service() -> BillingService:
+    global _billing_service
+    if _billing_service is None:
+        _billing_service = build_billing_service()
+    return _billing_service
+
+
+def _raise_quota_exceeded(exc: QuotaExceededError) -> None:
+    raise HTTPException(
+        status_code=429,
+        detail={
+            "code": "quota_exceeded",
+            "plan": exc.plan,
+            "limit_type": exc.limit_type,
+            "limit": exc.limit,
+            "used": exc.used,
+            "resets_at": exc.resets_at,
+            "message": exc.message,
+        },
+    )
+
+
+async def _consume_usage_or_429(user_id: str, increment: UsageIncrement) -> None:
+    try:
+        await _get_billing_service().check_and_consume_usage(user_id, increment)
+    except QuotaExceededError as exc:
+        _raise_quota_exceeded(exc)
 
 
 def _build_rag_citations(chunks: list[dict] | None) -> list[dict]:
@@ -857,14 +896,51 @@ async def health():
     return HealthResponse(status="ok", version="0.1.0")
 
 
-@app.post("/research", tags=["Research"])
-async def research(body: ResearchRequest):
-    """Run the research pipeline and stream progress via Server-Sent Events."""
-    return StreamingResponse(
-        _stream_research(body.query, body.use_vector_store),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+@app.get("/api/billing/usage", tags=["Billing"])
+async def billing_usage(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    summary = await _get_billing_service().get_usage_summary(current_user.user_id)
+    return usage_summary_to_response(summary)
+
+
+@app.post("/api/billing/checkout-session", tags=["Billing"])
+async def create_checkout_session(
+    _body: BillingCheckoutRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    try:
+        checkout_url = await _get_billing_service().start_checkout(
+            user_id=current_user.user_id,
+            email=current_user.email,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"url": checkout_url}
+
+
+@app.post("/api/billing/portal-session", tags=["Billing"])
+async def create_portal_session(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    try:
+        portal_url = await _get_billing_service().start_portal(user_id=current_user.user_id)
+    except BillingSyncError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {"url": portal_url}
+
+
+@app.post("/api/billing/webhook", tags=["Billing"])
+async def stripe_webhook(request: Request):
+    signature = request.headers.get("Stripe-Signature", "")
+    payload = await request.body()
+    try:
+        await _get_billing_service().handle_webhook(payload, signature)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"received": True})
 
 
 # ---------------------------------------------------------------------------
@@ -976,6 +1052,11 @@ async def session_research(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Queue background research within a session and return run metadata."""
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(research_queries=1, total_questions=1),
+    )
+
     session = await get_session(session_id, current_user.user_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
@@ -1143,6 +1224,11 @@ async def session_followup(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Ask a follow-up question grounded to a session's source material."""
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(total_questions=1),
+    )
+
     session = await get_session(session_id, current_user.user_id)
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
@@ -1301,6 +1387,11 @@ async def rag_chat_with_agent(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(total_questions=1),
+    )
+
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
@@ -1471,6 +1562,11 @@ async def rag_chat_with_agent_stream(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(total_questions=1),
+    )
+
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")

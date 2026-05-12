@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import {
+  createCheckoutSession,
   createSession,
+  getBillingUsage,
   getSession,
   startSessionResearch,
   streamSessionRun,
@@ -13,7 +15,7 @@ import { QueryComposer } from '@/components/research/QueryComposer'
 import { ResearchProgress } from '@/components/research/ResearchProgress'
 import { ReportViewer } from '@/components/research/ReportViewer'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { ConversationTurn, SessionDetail } from '@/types'
+import type { BillingUsageSummary, ConversationTurn, SessionDetail } from '@/types'
 
 type Props = {
   authSession: Session | null
@@ -37,6 +39,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   const [feedbackPending, setFeedbackPending] = useState(false)
   const [feedbackError, setFeedbackError] = useState<string | null>(null)
   const [feedbackAvailable, setFeedbackAvailable] = useState(false)
+  const [billingUsage, setBillingUsage] = useState<BillingUsageSummary | null>(null)
 
   const loadedSessionRef = useRef<string | null>(null)
   const pollTimerRef = useRef<number | null>(null)
@@ -178,6 +181,13 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       stopRunStream()
     }
   }, [stopPolling, stopRunStream])
+
+  useEffect(() => {
+    if (!authSession?.access_token) return
+    void getBillingUsage(authSession.access_token)
+      .then(setBillingUsage)
+      .catch(() => {})
+  }, [authSession?.access_token])
 
   const openSession = useCallback(
     async (selectedSessionId: string) => {
@@ -321,6 +331,28 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
               <p className="text-sm text-muted-foreground mb-4">
                 Sign in to save and revisit your research sessions.
               </p>
+            )}
+            {authSession && billingUsage && (
+              <div className="mb-4 rounded-md border bg-card p-3 text-xs text-muted-foreground">
+                <div>
+                  Plan: <span className="font-medium">{billingUsage.plan}</span> · Research:{' '}
+                  {billingUsage.usage.research_queries_count}/{billingUsage.limits.research_queries_daily} · Questions:{' '}
+                  {billingUsage.usage.total_questions_count}/{billingUsage.limits.total_questions_daily}
+                </div>
+                {billingUsage.plan === 'free' && (
+                  <button
+                    type="button"
+                    className="mt-2 text-primary underline"
+                    onClick={() => {
+                      void createCheckoutSession(authSession.access_token).then((res) => {
+                        window.location.href = res.url
+                      })
+                    }}
+                  >
+                    Upgrade to Pro
+                  </button>
+                )}
+              </div>
             )}
             <QueryComposer
               onSubmit={handleSubmit}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -296,7 +296,7 @@ class SupabaseSessionStore:
         ]
 
     async def get_session(self, session_id: str, user_id: str) -> Session | None:
-        from src.sessions import ConversationTurn, Session, SessionRun
+        from src.sessions import ConversationTurn, Session
 
         session_resp = await self._request(
             "GET",
@@ -1313,3 +1313,115 @@ class SupabaseSessionStore:
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
         }
+
+    # ------------------------------------------------------------------
+    # Billing subscriptions + usage
+    # ------------------------------------------------------------------
+
+    async def get_user_subscription(self, user_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "user_subscriptions",
+            params={
+                "select": (
+                    "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
+                    "current_period_start,current_period_end,created_at,updated_at"
+                ),
+                "user_id": f"eq.{user_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
+
+    async def get_user_subscription_by_customer_id(self, customer_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "user_subscriptions",
+            params={
+                "select": (
+                    "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
+                    "current_period_start,current_period_end,created_at,updated_at"
+                ),
+                "stripe_customer_id": f"eq.{customer_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
+
+    async def get_user_subscription_by_subscription_id(self, subscription_id: str) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "user_subscriptions",
+            params={
+                "select": (
+                    "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
+                    "current_period_start,current_period_end,created_at,updated_at"
+                ),
+                "stripe_subscription_id": f"eq.{subscription_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
+
+    async def upsert_user_subscription(self, payload: dict[str, Any]) -> None:
+        await self._request(
+            "POST",
+            "user_subscriptions",
+            json_body=payload,
+            extra_headers={"Prefer": "resolution=merge-duplicates"},
+        )
+
+    async def get_daily_usage_counter(self, *, user_id: str, usage_date: date) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "daily_usage_counters",
+            params={
+                "select": (
+                    "user_id,usage_date,research_queries_count,total_questions_count,created_at,updated_at"
+                ),
+                "user_id": f"eq.{user_id}",
+                "usage_date": f"eq.{usage_date.isoformat()}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
+
+    async def increment_daily_usage_counter(
+        self,
+        *,
+        user_id: str,
+        usage_date: date,
+        add_research_queries: int,
+        add_total_questions: int,
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            "rpc/increment_daily_usage_counters",
+            json_body={
+                "p_user_id": user_id,
+                "p_usage_date": usage_date.isoformat(),
+                "p_research_queries": add_research_queries,
+                "p_total_questions": add_total_questions,
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return {
+                "user_id": user_id,
+                "usage_date": usage_date.isoformat(),
+                "research_queries_count": 0,
+                "total_questions_count": 0,
+            }
+        return rows[0]

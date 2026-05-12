@@ -3,17 +3,55 @@
 import asyncio
 import json
 import time
+from datetime import UTC, datetime
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
 from src.api.endpoints import _stream_research, app
 from src.auth import AuthenticatedUser, get_authenticated_user
+from src.billing.application.service import UsageIncrement
+from src.billing.domain.errors import QuotaExceededError
+from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary
 from src.rag import RagValidationError
 from src.sessions import Session, SessionRun
+import src.api.endpoints as endpoints
 
 with patch("src.api.endpoints.validate_web_search_provider_health"):
     client = TestClient(app)
+
+
+class _FakeBillingService:
+    def __init__(self) -> None:
+        self.raise_quota = False
+
+    async def check_and_consume_usage(self, user_id: str, increment: UsageIncrement):
+        if self.raise_quota:
+            raise QuotaExceededError(
+                plan="free",
+                limit_type="questions_daily",
+                limit=10,
+                used=10,
+                resets_at="2026-01-01T00:00:00+00:00",
+                message="Daily question limit reached.",
+            )
+        return None
+
+    async def get_usage_summary(self, user_id: str):
+        raise NotImplementedError
+
+    async def start_checkout(self, *, user_id: str, email: str | None):
+        return "https://example.com/checkout"
+
+    async def start_portal(self, *, user_id: str):
+        return "https://example.com/portal"
+
+    async def handle_webhook(self, payload: bytes, signature: str):
+        return None
+
+
+_fake_billing = _FakeBillingService()
+endpoints._billing_service = _fake_billing
 
 
 def _auth_override() -> AuthenticatedUser:
@@ -31,54 +69,25 @@ def test_health_returns_ok():
     assert "version" in data
 
 
-def test_research_streams_events():
-    search_result = [
-        {"url": "https://example.com", "title": "Example", "content": "Test", "raw_content": "Full text"}
-    ]
-
-    async def _fake_report_stream(*args, **kwargs):
-        yield MagicMock(content="# Report\nFinal output.")
-
-    mock_llm = MagicMock()
-    mock_llm.ainvoke = AsyncMock(
-        return_value=MagicMock(
-            content='[{"url":"https://example.com","title":"Example","summary":"Summary text."}]'
-        )
+def test_billing_usage_endpoint():
+    summary = UsageSummary(
+        plan=Plan.FREE,
+        date=datetime(2026, 1, 1, tzinfo=UTC).date(),
+        limits=QuotaLimits(research_queries_daily=3, total_questions_daily=10),
+        usage=DailyUsage(
+            usage_date=datetime(2026, 1, 1, tzinfo=UTC).date(),
+            research_queries_count=1,
+            total_questions_count=2,
+        ),
+        resets_at=datetime(2026, 1, 2, tzinfo=UTC),
     )
-    mock_llm.astream = _fake_report_stream
 
-    with (
-        patch("src.graph.nodes.perform_search", return_value=search_result),
-        patch("src.graph.nodes.get_llm", return_value=mock_llm),
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
-    ):
-        mock_vs = MagicMock()
-        mock_vs.search_reports.return_value = []
-        mock_vs.rerank_documents.return_value = [
-            {
-                "url": "https://example.com",
-                "title": "Example",
-                "raw_text": "Full text",
-                "score": 0.9,
-            }
-        ]
-        mock_vs_cls.return_value = mock_vs
-        response = client.post(
-            "/research",
-            json={"query": "What is LangGraph?", "use_vector_store": False},
-        )
-
+    with patch.object(_fake_billing, "get_usage_summary", new=AsyncMock(return_value=summary)):
+        response = client.get("/api/billing/usage")
     assert response.status_code == 200
-    assert "text/event-stream" in response.headers["content-type"]
-
-    # Parse SSE lines
-    events = []
-    for line in response.text.splitlines():
-        if line.startswith("data: "):
-            events.append(json.loads(line[6:]))
-
-    node_names = [e["node"] for e in events]
-    assert "__end__" in node_names
+    data = response.json()
+    assert data["plan"] == "free"
+    assert data["limits"]["research_queries_daily"] == 3
 
 
 def test_stream_research_emits_node_completion_from_langgraph_node_metadata():
@@ -113,11 +122,6 @@ def test_stream_research_emits_node_completion_from_langgraph_node_metadata():
     assert len(report_events) == 1
     assert report_events[0]["data"]["report"] == "# From metadata"
     assert any(e.get("node") == "__end__" for e in events)
-
-
-def test_research_bad_request_returns_422():
-    response = client.post("/research", json={})  # missing 'query'
-    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +215,7 @@ def test_followup_returns_404_for_unknown_run_id():
 
 
 def test_session_research_queues_background_run():
+    _fake_billing.raise_quota = False
     mock_session = Session(
         session_id="session-1",
         runs=[SessionRun(run_id="old", query="q", source_urls=[], report="", created_at="2026")],
@@ -238,6 +243,21 @@ def test_session_research_queues_background_run():
     assert payload["run_id"]
     assert mock_create_session_run.await_count == 1
     assert mock_enqueue_event.await_count == 1
+
+
+def test_session_research_returns_429_when_quota_exceeded():
+    _fake_billing.raise_quota = True
+    mock_session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
+    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+        response = client.post(
+            "/sessions/session-1/research",
+            json={"query": "What is LangGraph?", "use_vector_store": False},
+        )
+    assert response.status_code == 429
+    payload = response.json()["detail"]
+    assert payload["code"] == "quota_exceeded"
+    assert payload["limit_type"] == "questions_daily"
+    _fake_billing.raise_quota = False
 
 
 def test_submit_run_feedback_creates_boolean_score_and_marks_run():

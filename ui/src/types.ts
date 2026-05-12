@@ -154,3 +154,17 @@ export type RagChatStreamEvent =
   | { type: 'suggestions'; suggestions: string[] }
   | { type: 'done' }
   | { type: 'error'; error: string }
+
+export type BillingUsageSummary = {
+  plan: 'free' | 'pro'
+  date: string
+  limits: {
+    research_queries_daily: number
+    total_questions_daily: number
+  }
+  usage: {
+    research_queries_count: number
+    total_questions_count: number
+  }
+  resets_at: string
+}

@@ -36,7 +36,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 
 ```mermaid
 flowchart LR
-    userQuery["User query"] --> apiResearch["POST /research or /sessions/{id}/research"]
+    userQuery["User query"] --> apiResearch["POST /sessions/{id}/research"]
     apiResearch --> search["search (Tavily)"]
     search -->|"continue"| retrieve["retrieve (httpx + BeautifulSoup)"]
     search -->|"abort"| abortNode["abort"]
@@ -118,20 +118,57 @@ while true; do uv run python -m src.main rag-dispatch-outbox --limit 100; sleep 
 Key endpoints:
 
 - `GET /health` - liveness check.
-- `POST /research` - sessionless research run with SSE streaming.
 - `POST /sessions` - create authenticated session.
 - `GET /sessions` - list authenticated user sessions.
 - `POST /sessions/{id}/research` - run research in-session with SSE streaming.
 - `POST /sessions/{id}/runs/{run_id}/feedback` - submit thumbs feedback (optional comment) for a completed run.
 - `POST /sessions/{id}/followup` - grounded follow-up chat over run sources.
+- `POST /api/rag/agents/{id}/chat` and `/chat/stream` - agent Q&A grounded to linked resources.
+
+Billing + subscriptions:
+
+- `GET /api/billing/usage` - current plan + daily usage counters + reset time.
+- `POST /api/billing/checkout-session` - Stripe Checkout URL for Pro upgrade.
+- `POST /api/billing/portal-session` - Stripe Billing Portal URL for self-serve management.
+- `POST /api/billing/webhook` - signed Stripe webhook receiver for subscription state sync.
 
 Example research request:
 
 ```bash
-curl -N -X POST http://localhost:8000/research \
+curl -N -X POST http://localhost:8000/sessions/<session_id>/research \
+  -H "Authorization: Bearer <supabase_access_token>" \
   -H "Content-Type: application/json" \
   -d '{"query": "What is LangGraph?", "use_vector_store": false}'
 ```
+
+### Billing flow (production)
+
+```mermaid
+flowchart LR
+    ui["UI Upgrade button"] --> checkout["POST /api/billing/checkout-session"]
+    checkout --> stripeCheckout["Stripe Hosted Checkout"]
+    stripeCheckout --> webhook["POST /api/billing/webhook"]
+    webhook --> verify["Verify Stripe signature"]
+    verify --> sync["Upsert user_subscriptions"]
+    sync --> usage["GET /api/billing/usage"]
+    usage --> enforce["Quota guard on research/chat endpoints"]
+```
+
+## Stripe production configuration
+
+Set these in `.env`:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRO_PRICE_ID`
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
+- `STRIPE_PORTAL_RETURN_URL`
+
+Notes:
+
+- Webhook signature verification uses Stripe’s official SDK (`stripe.Webhook.construct_event`).
+- Subscription sync supports metadata-based user mapping and fallback resolution via Stripe customer/subscription IDs.
 
 ## Best practices implemented
 
