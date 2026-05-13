@@ -1406,22 +1406,81 @@ class SupabaseSessionStore:
         add_research_queries: int,
         add_total_questions: int,
     ) -> dict[str, Any]:
+        try:
+            response = await self._request(
+                "POST",
+                "rpc/increment_daily_usage_counters",
+                json_body={
+                    "p_user_id": user_id,
+                    "p_usage_date": usage_date.isoformat(),
+                    "p_research_queries": add_research_queries,
+                    "p_total_questions": add_total_questions,
+                },
+            )
+            rows = response.json()
+            if not rows:
+                return {
+                    "user_id": user_id,
+                    "usage_date": usage_date.isoformat(),
+                    "research_queries_count": 0,
+                    "total_questions_count": 0,
+                }
+            return rows[0]
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 400:
+                raise
+            try:
+                payload = exc.response.json()
+            except Exception:
+                payload = {"message": exc.response.text}
+            logger.warning(
+                "billing rpc increment_daily_usage_counters failed; using non-atomic fallback. "
+                "status=%s payload=%s",
+                exc.response.status_code,
+                payload,
+            )
+            return await self._increment_daily_usage_counter_fallback(
+                user_id=user_id,
+                usage_date=usage_date,
+                add_research_queries=add_research_queries,
+                add_total_questions=add_total_questions,
+            )
+
+    async def _increment_daily_usage_counter_fallback(
+        self,
+        *,
+        user_id: str,
+        usage_date: date,
+        add_research_queries: int,
+        add_total_questions: int,
+    ) -> dict[str, Any]:
+        current = await self.get_daily_usage_counter(user_id=user_id, usage_date=usage_date)
+        current_research = int((current or {}).get("research_queries_count") or 0)
+        current_total = int((current or {}).get("total_questions_count") or 0)
+
+        next_research = current_research + max(0, add_research_queries)
+        next_total = current_total + max(0, add_total_questions)
+        now_iso = datetime.now(UTC).isoformat()
+
         response = await self._request(
             "POST",
-            "rpc/increment_daily_usage_counters",
+            "daily_usage_counters",
             json_body={
-                "p_user_id": user_id,
-                "p_usage_date": usage_date.isoformat(),
-                "p_research_queries": add_research_queries,
-                "p_total_questions": add_total_questions,
-            },
-        )
-        rows = response.json()
-        if not rows:
-            return {
                 "user_id": user_id,
                 "usage_date": usage_date.isoformat(),
-                "research_queries_count": 0,
-                "total_questions_count": 0,
-            }
-        return rows[0]
+                "research_queries_count": next_research,
+                "total_questions_count": next_total,
+                "updated_at": now_iso,
+            },
+            extra_headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            return rows[0]
+        return {
+            "user_id": user_id,
+            "usage_date": usage_date.isoformat(),
+            "research_queries_count": next_research,
+            "total_questions_count": next_total,
+            "updated_at": now_iso,
+        }
