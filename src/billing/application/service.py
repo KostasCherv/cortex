@@ -114,13 +114,40 @@ class BillingService:
             if not user_id:
                 logger.warning("[billing] checkout.session.completed missing user_id; ignoring.")
                 return
+            subscription_id = data.get("subscription")
+            customer_id = data.get("customer")
+            status = "active"
+            current_period_start = None
+            current_period_end = None
+            if isinstance(subscription_id, str) and subscription_id:
+                try:
+                    subscription = await self._stripe.get_subscription(subscription_id)
+                except Exception as exc:
+                    logger.warning(
+                        "[billing] failed to fetch subscription details for checkout session. "
+                        "subscription_id=%s error=%s",
+                        subscription_id,
+                        exc,
+                    )
+                    subscription = None
+                if isinstance(subscription, dict):
+                    subscription_status = subscription.get("status")
+                    if isinstance(subscription_status, str) and subscription_status:
+                        status = subscription_status
+                    current_period_start = _unix_to_iso(subscription.get("current_period_start"))
+                    current_period_end = _unix_to_iso(subscription.get("current_period_end"))
+                    maybe_customer = subscription.get("customer")
+                    if isinstance(maybe_customer, str) and maybe_customer:
+                        customer_id = maybe_customer
             await self._subscriptions.upsert_user_subscription(
                 {
                     "user_id": user_id,
                     "plan": "pro",
-                    "status": "active",
-                    "stripe_customer_id": data.get("customer"),
-                    "stripe_subscription_id": data.get("subscription"),
+                    "status": status,
+                    "stripe_customer_id": customer_id,
+                    "stripe_subscription_id": subscription_id,
+                    "current_period_start": current_period_start,
+                    "current_period_end": current_period_end,
                     "updated_at": datetime.now(UTC).isoformat(),
                 }
             )

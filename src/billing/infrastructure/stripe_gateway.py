@@ -51,6 +51,26 @@ class StripeHttpGateway(StripeGateway):
             raise RuntimeError("Stripe portal session URL missing.")
         return url
 
+    async def get_subscription(self, subscription_id: str) -> dict | None:
+        if not subscription_id.strip():
+            return None
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(
+                f"https://api.stripe.com/v1/subscriptions/{subscription_id}",
+                headers={"Authorization": f"Bearer {self._secret_key}"},
+            )
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            logger.warning(
+                "[billing] Stripe subscription fetch failed: %s %s",
+                response.status_code,
+                response.text,
+            )
+            raise RuntimeError("Stripe subscription fetch failed.")
+        data = response.json()
+        return data if isinstance(data, dict) else None
+
     def construct_webhook_event(self, payload: bytes, signature: str) -> dict:
         if not settings.stripe_webhook_secret:
             raise RuntimeError("STRIPE_WEBHOOK_SECRET is not configured.")
@@ -64,7 +84,7 @@ class StripeHttpGateway(StripeGateway):
             )
         except Exception as exc:
             raise RuntimeError("Invalid Stripe webhook signature or payload.") from exc
-        data = event.to_dict_recursive()
+        data = _stripe_event_to_dict(event)
         if not isinstance(data, dict) or "type" not in data:
             raise RuntimeError("Malformed Stripe webhook event.")
         return data
@@ -89,5 +109,34 @@ class NoopStripeGateway(StripeGateway):
     async def create_portal_session(self, *, customer_id: str) -> str:
         raise RuntimeError("Stripe portal is not configured.")
 
+    async def get_subscription(self, subscription_id: str) -> dict | None:
+        raise RuntimeError("Stripe subscription fetch is not configured.")
+
     def construct_webhook_event(self, payload: bytes, signature: str) -> dict:
         raise RuntimeError("Stripe webhook is not configured.")
+
+
+def _stripe_event_to_dict(event: object) -> dict:
+    """Convert Stripe SDK event objects to plain dicts across SDK versions."""
+    to_dict = getattr(event, "to_dict", None)
+    if callable(to_dict):
+        data = to_dict()
+        if isinstance(data, dict):
+            return data
+
+    to_dict_recursive = getattr(event, "to_dict_recursive", None)
+    if callable(to_dict_recursive):
+        data = to_dict_recursive()
+        if isinstance(data, dict):
+            return data
+
+    internal_recursive = getattr(event, "_to_dict_recursive", None)
+    if callable(internal_recursive):
+        data = internal_recursive()
+        if isinstance(data, dict):
+            return data
+
+    if isinstance(event, dict):
+        return event
+
+    raise RuntimeError("Malformed Stripe webhook event.")

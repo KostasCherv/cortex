@@ -50,12 +50,16 @@ class _FakeUsage:
 class _FakeStripe:
     def __init__(self, event: dict | None = None) -> None:
         self.event = event or {}
+        self.subscriptions: dict[str, dict] = {}
 
     async def create_checkout_session(self, *, user_id: str, email: str | None) -> str:
         return "https://checkout"
 
     async def create_portal_session(self, *, customer_id: str) -> str:
         return "https://portal"
+
+    async def get_subscription(self, subscription_id: str) -> dict | None:
+        return self.subscriptions.get(subscription_id)
 
     def construct_webhook_event(self, payload: bytes, signature: str) -> dict:
         return self.event
@@ -84,6 +88,42 @@ async def test_checkout_completed_uses_client_reference_id_when_metadata_missing
     assert subs.last_upsert is not None
     assert subs.last_upsert["user_id"] == "user-1"
     assert subs.last_upsert["plan"] == "pro"
+
+
+@pytest.mark.asyncio
+async def test_checkout_completed_enriches_period_fields_from_subscription_lookup():
+    subs = _FakeSubscriptions()
+    stripe = _FakeStripe(
+        {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "client_reference_id": "user-42",
+                    "customer": "cus_checkout",
+                    "subscription": "sub_checkout",
+                    "metadata": {},
+                }
+            },
+        }
+    )
+    stripe.subscriptions["sub_checkout"] = {
+        "id": "sub_checkout",
+        "customer": "cus_real",
+        "status": "trialing",
+        "current_period_start": 1_700_000_000,
+        "current_period_end": 1_700_100_000,
+    }
+    service = BillingService(subscriptions=subs, usage=_FakeUsage(), stripe=stripe)
+
+    await service.handle_webhook(b"{}", "sig")
+
+    assert subs.last_upsert is not None
+    assert subs.last_upsert["user_id"] == "user-42"
+    assert subs.last_upsert["status"] == "trialing"
+    assert subs.last_upsert["stripe_customer_id"] == "cus_real"
+    assert subs.last_upsert["stripe_subscription_id"] == "sub_checkout"
+    assert subs.last_upsert["current_period_start"] is not None
+    assert subs.last_upsert["current_period_end"] is not None
 
 
 @pytest.mark.asyncio
