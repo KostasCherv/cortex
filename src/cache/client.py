@@ -15,7 +15,7 @@ _cache: "RedisCache | None" = None
 
 
 def get_cache() -> "RedisCache | None":
-    """Return the singleton RedisCache, or None if Redis is not configured."""
+    """Return (or lazily create) singleton RedisCache, or None when disabled."""
     global _cache
     if _cache is None and settings.redis_url:
         _cache = RedisCache(url=settings.redis_url)
@@ -52,11 +52,9 @@ class RedisCache:
 
     async def ping(self) -> bool:
         try:
-            result = self._client.ping()
-            if hasattr(result, "__await__"):
-                result = await result
-            return bool(result)
-        except Exception:
+            return bool(await self._client.ping())
+        except Exception as exc:
+            logger.warning("[cache] ping failed: %s", exc)
             return False
 
     @staticmethod

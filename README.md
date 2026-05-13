@@ -25,6 +25,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Retrieval and reranking: `Pinecone`
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
 - Auth, sessions, and storage: `Supabase` (Postgres, Auth, Storage)
+- Caching: `Redis` (optional for auth, search, and session hot paths; graceful degradation when unavailable)
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`
@@ -87,6 +88,11 @@ Relevant LLM settings:
 - `OPENAI_API_KEY` and `OPENAI_MODEL` for direct OpenAI usage
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for OpenRouter-hosted models
 - `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for local Ollama usage
+
+Optional Redis caching:
+
+- Uncomment the `REDIS_*` block in `.env` to enable auth, search, and session caching
+- If Redis is not configured or is temporarily unreachable, Cortex continues to run normally
 
 2) Start backend API:
 

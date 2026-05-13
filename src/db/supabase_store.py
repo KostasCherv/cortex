@@ -302,7 +302,14 @@ class SupabaseSessionStore:
         if cache is not None and cache_key is not None:
             cached = await cache.get(cache_key)
             if cached is not None:
-                return self._session_from_dict(cached)
+                try:
+                    return self._session_from_dict(cached)
+                except (KeyError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        "[cache] failed to deserialize session key=%r: %s",
+                        cache_key,
+                        exc,
+                    )
         result = await self._fetch_session_from_db(session_id, user_id)
         if cache is not None and cache_key is not None and result is not None:
             await cache.set(
