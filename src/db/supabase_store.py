@@ -1325,7 +1325,8 @@ class SupabaseSessionStore:
             params={
                 "select": (
                     "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
-                    "current_period_start,current_period_end,created_at,updated_at"
+                    "current_period_start,current_period_end,cancel_at_period_end,cancel_at,canceled_at,"
+                    "created_at,updated_at"
                 ),
                 "user_id": f"eq.{user_id}",
                 "limit": "1",
@@ -1343,7 +1344,8 @@ class SupabaseSessionStore:
             params={
                 "select": (
                     "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
-                    "current_period_start,current_period_end,created_at,updated_at"
+                    "current_period_start,current_period_end,cancel_at_period_end,cancel_at,canceled_at,"
+                    "created_at,updated_at"
                 ),
                 "stripe_customer_id": f"eq.{customer_id}",
                 "limit": "1",
@@ -1361,7 +1363,8 @@ class SupabaseSessionStore:
             params={
                 "select": (
                     "user_id,plan,status,stripe_customer_id,stripe_subscription_id,"
-                    "current_period_start,current_period_end,created_at,updated_at"
+                    "current_period_start,current_period_end,cancel_at_period_end,cancel_at,canceled_at,"
+                    "created_at,updated_at"
                 ),
                 "stripe_subscription_id": f"eq.{subscription_id}",
                 "limit": "1",

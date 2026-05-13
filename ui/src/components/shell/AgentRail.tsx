@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, FolderOpen, Loader2, LogOut, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
+  createCheckoutSession,
+  createPortalSession,
   deleteRagAgent,
   deleteRagAgentChatSession,
   deleteSession,
+  getBillingUsage,
   listRagAgentChatSessions,
   listSessions,
   updateRagAgentChatSessionTitle,
@@ -24,13 +27,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
-import type { RagAgent, RagChatSessionSummary, SessionSummary } from '@/types'
+import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SessionSummary } from '@/types'
 import type { ActiveView } from './AppShell'
 
 type Props = {
@@ -52,6 +56,21 @@ type Props = {
 
 type ResearchSession = SessionSummary
 type AgentSession = RagChatSessionSummary
+
+function formatDateLabel(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function daysUntilLabel(iso: string): string {
+  const target = new Date(iso)
+  if (Number.isNaN(target.getTime())) return ''
+  const now = new Date()
+  const msPerDay = 24 * 60 * 60 * 1000
+  const days = Math.max(0, Math.ceil((target.getTime() - now.getTime()) / msPerDay))
+  return `Expires in ${days} day${days === 1 ? '' : 's'}`
+}
 
 function ResearchSessionList({
   accessToken,
@@ -568,6 +587,17 @@ export function AgentRail({
 }: Props) {
   const { theme, toggle } = useTheme()
   const accessToken = authSession?.access_token ?? null
+  const [billingUsage, setBillingUsage] = useState<BillingUsageSummary | null>(null)
+
+  useEffect(() => {
+    if (!accessToken) {
+      setBillingUsage(null)
+      return
+    }
+    void getBillingUsage(accessToken)
+      .then(setBillingUsage)
+      .catch(() => setBillingUsage(null))
+  }, [accessToken, sessionRefreshToken])
 
   const handleDeleteAgent = useCallback(
     async (agent: RagAgent) => {
@@ -787,10 +817,57 @@ export function AgentRail({
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top" className="w-48">
+              <DropdownMenuContent align="end" side="top" className="w-64">
                 <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
                   {authSession.user.email}
                 </DropdownMenuItem>
+                {billingUsage && (
+                  <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
+                    {billingUsage.plan === 'free'
+                      ? `Free · Research ${billingUsage.usage.research_queries_count}/${billingUsage.limits.research_queries_daily} · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`
+                      : `Pro · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`}
+                  </DropdownMenuItem>
+                )}
+                {billingUsage?.subscription && (
+                  <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
+                    {(() => {
+                      const subscription = billingUsage.subscription
+                      const effectiveEnd = subscription.cancel_at ?? subscription.current_period_end
+                      if (subscription.cancel_at_period_end && effectiveEnd) {
+                        return `Cancels on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
+                      }
+                      if (effectiveEnd && subscription.status === 'active') {
+                        return `Renews on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
+                      }
+                      return `Status: ${subscription.status}`
+                    })()}
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {billingUsage?.plan === 'free' ? (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (!accessToken) return
+                      void createCheckoutSession(accessToken).then((res) => {
+                        window.location.href = res.url
+                      })
+                    }}
+                  >
+                    Upgrade to Pro
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (!accessToken) return
+                      void createPortalSession(accessToken).then((res) => {
+                        window.location.href = res.url
+                      })
+                    }}
+                  >
+                    Manage Subscription
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={onSignOut}>
                   <LogOut size={13} className="mr-2" />
                   Sign out

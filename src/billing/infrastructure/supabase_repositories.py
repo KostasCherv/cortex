@@ -40,6 +40,9 @@ def _row_to_subscription(row: dict | None) -> UserSubscription | None:
             stripe_subscription_id=row.get("stripe_subscription_id"),
             current_period_start=_parse_datetime(row.get("current_period_start")),
             current_period_end=_parse_datetime(row.get("current_period_end")),
+            cancel_at_period_end=row.get("cancel_at_period_end"),
+            cancel_at=_parse_datetime(row.get("cancel_at")),
+            canceled_at=_parse_datetime(row.get("canceled_at")),
         )
 
 

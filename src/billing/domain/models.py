@@ -32,6 +32,9 @@ class UserSubscription:
     stripe_subscription_id: str | None = None
     current_period_start: datetime | None = None
     current_period_end: datetime | None = None
+    cancel_at_period_end: bool | None = None
+    cancel_at: datetime | None = None
+    canceled_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -41,3 +44,4 @@ class UsageSummary:
     limits: QuotaLimits
     usage: DailyUsage
     resets_at: datetime
+    subscription: UserSubscription | None = None

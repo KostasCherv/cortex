@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
+  createPortalSession,
   createRagAgent,
   deleteRagAgent,
   getBillingUsage,
@@ -108,6 +109,27 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
               }}
             >
               Upgrade to Pro
+            </button>
+          )}
+          {billingUsage.plan === 'pro' && (
+            <button
+              type="button"
+              className="mt-2 text-primary underline"
+              onClick={() => {
+                void createPortalSession(authSession.access_token)
+                  .then((res) => {
+                    window.location.href = res.url
+                  })
+                  .catch((portalError) => {
+                    setError(
+                      portalError instanceof Error
+                        ? portalError.message
+                        : 'Failed to open billing portal.',
+                    )
+                  })
+              }}
+            >
+              Manage Subscription
             </button>
           )}
         </div>

@@ -7,6 +7,7 @@ from src.billing.domain.models import UsageSummary
 
 
 def usage_summary_to_response(summary: UsageSummary) -> dict:
+    subscription = summary.subscription
     return {
         "plan": summary.plan.value,
         "date": summary.date.isoformat(),
@@ -16,6 +17,21 @@ def usage_summary_to_response(summary: UsageSummary) -> dict:
             "total_questions_count": summary.usage.total_questions_count,
         },
         "resets_at": summary.resets_at.isoformat(),
+        "subscription": (
+            {
+                "status": subscription.status,
+                "current_period_end": (
+                    subscription.current_period_end.isoformat()
+                    if subscription.current_period_end
+                    else None
+                ),
+                "cancel_at_period_end": subscription.cancel_at_period_end,
+                "cancel_at": subscription.cancel_at.isoformat() if subscription.cancel_at else None,
+                "canceled_at": subscription.canceled_at.isoformat() if subscription.canceled_at else None,
+            }
+            if subscription
+            else None
+        ),
     }
 
 

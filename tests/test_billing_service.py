@@ -110,8 +110,17 @@ async def test_checkout_completed_enriches_period_fields_from_subscription_looku
         "id": "sub_checkout",
         "customer": "cus_real",
         "status": "trialing",
-        "current_period_start": 1_700_000_000,
-        "current_period_end": 1_700_100_000,
+        "items": {
+            "data": [
+                {
+                    "current_period_start": 1_700_000_000,
+                    "current_period_end": 1_700_100_000,
+                }
+            ]
+        },
+        "cancel_at_period_end": True,
+        "cancel_at": 1_700_100_000,
+        "canceled_at": 1_700_050_000,
     }
     service = BillingService(subscriptions=subs, usage=_FakeUsage(), stripe=stripe)
 
@@ -124,6 +133,9 @@ async def test_checkout_completed_enriches_period_fields_from_subscription_looku
     assert subs.last_upsert["stripe_subscription_id"] == "sub_checkout"
     assert subs.last_upsert["current_period_start"] is not None
     assert subs.last_upsert["current_period_end"] is not None
+    assert subs.last_upsert["cancel_at_period_end"] is True
+    assert subs.last_upsert["cancel_at"] is not None
+    assert subs.last_upsert["canceled_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -160,6 +172,7 @@ async def test_subscription_event_resolves_user_by_subscription_id_when_metadata
     assert subs.last_upsert["user_id"] == "user-9"
     assert subs.last_upsert["plan"] == "free"
     assert subs.last_upsert["status"] == "canceled"
+    assert subs.last_upsert["cancel_at_period_end"] is None
 
 
 @pytest.mark.asyncio

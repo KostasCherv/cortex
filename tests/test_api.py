@@ -12,7 +12,7 @@ from src.api.endpoints import _stream_research, app
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
-from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary
+from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary, UserSubscription
 from src.rag import RagValidationError
 from src.sessions import Session, SessionRun
 import src.api.endpoints as endpoints
@@ -80,6 +80,15 @@ def test_billing_usage_endpoint():
             total_questions_count=2,
         ),
         resets_at=datetime(2026, 1, 2, tzinfo=UTC),
+        subscription=UserSubscription(
+            user_id="test-user",
+            plan=Plan.FREE,
+            status="active",
+            current_period_end=datetime(2026, 1, 10, tzinfo=UTC),
+            cancel_at_period_end=True,
+            cancel_at=datetime(2026, 1, 10, tzinfo=UTC),
+            canceled_at=datetime(2026, 1, 5, tzinfo=UTC),
+        ),
     )
 
     with patch.object(_fake_billing, "get_usage_summary", new=AsyncMock(return_value=summary)):
@@ -88,6 +97,8 @@ def test_billing_usage_endpoint():
     data = response.json()
     assert data["plan"] == "free"
     assert data["limits"]["research_queries_daily"] == 3
+    assert data["subscription"]["status"] == "active"
+    assert data["subscription"]["cancel_at_period_end"] is True
 
 
 def test_stream_research_emits_node_completion_from_langgraph_node_metadata():

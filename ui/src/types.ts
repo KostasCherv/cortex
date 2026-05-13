@@ -167,4 +167,11 @@ export type BillingUsageSummary = {
     total_questions_count: number
   }
   resets_at: string
+  subscription: {
+    status: string
+    current_period_end: string | null
+    cancel_at_period_end: boolean | null
+    cancel_at: string | null
+    canceled_at: string | null
+  } | null
 }
