@@ -1,11 +1,11 @@
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from src.auth import get_authenticated_user
+from src.auth import get_authenticated_user, _verify_with_supabase_userinfo
 
 
 def test_get_authenticated_user_rejects_missing_token():
@@ -81,3 +81,70 @@ def test_get_authenticated_user_handles_jwks_client_error_with_fallback():
 
     assert user.user_id == "user-1"
     mock_fallback.assert_called_once_with(credentials.credentials)
+
+
+def test_verify_with_supabase_userinfo_returns_cached_user_without_http_call():
+    mock_cache = AsyncMock()
+    mock_cache.hash_key.return_value = "auth:key"
+    mock_cache.get.return_value = {"user_id": "cached-user", "email": "cached@example.com"}
+
+    with (
+        patch("src.auth.settings") as mock_settings,
+        patch("src.auth.get_cache", return_value=mock_cache),
+        patch("src.auth.httpx.AsyncClient") as mock_http_client,
+    ):
+        mock_settings.supabase_url = "https://example.supabase.co"
+        user = asyncio.run(_verify_with_supabase_userinfo("token-1"))
+
+    assert user.user_id == "cached-user"
+    mock_http_client.assert_not_called()
+
+
+def test_verify_with_supabase_userinfo_miss_calls_supabase_and_writes_cache():
+    mock_cache = AsyncMock()
+    mock_cache.hash_key.return_value = "auth:key"
+    mock_cache.get.return_value = None
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "user-1", "email": "user@example.com"}
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_client
+    mock_ctx.__aexit__.return_value = False
+
+    with (
+        patch("src.auth.settings") as mock_settings,
+        patch("src.auth.get_cache", return_value=mock_cache),
+        patch("src.auth.httpx.AsyncClient", return_value=mock_ctx),
+    ):
+        mock_settings.supabase_url = "https://example.supabase.co"
+        mock_settings.supabase_service_role_key = "service-key"
+        mock_settings.redis_cache_ttl_auth_seconds = 300
+        user = asyncio.run(_verify_with_supabase_userinfo("token-1"))
+
+    assert user.user_id == "user-1"
+    mock_cache.set.assert_awaited_once()
+
+
+def test_verify_with_supabase_userinfo_without_cache_calls_supabase_directly():
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"id": "user-1", "email": "user@example.com"}
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_client
+    mock_ctx.__aexit__.return_value = False
+
+    with (
+        patch("src.auth.settings") as mock_settings,
+        patch("src.auth.get_cache", return_value=None),
+        patch("src.auth.httpx.AsyncClient", return_value=mock_ctx),
+    ):
+        mock_settings.supabase_url = "https://example.supabase.co"
+        mock_settings.supabase_service_role_key = "service-key"
+        user = asyncio.run(_verify_with_supabase_userinfo("token-1"))
+
+    assert user.user_id == "user-1"

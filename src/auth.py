@@ -1,6 +1,7 @@
 """Authentication helpers for Supabase JWT validation."""
 
 from dataclasses import dataclass
+import logging
 
 import httpx
 import jwt
@@ -10,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from src.cache.client import get_cache
 from src.config import settings
 
+logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -42,10 +44,14 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
         cache_key = cache.hash_key("auth", token)
         cached = await cache.get(cache_key)
         if cached is not None:
-            return AuthenticatedUser(
-                user_id=cached["user_id"],
-                email=cached.get("email"),
-            )
+            cached_user_id = cached.get("user_id")
+            if not cached_user_id:
+                logger.warning("[cache] auth entry missing user_id key=%r", cache_key)
+            else:
+                return AuthenticatedUser(
+                    user_id=cached_user_id,
+                    email=cached.get("email"),
+                )
 
     apikey = settings.supabase_service_role_key or ""
     try:
