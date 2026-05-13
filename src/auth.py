@@ -1,17 +1,13 @@
 """Authentication helpers for Supabase JWT validation."""
 
 from dataclasses import dataclass
-import logging
 
 import httpx
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.cache.client import get_cache
 from src.config import settings
-
-logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -37,21 +33,6 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Supabase URL is not configured.",
         )
-
-    cache = get_cache()
-    cache_key = None
-    if cache is not None:
-        cache_key = cache.hash_key("auth", token)
-        cached = await cache.get(cache_key)
-        if cached is not None:
-            cached_user_id = cached.get("user_id")
-            if not cached_user_id:
-                logger.warning("[cache] auth entry missing user_id key=%r", cache_key)
-            else:
-                return AuthenticatedUser(
-                    user_id=cached_user_id,
-                    email=cached.get("email"),
-                )
 
     apikey = settings.supabase_service_role_key or ""
     try:
@@ -82,14 +63,7 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token subject.",
         )
-    user = AuthenticatedUser(user_id=user_id, email=data.get("email"))
-    if cache is not None and cache_key is not None:
-        await cache.set(
-            cache_key,
-            {"user_id": user.user_id, "email": user.email},
-            settings.redis_cache_ttl_auth_seconds,
-        )
-    return user
+    return AuthenticatedUser(user_id=user_id, email=data.get("email"))
 
 
 async def get_authenticated_user(

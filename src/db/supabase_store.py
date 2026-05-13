@@ -61,6 +61,11 @@ class SupabaseSessionStore:
         "feedback_submitted_at",
         "feedback_helpful",
     }
+    _CACHE_PREFIX_SESSIONS_LIST = "sessions:list"
+    _CACHE_PREFIX_RAG_RESOURCES_LIST = "rag:resources:list"
+    _CACHE_PREFIX_RAG_AGENTS_LIST = "rag:agents:list"
+    _CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST = "rag:chat:sessions:list"
+    _CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST = "rag:chat:messages:list"
 
     async def _request(
         self,
@@ -121,6 +126,66 @@ class SupabaseSessionStore:
             for key, value in payload.items()
             if key not in self._SESSION_RUN_NON_BASE_FIELDS
         }
+
+    @staticmethod
+    def _cache_key(prefix: str, raw: str) -> str:
+        cache = get_cache()
+        if cache is None:
+            return ""
+        return cache.hash_key(prefix, raw)
+
+    async def _cache_get_list(self, key: str) -> list[dict[str, Any]] | None:
+        cache = get_cache()
+        if cache is None or not key:
+            return None
+        cached = await cache.get(key)
+        if isinstance(cached, list):
+            return cached
+        return None
+
+    async def _cache_set_list(self, key: str, value: list[dict[str, Any]]) -> None:
+        cache = get_cache()
+        if cache is None or not key:
+            return
+        await cache.set(key, value, settings.redis_cache_ttl_db_list_seconds)
+
+    async def _cache_delete(self, key: str) -> None:
+        cache = get_cache()
+        if cache is None or not key:
+            return
+        await cache.delete(key)
+
+    async def _invalidate_sessions_list_cache(self, user_id: str) -> None:
+        key = self._cache_key(self._CACHE_PREFIX_SESSIONS_LIST, user_id)
+        await self._cache_delete(key)
+
+    async def _invalidate_rag_resources_list_cache(self, owner_id: str, workspace_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_RAG_RESOURCES_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_rag_agents_list_cache(self, owner_id: str, workspace_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_RAG_AGENTS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_rag_chat_sessions_list_cache(self, owner_id: str, agent_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST,
+            f"{owner_id}:{agent_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_rag_chat_messages_list_cache(self, owner_id: str, session_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
+            f"{owner_id}:{session_id}",
+        )
+        await self._cache_delete(key)
 
     @staticmethod
     def _is_bad_request(exc: httpx.HTTPStatusError) -> bool:
@@ -248,6 +313,7 @@ class SupabaseSessionStore:
             "created_at": created_at,
         }
         await self._request("POST", "research_sessions", json_body=payload)
+        await self._invalidate_sessions_list_cache(user_id)
         return Session(
             session_id=session_id,
             title=title,
@@ -258,6 +324,11 @@ class SupabaseSessionStore:
 
     async def list_sessions(self, user_id: str) -> list[dict[str, str]]:
         """List lightweight session summaries for a user."""
+        cache_key = self._cache_key(self._CACHE_PREFIX_SESSIONS_LIST, user_id)
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._request(
             "GET",
             "research_sessions",
@@ -286,7 +357,7 @@ class SupabaseSessionStore:
         for run_row in runs_resp.json():
             latest_status_by_session.setdefault(run_row["session_id"], run_row.get("status", "completed"))
 
-        return [
+        result = [
             {
                 "session_id": row["id"],
                 "title": row.get("title") or "New session",
@@ -295,29 +366,11 @@ class SupabaseSessionStore:
             }
             for row in rows
         ]
+        await self._cache_set_list(cache_key, result)
+        return result
 
     async def get_session(self, session_id: str, user_id: str) -> Session | None:
-        cache = get_cache()
-        cache_key = f"session:{user_id}:{session_id}" if cache is not None else None
-        if cache is not None and cache_key is not None:
-            cached = await cache.get(cache_key)
-            if cached is not None:
-                try:
-                    return self._session_from_dict(cached)
-                except (KeyError, TypeError, ValueError) as exc:
-                    logger.warning(
-                        "[cache] failed to deserialize session key=%r: %s",
-                        cache_key,
-                        exc,
-                    )
-        result = await self._fetch_session_from_db(session_id, user_id)
-        if cache is not None and cache_key is not None and result is not None:
-            await cache.set(
-                cache_key,
-                result.to_dict(),
-                settings.redis_cache_ttl_session_seconds,
-            )
-        return result
+        return await self._fetch_session_from_db(session_id, user_id)
 
     async def _fetch_session_from_db(
         self, session_id: str, user_id: str
@@ -380,54 +433,6 @@ class SupabaseSessionStore:
             created_at=session_row.get("created_at", ""),
         )
 
-    @staticmethod
-    def _session_from_dict(data: dict[str, Any]) -> Session:
-        """Reconstruct a Session dataclass from its `to_dict()` representation."""
-        from src.sessions import ConversationTurn, Session, SessionRun
-
-        runs = [
-            SessionRun(
-                run_id=row["run_id"],
-                query=row.get("query", ""),
-                source_urls=row.get("source_urls") or [],
-                report=row.get("report", ""),
-                status=row.get("status", "completed"),
-                error_details=row.get("error_details"),
-                latest_node=row.get("latest_node"),
-                latest_event_at=row.get("latest_event_at"),
-                partial_report=row.get("partial_report") or "",
-                langfuse_trace_id=row.get("langfuse_trace_id"),
-                langfuse_observation_id=row.get("langfuse_observation_id"),
-                feedback_submitted_at=row.get("feedback_submitted_at"),
-                feedback_helpful=row.get("feedback_helpful"),
-                created_at=row.get("created_at", ""),
-            )
-            for row in data.get("runs") or []
-        ]
-        conversation = [
-            ConversationTurn(
-                role=row.get("role", "user"),
-                content=row.get("content", ""),
-                run_id=row.get("run_id"),
-                citations=row.get("citations") or [],
-                suggestions=row.get("suggestions") or [],
-                created_at=row.get("created_at", ""),
-            )
-            for row in data.get("conversation") or []
-        ]
-        return Session(
-            session_id=data["session_id"],
-            title=data.get("title") or "New session",
-            runs=runs,
-            conversation=conversation,
-            created_at=data.get("created_at", ""),
-        )
-
-    async def _invalidate_session_cache(self, user_id: str, session_id: str) -> None:
-        cache = get_cache()
-        if cache is not None:
-            await cache.delete(f"session:{user_id}:{session_id}")
-
     async def update_session_title(
         self,
         *,
@@ -446,7 +451,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
-        await self._invalidate_session_cache(user_id, session_id)
+        await self._invalidate_sessions_list_cache(user_id)
         return bool(rows)
 
     async def delete_session(
@@ -465,7 +470,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
-        await self._invalidate_session_cache(user_id, session_id)
+        await self._invalidate_sessions_list_cache(user_id)
         return bool(rows)
 
     async def append_run(
@@ -498,7 +503,7 @@ class SupabaseSessionStore:
             params=None,
             payload=payload,
         )
-        await self._invalidate_session_cache(user_id, session_id)
+        await self._invalidate_sessions_list_cache(user_id)
 
     async def create_session_run(
         self,
@@ -530,7 +535,7 @@ class SupabaseSessionStore:
             params=None,
             payload=payload,
         )
-        await self._invalidate_session_cache(user_id, session_id)
+        await self._invalidate_sessions_list_cache(user_id)
 
     async def update_session_run(
         self,
@@ -552,7 +557,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
-        await self._invalidate_session_cache(user_id, session_id)
+        await self._invalidate_sessions_list_cache(user_id)
         return bool(rows)
 
     async def get_session_run(
@@ -594,7 +599,6 @@ class SupabaseSessionStore:
             "created_at": turn.created_at,
         }
         await self._request("POST", "conversation_turns", json_body=payload)
-        await self._invalidate_session_cache(user_id, session_id)
 
     # ------------------------------------------------------------------
     # RAG resources + jobs
@@ -615,8 +619,20 @@ class SupabaseSessionStore:
             "updated_at": payload["updated_at"],
         }
         await self._request("POST", "rag_resources", json_body=body)
+        await self._invalidate_rag_resources_list_cache(
+            payload["owner_id"],
+            payload["workspace_id"],
+        )
 
     async def list_rag_resources(self, *, owner_id: str, workspace_id: str) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_RAG_RESOURCES_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._request(
             "GET",
             "rag_resources",
@@ -631,7 +647,9 @@ class SupabaseSessionStore:
             },
         )
         rows = response.json()
-        return [self._map_rag_resource_row(row) for row in rows]
+        result = [self._map_rag_resource_row(row) for row in rows]
+        await self._cache_set_list(cache_key, result)
+        return result
 
     async def get_rag_resource(
         self,
@@ -709,6 +727,12 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            row = rows[0]
+            owner_id = str(row.get("owner_id", ""))
+            workspace_id = str(row.get("workspace_id", ""))
+            if owner_id and workspace_id:
+                await self._invalidate_rag_resources_list_cache(owner_id, workspace_id)
         return bool(rows)
 
     async def delete_rag_resource(
@@ -729,6 +753,8 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            await self._invalidate_rag_resources_list_cache(owner_id, workspace_id)
         return bool(rows)
 
     async def create_rag_ingestion_job(self, payload: dict[str, Any]) -> None:
@@ -1014,8 +1040,20 @@ class SupabaseSessionStore:
             "updated_at": payload["updated_at"],
         }
         await self._request("POST", "rag_agents", json_body=body)
+        await self._invalidate_rag_agents_list_cache(
+            payload["owner_id"],
+            payload["workspace_id"],
+        )
 
     async def list_rag_agents(self, *, owner_id: str, workspace_id: str) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_RAG_AGENTS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._request(
             "GET",
             "rag_agents",
@@ -1036,10 +1074,12 @@ class SupabaseSessionStore:
         for link in links:
             by_agent.setdefault(link["agent_id"], []).append(link["resource_id"])
 
-        return [
+        result = [
             self._map_rag_agent_row(row, by_agent.get(row["id"], []))
             for row in agents
         ]
+        await self._cache_set_list(cache_key, result)
+        return result
 
     async def get_rag_agent(
         self,
@@ -1088,6 +1128,8 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            await self._invalidate_rag_agents_list_cache(owner_id, workspace_id)
         return bool(rows)
 
     async def replace_rag_agent_resources(
@@ -1119,6 +1161,7 @@ class SupabaseSessionStore:
             for resource_id in resource_ids
         ]
         await self._request("POST", "rag_agent_resources", json_body=rows)
+        await self._invalidate_rag_agents_list_cache(owner_id, workspace_id)
 
     async def _list_agent_links(self, agent_ids: list[str]) -> list[dict[str, str]]:
         if not agent_ids:
@@ -1149,6 +1192,10 @@ class SupabaseSessionStore:
             "created_at": datetime.now(UTC).isoformat(),
         }
         await self._request("POST", "rag_chat_sessions", json_body=body)
+        await self._invalidate_rag_chat_sessions_list_cache(
+            payload["owner_id"],
+            payload["agent_id"],
+        )
 
     async def get_rag_chat_session(
         self,
@@ -1188,6 +1235,14 @@ class SupabaseSessionStore:
         agent_id: str,
         owner_id: str,
     ) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST,
+            f"{owner_id}:{agent_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._request(
             "GET",
             "rag_chat_sessions",
@@ -1237,11 +1292,13 @@ class SupabaseSessionStore:
                 }
             )
 
-        return sorted(
+        result = sorted(
             summaries,
             key=lambda summary: summary.get("last_message_at") or summary.get("created_at") or "",
             reverse=True,
         )
+        await self._cache_set_list(cache_key, result)
+        return result
 
     async def update_rag_chat_session_title(
         self,
@@ -1263,6 +1320,8 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
         return bool(rows)
 
     async def update_rag_chat_session_web_search_enabled(
@@ -1285,6 +1344,8 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
         return bool(rows)
 
     async def delete_rag_chat_session(
@@ -1305,6 +1366,9 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        if rows:
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+            await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
         return bool(rows)
 
     async def create_rag_chat_message(self, payload: dict[str, Any]) -> None:
@@ -1320,8 +1384,24 @@ class SupabaseSessionStore:
             "created_at": payload["created_at"],
         }
         await self._request("POST", "rag_chat_messages", json_body=body)
+        await self._invalidate_rag_chat_messages_list_cache(
+            payload["owner_id"],
+            payload["session_id"],
+        )
+        await self._invalidate_rag_chat_sessions_list_cache(
+            payload["owner_id"],
+            payload["agent_id"],
+        )
 
     async def list_rag_chat_messages(self, *, session_id: str, owner_id: str) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
+            f"{owner_id}:{session_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
         response = await self._request(
             "GET",
             "rag_chat_messages",
@@ -1333,7 +1413,7 @@ class SupabaseSessionStore:
             },
         )
         rows = response.json()
-        return [
+        result = [
             {
                 "message_id": row["id"],
                 "session_id": row["session_id"],
@@ -1347,6 +1427,8 @@ class SupabaseSessionStore:
             }
             for row in rows
         ]
+        await self._cache_set_list(cache_key, result)
+        return result
 
     @staticmethod
     def _map_rag_resource_row(row: dict[str, Any]) -> dict[str, Any]:
