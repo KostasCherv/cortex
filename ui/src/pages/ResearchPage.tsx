@@ -45,6 +45,16 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   const pollTimerRef = useRef<number | null>(null)
   const runStreamAbortRef = useRef<AbortController | null>(null)
 
+  const refreshBillingUsage = useCallback(async () => {
+    if (!authSession?.access_token) return
+    try {
+      const usage = await getBillingUsage(authSession.access_token)
+      setBillingUsage(usage)
+    } catch {
+      // Keep current UI state if usage refresh fails.
+    }
+  }, [authSession?.access_token])
+
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
       window.clearInterval(pollTimerRef.current)
@@ -183,11 +193,8 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   }, [stopPolling, stopRunStream])
 
   useEffect(() => {
-    if (!authSession?.access_token) return
-    void getBillingUsage(authSession.access_token)
-      .then(setBillingUsage)
-      .catch(() => {})
-  }, [authSession?.access_token])
+    void refreshBillingUsage()
+  }, [refreshBillingUsage])
 
   const openSession = useCallback(
     async (selectedSessionId: string) => {
@@ -274,6 +281,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
           { query: normalizedQuery, use_vector_store: useVectorStore },
           authSession.access_token,
         )
+        void refreshBillingUsage()
         setRunId(started.run_id)
         setRunStatus('running')
         onSessionsChanged()
@@ -285,7 +293,15 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
         setRunStatus('failed')
       }
     },
-    [authSession, onSessionActivated, onSessionsChanged, startRunStream, stopPolling, stopRunStream],
+    [
+      authSession,
+      onSessionActivated,
+      onSessionsChanged,
+      refreshBillingUsage,
+      startRunStream,
+      stopPolling,
+      stopRunStream,
+    ],
   )
 
   const handleFeedbackSubmit = useCallback(
@@ -400,6 +416,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
                   accessToken={authSession?.access_token ?? null}
                   conversation={conversation}
                   onConversationUpdate={handleConversationUpdate}
+                  onUsageChanged={refreshBillingUsage}
                 />
               </div>
             )}

@@ -15,6 +15,7 @@ type FollowupChatProps = {
   accessToken: string | null
   conversation: ConversationTurn[]
   onConversationUpdate: (turn: ConversationTurn) => void
+  onUsageChanged?: () => void
 }
 
 function CitationBadges({ citations }: { citations: Citation[] }) {
@@ -48,6 +49,7 @@ export function FollowupChat({
   accessToken,
   conversation,
   onConversationUpdate,
+  onUsageChanged,
 }: FollowupChatProps) {
   const [question, setQuestion] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -148,9 +150,12 @@ export function FollowupChat({
         if (abortRef.current === controller) {
           abortRef.current = null
         }
+        if (!controller.signal.aborted) {
+          onUsageChanged?.()
+        }
       }
     },
-    [question, streaming, sessionId, runId, accessToken, onConversationUpdate],
+    [question, streaming, sessionId, runId, accessToken, onConversationUpdate, onUsageChanged],
   )
 
   const handleKeyDown = useCallback(
