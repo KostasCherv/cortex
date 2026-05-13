@@ -26,6 +26,7 @@ def test_get_authenticated_user_accepts_valid_jwt_payload():
     mock_key.key = "public-key"
 
     with (
+        patch("src.auth._jwks_url", return_value="https://example.supabase.co/auth/v1/.well-known/jwks.json"),
         patch("src.auth.jwt.PyJWKClient") as mock_jwk_client_cls,
         patch("src.auth.jwt.decode") as mock_decode,
     ):
@@ -46,6 +47,7 @@ def test_get_authenticated_user_rejects_invalid_jwt():
         credentials="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.bad-signature",
     )
     with (
+        patch("src.auth._jwks_url", return_value="https://example.supabase.co/auth/v1/.well-known/jwks.json"),
         patch("src.auth.jwt.PyJWKClient") as mock_jwk_client_cls,
         patch("src.auth._verify_with_supabase_userinfo", side_effect=HTTPException(status_code=401, detail="Invalid or expired token.")),
     ):
@@ -67,6 +69,7 @@ def test_get_authenticated_user_handles_jwks_client_error_with_fallback():
         credentials="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.bad-kid",
     )
     with (
+        patch("src.auth._jwks_url", return_value="https://example.supabase.co/auth/v1/.well-known/jwks.json"),
         patch("src.auth.jwt.PyJWKClient") as mock_jwk_client_cls,
         patch("src.auth._verify_with_supabase_userinfo", return_value=MagicMock(user_id="user-1", email="u@example.com")) as mock_fallback,
     ):

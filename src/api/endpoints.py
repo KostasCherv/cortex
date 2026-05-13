@@ -25,6 +25,7 @@ from src.observability.langfuse import (
 from src.observability import end_workflow_run, start_workflow_run
 from src.config import settings
 from src.auth import AuthenticatedUser, get_authenticated_user
+from src.cache.client import get_cache
 from src.sessions import (
     Session,
     SessionRun,
@@ -107,20 +108,29 @@ async def validate_session_store_configuration() -> None:
         logger.info(
             "[startup] Supabase session persistence is disabled; non-session routes remain available."
         )
-        return
-
-    if not has_url or not has_key:
+    elif not has_url or not has_key:
         logger.warning(
             "[startup] Supabase session persistence is partially configured; "
             "session endpoints may fail until SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both set."
         )
-        return
+    else:
+        ensure_store_initialized()
+        try:
+            await ensure_rag_storage_ready()
+        except Exception as exc:
+            logger.warning("[startup] RAG storage readiness check failed: %s", exc)
 
-    ensure_store_initialized()
-    try:
-        await ensure_rag_storage_ready()
-    except Exception as exc:
-        logger.warning("[startup] RAG storage readiness check failed: %s", exc)
+    cache = get_cache()
+    if cache is None:
+        logger.info("[startup] Redis caching is disabled (REDIS_URL not set).")
+    else:
+        reachable = await cache.ping()
+        if reachable:
+            logger.info("[startup] Redis cache connected.")
+        else:
+            logger.warning(
+                "[startup] Redis is configured but unreachable — caching disabled for this run."
+            )
 
 
 # ---------------------------------------------------------------------------

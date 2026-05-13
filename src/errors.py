@@ -23,3 +23,7 @@ class VectorStoreError(ResearchAgentError):
 
 class ConfigurationError(ResearchAgentError):
     """Raised when required configuration is missing or invalid."""
+
+
+class CacheError(ResearchAgentError):
+    """Raised when a Redis cache operation fails."""

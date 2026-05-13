@@ -13,7 +13,7 @@ from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
 from src.prompts.registry import prompt_registry
-from src.tools.search import perform_search
+from src.tools.search import perform_search_cached
 from src.tools.vector_store import VectorStoreManager
 
 logger = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ async def search_node(state: ResearchState) -> ResearchState:
                 inputs={"query": query},
                 tags=["external", "tavily"],
             ):
-                results = await asyncio.to_thread(perform_search, query)
+                results = await perform_search_cached(query)
             logger.info("[search_node] got %d results", len(results))
             retrieved_contents = [
                 {

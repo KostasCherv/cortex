@@ -26,7 +26,7 @@ def test_graph_invoke_with_error_reaches_abort(monkeypatch):
     from src.errors import SearchError
 
     with (
-        patch("src.graph.nodes.perform_search", side_effect=SearchError("no search")),
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, side_effect=SearchError("no search")),
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
         mock_vs = MagicMock()
@@ -61,7 +61,7 @@ def test_graph_invoke_happy_path(monkeypatch):
     ]
 
     with (
-        patch("src.graph.nodes.perform_search", return_value=search_result),
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, return_value=search_result),
         patch("src.graph.nodes.get_llm", return_value=mock_llm),
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
@@ -104,7 +104,7 @@ def test_graph_invoke_continues_when_memory_lookup_fails():
     ]
 
     with (
-        patch("src.graph.nodes.perform_search", return_value=search_result),
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, return_value=search_result),
         patch("src.graph.nodes.get_llm", return_value=mock_llm),
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from src.cache.client import get_cache
 from src.config import settings
 
 if TYPE_CHECKING:
@@ -296,6 +297,24 @@ class SupabaseSessionStore:
         ]
 
     async def get_session(self, session_id: str, user_id: str) -> Session | None:
+        cache = get_cache()
+        cache_key = f"session:{user_id}:{session_id}" if cache is not None else None
+        if cache is not None and cache_key is not None:
+            cached = await cache.get(cache_key)
+            if cached is not None:
+                return self._session_from_dict(cached)
+        result = await self._fetch_session_from_db(session_id, user_id)
+        if cache is not None and cache_key is not None and result is not None:
+            await cache.set(
+                cache_key,
+                result.to_dict(),
+                settings.redis_cache_ttl_session_seconds,
+            )
+        return result
+
+    async def _fetch_session_from_db(
+        self, session_id: str, user_id: str
+    ) -> Session | None:
         from src.sessions import ConversationTurn, Session
 
         session_resp = await self._request(
@@ -354,6 +373,54 @@ class SupabaseSessionStore:
             created_at=session_row.get("created_at", ""),
         )
 
+    @staticmethod
+    def _session_from_dict(data: dict[str, Any]) -> Session:
+        """Reconstruct a Session dataclass from its `to_dict()` representation."""
+        from src.sessions import ConversationTurn, Session, SessionRun
+
+        runs = [
+            SessionRun(
+                run_id=row["run_id"],
+                query=row.get("query", ""),
+                source_urls=row.get("source_urls") or [],
+                report=row.get("report", ""),
+                status=row.get("status", "completed"),
+                error_details=row.get("error_details"),
+                latest_node=row.get("latest_node"),
+                latest_event_at=row.get("latest_event_at"),
+                partial_report=row.get("partial_report") or "",
+                langfuse_trace_id=row.get("langfuse_trace_id"),
+                langfuse_observation_id=row.get("langfuse_observation_id"),
+                feedback_submitted_at=row.get("feedback_submitted_at"),
+                feedback_helpful=row.get("feedback_helpful"),
+                created_at=row.get("created_at", ""),
+            )
+            for row in data.get("runs") or []
+        ]
+        conversation = [
+            ConversationTurn(
+                role=row.get("role", "user"),
+                content=row.get("content", ""),
+                run_id=row.get("run_id"),
+                citations=row.get("citations") or [],
+                suggestions=row.get("suggestions") or [],
+                created_at=row.get("created_at", ""),
+            )
+            for row in data.get("conversation") or []
+        ]
+        return Session(
+            session_id=data["session_id"],
+            title=data.get("title") or "New session",
+            runs=runs,
+            conversation=conversation,
+            created_at=data.get("created_at", ""),
+        )
+
+    async def _invalidate_session_cache(self, user_id: str, session_id: str) -> None:
+        cache = get_cache()
+        if cache is not None:
+            await cache.delete(f"session:{user_id}:{session_id}")
+
     async def update_session_title(
         self,
         *,
@@ -372,6 +439,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        await self._invalidate_session_cache(user_id, session_id)
         return bool(rows)
 
     async def delete_session(
@@ -390,6 +458,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        await self._invalidate_session_cache(user_id, session_id)
         return bool(rows)
 
     async def append_run(
@@ -422,6 +491,7 @@ class SupabaseSessionStore:
             params=None,
             payload=payload,
         )
+        await self._invalidate_session_cache(user_id, session_id)
 
     async def create_session_run(
         self,
@@ -453,6 +523,7 @@ class SupabaseSessionStore:
             params=None,
             payload=payload,
         )
+        await self._invalidate_session_cache(user_id, session_id)
 
     async def update_session_run(
         self,
@@ -474,6 +545,7 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
+        await self._invalidate_session_cache(user_id, session_id)
         return bool(rows)
 
     async def get_session_run(
@@ -515,6 +587,7 @@ class SupabaseSessionStore:
             "created_at": turn.created_at,
         }
         await self._request("POST", "conversation_turns", json_body=payload)
+        await self._invalidate_session_cache(user_id, session_id)
 
     # ------------------------------------------------------------------
     # RAG resources + jobs

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 # ---------------------------------------------------------------------------
 
 def test_search_node_populates_results():
-    with patch("src.graph.nodes.perform_search") as mock_search:
+    with patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search:
         mock_search.return_value = [
             {"url": "https://a.com", "title": "A", "content": "snippet", "raw_content": "full text"}
         ]
@@ -24,7 +24,7 @@ def test_search_node_populates_results():
 
 
 def test_search_node_falls_back_to_content_when_no_raw_content():
-    with patch("src.graph.nodes.perform_search") as mock_search:
+    with patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search:
         mock_search.return_value = [
             {"url": "https://a.com", "title": "A", "content": "snippet", "raw_content": ""}
         ]
@@ -36,7 +36,7 @@ def test_search_node_falls_back_to_content_when_no_raw_content():
 
 def test_search_node_sets_error_on_failure():
     from src.errors import SearchError
-    with patch("src.graph.nodes.perform_search", side_effect=SearchError("boom")):
+    with patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, side_effect=SearchError("boom")):
         from src.graph.nodes import search_node
         state = asyncio.run(search_node({"query": "fail", "error": None}))
 
@@ -51,7 +51,7 @@ def test_search_node_sets_error_on_failure():
 
 def test_search_and_memory_node_runs_both_concurrently():
     with (
-        patch("src.graph.nodes.perform_search") as mock_search,
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search,
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
         mock_search.return_value = [
@@ -73,7 +73,7 @@ def test_search_and_memory_node_runs_both_concurrently():
 def test_search_and_memory_node_propagates_search_error():
     from src.errors import SearchError
     with (
-        patch("src.graph.nodes.perform_search", side_effect=SearchError("no search")),
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, side_effect=SearchError("no search")),
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
         mock_vs = MagicMock()
@@ -89,7 +89,7 @@ def test_search_and_memory_node_propagates_search_error():
 
 def test_search_and_memory_node_continues_when_memory_fails():
     with (
-        patch("src.graph.nodes.perform_search") as mock_search,
+        patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search,
         patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
     ):
         mock_search.return_value = [

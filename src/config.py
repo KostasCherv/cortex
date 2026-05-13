@@ -169,5 +169,23 @@ class Settings(BaseSettings):
         description="Return URL from Stripe customer portal.",
     )
 
+    # Redis cache
+    redis_url: str = Field(
+        default="",
+        description="Redis connection URL (e.g. redis://localhost:6379/0). Leave empty to disable caching.",
+    )
+    redis_cache_ttl_auth_seconds: int = Field(
+        default=300,
+        description="TTL in seconds for cached JWT auth token verification results.",
+    )
+    redis_cache_ttl_search_seconds: int = Field(
+        default=1800,
+        description="TTL in seconds for cached Tavily web search results.",
+    )
+    redis_cache_ttl_session_seconds: int = Field(
+        default=60,
+        description="TTL in seconds for cached session reads.",
+    )
+
 
 settings = Settings()

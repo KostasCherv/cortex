@@ -36,6 +36,7 @@ dependencies = [
     "llama-index-embeddings-ollama>=0.3.0",
     "llama-index-vector-stores-pinecone>=0.4.0",
     "stripe>=11.0.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
