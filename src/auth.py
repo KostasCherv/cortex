@@ -7,6 +7,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from src.cache.client import get_cache
 from src.config import settings
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -33,6 +34,17 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Supabase URL is not configured.",
         )
+
+    cache = get_cache()
+    cache_key = ""
+    if cache is not None:
+        cache_key = cache.hash_key("auth:userinfo", token.strip())
+        cached = await cache.get(cache_key)
+        if isinstance(cached, dict) and cached.get("user_id"):
+            return AuthenticatedUser(
+                user_id=str(cached["user_id"]),
+                email=cached.get("email"),
+            )
 
     apikey = settings.supabase_service_role_key or ""
     try:
@@ -62,6 +74,12 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token subject.",
+        )
+    if cache is not None and cache_key:
+        await cache.set(
+            cache_key,
+            {"user_id": user_id, "email": data.get("email")},
+            settings.redis_cache_ttl_auth_seconds,
         )
     return AuthenticatedUser(user_id=user_id, email=data.get("email"))
 

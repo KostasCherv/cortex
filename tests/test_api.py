@@ -451,13 +451,14 @@ def test_execute_research_run_marks_completed_and_records():
 
     session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
     mock_update = AsyncMock(return_value=True)
-    mock_manager = MagicMock()
+    mock_graph_store = MagicMock()
+    mock_graph_store.ingest_document.return_value = 1
 
     with (
         patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
         patch("src.api.endpoints.build_graph", return_value=FakeGraph()),
         patch("src.api.endpoints.update_session_run", new=mock_update),
-        patch("src.api.endpoints.VectorStoreManager", return_value=mock_manager),
+        patch("src.api.endpoints.Neo4jGraphStore", return_value=mock_graph_store),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
@@ -476,7 +477,7 @@ def test_execute_research_run_marks_completed_and_records():
         and call.kwargs.get("patch", {}).get("report") == "Final report"
         for call in mock_update.await_args_list
     )
-    mock_manager.save_source_chunks.assert_called_once()
+    assert mock_graph_store.ingest_document.call_count >= 1
 
 
 def test_execute_research_run_marks_failed_on_error():
@@ -757,10 +758,17 @@ def test_followup_stream_includes_suggestions_event():
 
     with (
         patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.VectorStoreManager"),
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", side_effect=get_llm_side_effect),
     ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(
+            context="ctx",
+            chunks=[{"text": "Evidence", "source_url": "https://a.com", "source_title": "A"}],
+            entities=["a"],
+        )
+        mock_graph_cls.return_value = mock_graph
         response = client.post(
             "/sessions/session-1/followup",
             json={"question": "What did you find?", "run_id": "run-1"},

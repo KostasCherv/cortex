@@ -56,6 +56,32 @@ class Settings(BaseSettings):
         default="research-agent", description="Pinecone index name"
     )
 
+    # Graph store (Neo4j)
+    neo4j_uri: str = Field(
+        default="",
+        description="Neo4j Bolt URI (e.g. neo4j://localhost:7687).",
+    )
+    neo4j_username: str = Field(
+        default="",
+        description="Neo4j username.",
+    )
+    neo4j_password: str = Field(
+        default="",
+        description="Neo4j password.",
+    )
+    neo4j_database: str = Field(
+        default="neo4j",
+        description="Neo4j database name.",
+    )
+    graph_rag_top_k: int = Field(
+        default=8,
+        description="Top chunks to keep after graph-aware score fusion.",
+    )
+    graph_rag_max_hops: int = Field(
+        default=2,
+        description="Max RELATES_TO hop expansion during graph retrieval (1-2).",
+    )
+
     # API
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
@@ -177,6 +203,14 @@ class Settings(BaseSettings):
     redis_cache_ttl_db_list_seconds: int = Field(
         default=30,
         description="TTL in seconds for cached DB-heavy list/read-all responses.",
+    )
+    redis_cache_ttl_auth_seconds: int = Field(
+        default=300,
+        description="TTL in seconds for cached auth userinfo lookups.",
+    )
+    redis_cache_ttl_search_seconds: int = Field(
+        default=1800,
+        description="TTL in seconds for cached web search responses.",
     )
 
 

@@ -6,6 +6,7 @@ import functools
 import logging
 from typing import Callable, TypeVar
 
+from src.cache.client import get_cache
 from src.config import settings
 from src.errors import SearchError
 
@@ -87,8 +88,20 @@ def _perform_search_uncached(query: str, max_results: int | None = None) -> list
 async def perform_search_cached(
     query: str, max_results: int | None = None
 ) -> list[dict]:
-    """Async compatibility wrapper around direct Tavily search."""
-    return await asyncio.to_thread(_perform_search_uncached, query, max_results)
+    """Cached async wrapper around direct Tavily search."""
+    normalized_query = " ".join(query.strip().lower().split())
+    cache = get_cache()
+    if cache is None:
+        return await asyncio.to_thread(_perform_search_uncached, query, max_results)
+
+    cache_key = cache.hash_key("search:query", normalized_query)
+    cached = await cache.get(cache_key)
+    if isinstance(cached, list):
+        return cached
+
+    results = await asyncio.to_thread(_perform_search_uncached, query, max_results)
+    await cache.set(cache_key, results, settings.redis_cache_ttl_search_seconds)
+    return results
 
 
 # Synchronous alias preserved for backwards compatibility with existing tests/CLI paths

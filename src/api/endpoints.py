@@ -42,7 +42,7 @@ from src.sessions import (
     ensure_store_initialized,
     get_session_run,
 )
-from src.tools.vector_store import VectorStoreManager
+from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
@@ -139,6 +139,7 @@ async def validate_session_store_configuration() -> None:
 
 class ResearchRequest(BaseModel):
     query: str
+    # Deprecated compatibility flag. Graph-first persistence/retrieval is always active.
     use_vector_store: bool = False
 
 
@@ -516,6 +517,13 @@ async def _stream_research(
                 "data": {"error": str(exc)},
             }
             yield f"data: {json.dumps(error_payload)}\n\n"
+        finally:
+            if not trace_ctx.ended:
+                end_workflow_run(
+                    trace_ctx,
+                    status="error",
+                    error="stream exited before workflow trace was explicitly ended",
+                )
 
 
 async def _record_session_run(
@@ -525,7 +533,7 @@ async def _record_session_run(
     query: str,
     final_state: dict,
 ) -> None:
-    """Finalize an existing run with metadata and source chunks."""
+    """Finalize an existing run with metadata."""
 
     retrieved = final_state.get("retrieved_contents") or []
     summaries = final_state.get("summaries") or []
@@ -550,18 +558,68 @@ async def _record_session_run(
             f"Could not finalize run '{run_id}' for session '{session.session_id}'."
         )
 
-    # Persist source chunks for follow-up retrieval
-    sources_to_chunk = retrieved if retrieved else summaries
-    if sources_to_chunk:
+
+async def _persist_graph_artifacts_after_run(
+    *,
+    session_id: str,
+    user_id: str,
+    run_id: str,
+    query: str,
+    retrieved: list[dict],
+    report_text: str,
+) -> None:
+    """Best-effort Neo4j persistence after run completion.
+
+    This intentionally runs outside the critical path of run status/tracing finalization.
+    """
+    graph_store = Neo4jGraphStore()
+    workspace_id = user_id
+    for idx, source in enumerate(retrieved):
+        text = str(source.get("raw_text", "")).strip()
+        url = str(source.get("url", "")).strip()
+        title = str(source.get("title", "")).strip() or url or f"source-{idx + 1}"
+        if not text:
+            continue
+        document_id = f"run:{run_id}:source:{idx}"
         try:
-            manager = VectorStoreManager()
-            manager.save_source_chunks(
-                run_id=run_id,
-                session_id=session.session_id,
-                sources=sources_to_chunk,
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    graph_store.ingest_document,
+                    document_id=document_id,
+                    source_type="web_run",
+                    owner_id=user_id,
+                    workspace_id=workspace_id,
+                    title=title,
+                    source_url=url,
+                    text=text,
+                    session_id=session_id,
+                    run_id=run_id,
+                ),
+                timeout=20.0,
             )
         except Exception as exc:
-            logger.warning("[session] could not save source chunks: %s", exc)
+            logger.warning("[session] could not persist web source in graph store: %s", exc)
+
+    if report_text:
+        report_doc_id = f"run:{run_id}:report"
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    graph_store.ingest_document,
+                    document_id=report_doc_id,
+                    source_type="report",
+                    owner_id=user_id,
+                    workspace_id=workspace_id,
+                    title=f"Report: {query[:120]}",
+                    source_url="",
+                    text=report_text,
+                    session_id=session_id,
+                    run_id=run_id,
+                ),
+                timeout=20.0,
+            )
+        except Exception as exc:
+            logger.warning("[session] could not persist report in graph store: %s", exc)
 
 
 async def _execute_research_run(
@@ -705,6 +763,17 @@ async def _execute_research_run(
                     "has_error": bool(final_node_state.get("error")),
                 },
             )
+            # Neo4j persistence is intentionally decoupled from run completion/tracing.
+            asyncio.create_task(
+                _persist_graph_artifacts_after_run(
+                    session_id=session.session_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    query=query,
+                    retrieved=final_node_state.get("retrieved_contents") or [],
+                    report_text=str(final_node_state.get("report", "")).strip(),
+                )
+            )
         except Exception as exc:
             try:
                 await update_session_run(
@@ -728,6 +797,13 @@ async def _execute_research_run(
             logger.exception("[run] end run_id=%s status=failed error=%s", run_id, exc)
             end_workflow_run(trace_ctx, status="error", error=str(exc))
             raise
+        finally:
+            if not trace_ctx.ended:
+                end_workflow_run(
+                    trace_ctx,
+                    status="error",
+                    error="background run exited before workflow trace was explicitly ended",
+                )
 
 
 async def _stream_session_run(
@@ -824,10 +900,18 @@ async def _stream_followup(
     run_id: str,
 ) -> AsyncGenerator[str, None]:
     """Retrieve run-scoped sources and stream a cited answer."""
-    # Retrieve relevant source chunks
+    # Retrieve run-scoped graph chunks with local entity expansion.
     try:
-        manager = VectorStoreManager()
-        chunks = manager.search_run_sources(question, run_id=run_id, n_results=5)
+        graph_store = Neo4jGraphStore()
+        result = await asyncio.to_thread(
+            graph_store.query_context,
+            query=question,
+            owner_id=user_id,
+            workspace_id=user_id,
+            run_id=run_id,
+            top_k=5,
+        )
+        chunks = result.chunks
     except Exception as exc:
         logger.warning("[followup] source retrieval failed: %s", exc)
         chunks = []

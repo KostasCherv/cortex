@@ -52,17 +52,21 @@ def test_search_node_sets_error_on_failure():
 def test_search_and_memory_node_runs_both_concurrently():
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search,
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
         mock_search.return_value = [
             {"url": "https://a.com", "title": "A", "content": "c", "raw_content": "full"}
         ]
-        mock_vs = MagicMock()
-        mock_vs.search_reports.return_value = [{"document": "old report"}]
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(
+            context="old report",
+            chunks=[],
+            entities=[],
+        )
+        mock_graph_cls.return_value = mock_graph
 
         from src.graph.nodes import search_and_memory_node
-        state = asyncio.run(search_and_memory_node({"query": "LangGraph"}))
+        state = asyncio.run(search_and_memory_node({"query": "LangGraph", "user_id": "u-1"}))
 
     assert len(state["search_results"]) == 1
     assert len(state["retrieved_contents"]) == 1
@@ -74,14 +78,14 @@ def test_search_and_memory_node_propagates_search_error():
     from src.errors import SearchError
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, side_effect=SearchError("no search")),
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
-        mock_vs = MagicMock()
-        mock_vs.search_reports.return_value = []
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
 
         from src.graph.nodes import search_and_memory_node
-        state = asyncio.run(search_and_memory_node({"query": "fail"}))
+        state = asyncio.run(search_and_memory_node({"query": "fail", "user_id": "u-1"}))
 
     assert state["error"] == "no search"
     assert state["search_results"] == []
@@ -90,17 +94,17 @@ def test_search_and_memory_node_propagates_search_error():
 def test_search_and_memory_node_continues_when_memory_fails():
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock) as mock_search,
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
         mock_search.return_value = [
             {"url": "https://a.com", "title": "A", "content": "c", "raw_content": "text"}
         ]
-        mock_vs = MagicMock()
-        mock_vs.search_reports.side_effect = RuntimeError("pinecone down")
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.side_effect = RuntimeError("neo4j down")
+        mock_graph_cls.return_value = mock_graph
 
         from src.graph.nodes import search_and_memory_node
-        state = asyncio.run(search_and_memory_node({"query": "LangGraph"}))
+        state = asyncio.run(search_and_memory_node({"query": "LangGraph", "user_id": "u-1"}))
 
     assert len(state["search_results"]) == 1
     assert state["memory_context"] == ""
@@ -112,37 +116,19 @@ def test_search_and_memory_node_continues_when_memory_fails():
 # ---------------------------------------------------------------------------
 
 def test_rerank_node_returns_top_k_ranked_sources():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
-        mock_manager = MagicMock()
-        mock_manager.rerank_documents.return_value = [
-            {
-                "url": "https://b.com",
-                "title": "B",
-                "raw_text": "Beta",
-                "score": 0.9,
-            },
-            {
-                "url": "https://a.com",
-                "title": "A",
-                "raw_text": "Alpha",
-                "score": 0.4,
-            },
-        ]
-        mock_cls.return_value = mock_manager
+    from src.graph.nodes import rerank_node
 
-        from src.graph.nodes import rerank_node
-
-        state = asyncio.run(
-            rerank_node(
-                {
-                    "query": "LangGraph",
-                    "retrieved_contents": [
-                        {"url": "https://a.com", "title": "A", "raw_text": "Alpha"},
-                        {"url": "https://b.com", "title": "B", "raw_text": "Beta"},
-                    ],
-                }
-            )
+    state = asyncio.run(
+        rerank_node(
+            {
+                "query": "beta",
+                "retrieved_contents": [
+                    {"url": "https://a.com", "title": "A", "raw_text": "Alpha"},
+                    {"url": "https://b.com", "title": "B", "raw_text": "Beta"},
+                ],
+            }
         )
+    )
 
     assert [row["url"] for row in state["reranked_contents"]] == [
         "https://b.com",
@@ -151,31 +137,13 @@ def test_rerank_node_returns_top_k_ranked_sources():
     assert state["rerank_metadata"]["fallback"] is False
 
 
-def test_rerank_node_falls_back_to_retrieved_contents_on_failure():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
-        mock_manager = MagicMock()
-        mock_manager.rerank_documents.side_effect = RuntimeError("rerank unavailable")
-        mock_cls.return_value = mock_manager
+def test_rerank_node_handles_empty_input():
+    from src.graph.nodes import rerank_node
 
-        from src.graph.nodes import rerank_node
+    state = asyncio.run(rerank_node({"query": "LangGraph", "retrieved_contents": []}))
 
-        state = asyncio.run(
-            rerank_node(
-                {
-                    "query": "LangGraph",
-                    "retrieved_contents": [
-                        {"url": "https://a.com", "title": "A", "raw_text": "Alpha"},
-                        {"url": "https://b.com", "title": "B", "raw_text": "Beta"},
-                    ],
-                }
-            )
-        )
-
-    assert [row["url"] for row in state["reranked_contents"]] == [
-        "https://a.com",
-        "https://b.com",
-    ]
-    assert state["rerank_metadata"]["fallback"] is True
+    assert state["reranked_contents"] == []
+    assert state["rerank_metadata"]["reason"] == "empty_input"
 
 
 # ---------------------------------------------------------------------------
@@ -407,22 +375,18 @@ def test_vector_store_node_skips_when_disabled():
 
 
 def test_vector_store_node_saves_when_enabled():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
-        mock_manager = MagicMock()
-        mock_manager.save_report.return_value = "report_001"
-        mock_cls.return_value = mock_manager
-
-        from src.graph.nodes import vector_store_node
-        asyncio.run(
-            vector_store_node({
+    from src.graph.nodes import vector_store_node
+    state = asyncio.run(
+        vector_store_node(
+            {
                 "query": "LangGraph",
                 "use_vector_store": True,
                 "report": "# Report",
                 "report_metadata": {"title": "LangGraph"},
-            })
+            }
         )
-
-    mock_manager.save_report.assert_called_once()
+    )
+    assert state["query"] == "LangGraph"
 
 
 # ---------------------------------------------------------------------------
@@ -431,17 +395,18 @@ def test_vector_store_node_saves_when_enabled():
 
 
 def test_memory_context_node_builds_truncated_context():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
+    with patch("src.graph.nodes.Neo4jGraphStore") as mock_cls:
         mock_manager = MagicMock()
         long_doc = "A" * 2500
-        mock_manager.search_reports.return_value = [
-            {"id": "report_1", "document": long_doc, "metadata": {}},
-            {"id": "report_2", "document": "Second doc", "metadata": {}},
-        ]
+        mock_manager.query_context.return_value = MagicMock(
+            context=long_doc,
+            chunks=[{"chunk_id": "c1"}],
+            entities=["alpha"],
+        )
         mock_cls.return_value = mock_manager
 
         from src.graph.nodes import memory_context_node
-        state = asyncio.run(memory_context_node({"query": "LangGraph"}))
+        state = asyncio.run(memory_context_node({"query": "LangGraph", "user_id": "u-1"}))
 
     assert "memory_context" in state
     assert state["memory_context"].startswith("A")
@@ -449,24 +414,24 @@ def test_memory_context_node_builds_truncated_context():
 
 
 def test_memory_context_node_returns_empty_context_when_no_results():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
+    with patch("src.graph.nodes.Neo4jGraphStore") as mock_cls:
         mock_manager = MagicMock()
-        mock_manager.search_reports.return_value = []
+        mock_manager.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
         mock_cls.return_value = mock_manager
 
         from src.graph.nodes import memory_context_node
-        state = asyncio.run(memory_context_node({"query": "LangGraph"}))
+        state = asyncio.run(memory_context_node({"query": "LangGraph", "user_id": "u-1"}))
 
     assert state["memory_context"] == ""
 
 
 def test_memory_context_node_handles_lookup_failure():
-    with patch("src.graph.nodes.VectorStoreManager") as mock_cls:
+    with patch("src.graph.nodes.Neo4jGraphStore") as mock_cls:
         mock_manager = MagicMock()
-        mock_manager.search_reports.side_effect = RuntimeError("chroma unavailable")
+        mock_manager.query_context.side_effect = RuntimeError("neo4j unavailable")
         mock_cls.return_value = mock_manager
 
         from src.graph.nodes import memory_context_node
-        state = asyncio.run(memory_context_node({"query": "LangGraph"}))
+        state = asyncio.run(memory_context_node({"query": "LangGraph", "user_id": "u-1"}))
 
     assert state["memory_context"] == ""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import random
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from uuid import uuid4
 from typing import Any, Iterator
@@ -126,11 +127,49 @@ def end_workflow_run(
 
     payload: dict[str, object] = {"status": status}
     if outputs:
-        payload["outputs"] = redact_payload(outputs, mode=settings.langsmith_redaction_mode)
+        payload["data"] = redact_payload(outputs, mode=settings.langsmith_redaction_mode)
+    redacted_error: str | None = None
     if error:
-        payload["error"] = redact_payload({"error": error}, mode=settings.langsmith_redaction_mode)
+        redacted_error = str(
+            redact_payload({"error": error}, mode=settings.langsmith_redaction_mode).get(
+                "error", error
+            )
+        )
     if hasattr(ctx.run, "end"):
-        ctx.run.end(outputs=payload)
+        ctx.run.end(outputs=payload, error=redacted_error)
+    patch = getattr(ctx.run, "patch", None)
+    if callable(patch):
+        try:
+            patch()
+        except Exception:
+            pass
+    wait = getattr(ctx.run, "wait", None)
+    if callable(wait):
+        try:
+            wait()
+        except Exception:
+            pass
+
+    client = getattr(ctx.run, "ls_client", None) or _get_langsmith_client()
+    run_id = getattr(ctx.run, "id", None)
+    if client is not None and run_id is not None:
+        try:
+            client.update_run(
+                run_id=run_id,
+                end_time=datetime.now(UTC),
+                outputs=payload,
+                error=redacted_error,
+            )
+        except Exception:
+            # Best effort update; end() + patch()/wait() above are primary path.
+            pass
+    flush = getattr(client, "flush", None)
+    if callable(flush):
+        try:
+            flush()
+        except Exception:
+            # Best effort flush; run has already been ended above.
+            pass
     ctx.ended = True
 
 

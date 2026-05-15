@@ -27,16 +27,16 @@ def test_graph_invoke_with_error_reaches_abort(monkeypatch):
 
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, side_effect=SearchError("no search")),
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
-        mock_vs = MagicMock()
-        mock_vs.search_reports.return_value = []
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
 
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "test", "use_vector_store": False, "error": None})
+            graph.ainvoke({"query": "test", "use_vector_store": False, "error": None, "user_id": "u-1"})
         )
 
     # Pipeline should abort and set an error
@@ -63,23 +63,15 @@ def test_graph_invoke_happy_path(monkeypatch):
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, return_value=search_result),
         patch("src.graph.nodes.get_llm", return_value=mock_llm),
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
-        mock_vs = MagicMock()
-        mock_vs.search_reports.return_value = []
-        mock_vs.rerank_documents.return_value = [
-            {
-                "url": "https://example.com",
-                "title": "Example",
-                "raw_text": "Full text",
-                "score": 0.9,
-            }
-        ]
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None})
+            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None, "user_id": "u-1"})
         )
 
     assert "report" in final
@@ -106,24 +98,16 @@ def test_graph_invoke_continues_when_memory_lookup_fails():
     with (
         patch("src.graph.nodes.perform_search_cached", new_callable=AsyncMock, return_value=search_result),
         patch("src.graph.nodes.get_llm", return_value=mock_llm),
-        patch("src.graph.nodes.VectorStoreManager") as mock_vs_cls,
+        patch("src.graph.nodes.Neo4jGraphStore") as mock_graph_cls,
     ):
-        mock_vs = MagicMock()
-        mock_vs.search_reports.side_effect = RuntimeError("pinecone unavailable")
-        mock_vs.rerank_documents.return_value = [
-            {
-                "url": "https://example.com",
-                "title": "Example",
-                "raw_text": "Full text",
-                "score": 0.9,
-            }
-        ]
-        mock_vs_cls.return_value = mock_vs
+        mock_graph = MagicMock()
+        mock_graph.query_context.side_effect = RuntimeError("neo4j unavailable")
+        mock_graph_cls.return_value = mock_graph
 
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None})
+            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None, "user_id": "u-1"})
         )
 
     assert "report" in final

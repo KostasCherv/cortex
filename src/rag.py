@@ -492,7 +492,10 @@ async def delete_resource(resource_id: str, user_id: str) -> bool:
 
     try:
         await delete_resource_artifacts(
-            store=_get_store(), resource_id=resource.resource_id
+            store=_get_store(),
+            resource_id=resource.resource_id,
+            owner_id=resource.owner_id,
+            workspace_id=resource.workspace_id,
         )
     except Exception:
         # Sidecar cleanup is best-effort; resource deletion still proceeds.

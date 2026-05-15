@@ -13,12 +13,12 @@ from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
 from src.prompts.registry import prompt_registry
+from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.search import perform_search_cached
-from src.tools.vector_store import VectorStoreManager
 
 logger = logging.getLogger(__name__)
 
-_RERANK_MODEL = "pinecone-rerank-v0"
+_RERANK_MODEL = "graph_heuristic_v1"
 _RERANK_TOP_K = 5
 _RERANK_CANDIDATE_LIMIT = 10
 _RERANK_MAX_DOC_CHARS = 1200
@@ -190,7 +190,7 @@ async def search_node(state: ResearchState) -> ResearchState:
 
 
 async def rerank_node(state: ResearchState) -> ResearchState:
-    """Rerank retrieved sources with Pinecone-hosted rerank inference."""
+    """Rerank retrieved sources with a lightweight lexical relevance heuristic."""
     query = state.get("query", "")
     contents = state.get("retrieved_contents", [])
     with start_step_span(
@@ -223,54 +223,29 @@ async def rerank_node(state: ResearchState) -> ResearchState:
                 }
             )
 
-        manager = VectorStoreManager()
-        try:
-            ranked = await asyncio.wait_for(
-                asyncio.to_thread(
-                    manager.rerank_documents,
-                    query=query,
-                    documents=prepared,
-                    model=_RERANK_MODEL,
-                    top_k=min(_RERANK_TOP_K, len(prepared)),
-                ),
-                timeout=2.5,
-            )
-            if not ranked:
-                return {
-                    **state,
-                    "reranked_contents": prepared,
-                    "rerank_metadata": {
-                        "fallback": True,
-                        "reason": "empty_rerank_response",
-                        "model": _RERANK_MODEL,
-                        "input_count": len(prepared),
-                        "output_count": len(prepared),
-                    },
-                }
+        query_tokens = {token for token in re.split(r"\W+", query.lower()) if token}
 
-            return {
-                **state,
-                "reranked_contents": ranked,
-                "rerank_metadata": {
-                    "fallback": False,
-                    "model": _RERANK_MODEL,
-                    "input_count": len(prepared),
-                    "output_count": len(ranked),
-                },
-            }
-        except Exception as exc:
-            logger.warning("[rerank_node] failed; using retrieved order: %s", exc)
-            return {
-                **state,
-                "reranked_contents": prepared,
-                "rerank_metadata": {
-                    "fallback": True,
-                    "reason": str(exc),
-                    "model": _RERANK_MODEL,
-                    "input_count": len(prepared),
-                    "output_count": len(prepared),
-                },
-            }
+        scored = []
+        for row in prepared:
+            title_tokens = {t for t in re.split(r"\W+", row.get("title", "").lower()) if t}
+            text_tokens = {t for t in re.split(r"\W+", row.get("raw_text", "").lower()) if t}
+            overlap = len(query_tokens & (title_tokens | text_tokens))
+            score = overlap + (2 if query.lower() in row.get("title", "").lower() else 0)
+            scored.append({**row, "score": float(score)})
+
+        scored.sort(key=lambda item: item["score"], reverse=True)
+        ranked = scored[: min(_RERANK_TOP_K, len(scored))]
+
+        return {
+            **state,
+            "reranked_contents": ranked,
+            "rerank_metadata": {
+                "fallback": False,
+                "model": _RERANK_MODEL,
+                "input_count": len(prepared),
+                "output_count": len(ranked),
+            },
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -516,9 +491,9 @@ async def report_node(state: ResearchState) -> ResearchState:
 
 
 async def vector_store_node(state: ResearchState) -> ResearchState:
-    """Persist the final report to Pinecone (runs only when enabled).
+    """Legacy compatibility node retained for graph-first mode.
 
-    This node is a no-op if ``use_vector_store`` is False.
+    Report persistence now happens in the API run finalization path using Neo4j.
     """
     with start_step_span(
         name="vector_store_node",
@@ -526,35 +501,7 @@ async def vector_store_node(state: ResearchState) -> ResearchState:
         node_name="vector_store",
         inputs={"enabled": bool(state.get("use_vector_store", False))},
     ):
-        if not state.get("use_vector_store", False):
-            logger.info("[vector_store_node] skipping (use_vector_store=False)")
-            return state
-
-        report = state.get("report", "")
-        query = state.get("query", "")
-        metadata = state.get("report_metadata", {})
-
-        logger.info("[vector_store_node] saving report to Pinecone")
-        manager = VectorStoreManager()
-        try:
-            with start_step_span(
-                name="vector_store_node.save_report",
-                run_type="tool",
-                node_name="vector_store",
-                inputs={"query": query},
-                tags=["external", "pinecone"],
-            ):
-                doc_id = await asyncio.to_thread(
-                    manager.save_report,
-                    query=query,
-                    report=report,
-                    metadata=metadata,
-                )
-            logger.info("[vector_store_node] saved as %s", doc_id)
-        except Exception as exc:
-            # Non-fatal: log the error but don't abort the pipeline
-            logger.warning("[vector_store_node] could not save: %s", exc)
-
+        logger.info("[vector_store_node] graph-first mode active; no-op compatibility node")
         return state
 
 
@@ -564,10 +511,7 @@ async def vector_store_node(state: ResearchState) -> ResearchState:
 
 
 async def memory_context_node(state: ResearchState) -> ResearchState:
-    """Generate a memory context for the LLM using the vector store.
-
-    Populates ``memory_context`` with the most relevant reports from the vector store.
-    """
+    """Generate graph-aware memory context from Neo4j."""
     with start_step_span(
         name="memory_context_node",
         run_type="chain",
@@ -575,31 +519,43 @@ async def memory_context_node(state: ResearchState) -> ResearchState:
         inputs={},
     ):
         try:
-            vector_store = VectorStoreManager()
             query = state.get("query", "")
+            user_id = state.get("user_id") or ""
+            workspace_id = user_id
+            if not user_id:
+                return {**state, "memory_context": "", "graph_context": "", "graph_chunks": [], "graph_entities": []}
+            graph_store = Neo4jGraphStore()
             with start_step_span(
-                name="memory_context_node.search_reports",
+                name="memory_context_node.graph_query",
                 run_type="retriever",
                 node_name="memory_context",
-                inputs={"query": query, "n_results": 3},
-                tags=["external", "pinecone"],
+                inputs={"query": query, "top_k": 3},
+                tags=["external", "neo4j"],
             ):
-                context = await asyncio.wait_for(
-                    asyncio.to_thread(vector_store.search_reports, query),
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        graph_store.query_context,
+                        query=query,
+                        owner_id=user_id,
+                        workspace_id=workspace_id,
+                        top_k=3,
+                    ),
                     timeout=8,
                 )
-            if context:
-                context = "\n\n".join([c["document"] for c in context])[:2000]
-            else:
-                context = ""
-
-            return {**state, "memory_context": context}
+            context = (result.context or "")[:2000]
+            return {
+                **state,
+                "memory_context": context,
+                "graph_context": context,
+                "graph_chunks": result.chunks,
+                "graph_entities": result.entities,
+            }
         except asyncio.TimeoutError:
-            logger.warning("[memory_context_node] timed out while fetching context; continuing without memory context.")
-            return {**state, "memory_context": ""}
+            logger.warning("[memory_context_node] timed out while fetching graph context; continuing without memory context.")
+            return {**state, "memory_context": "", "graph_context": "", "graph_chunks": [], "graph_entities": []}
         except Exception as exc:
             logger.warning("[memory_context_node] could not generate context: %s", exc)
-            return {**state, "memory_context": ""}
+            return {**state, "memory_context": "", "graph_context": "", "graph_chunks": [], "graph_entities": []}
 
 
 # ---------------------------------------------------------------------------
@@ -623,4 +579,7 @@ async def search_and_memory_node(state: ResearchState) -> ResearchState:
         "retrieved_contents": search_result.get("retrieved_contents", []),
         "error": search_result.get("error"),
         "memory_context": memory_result.get("memory_context", ""),
+        "graph_context": memory_result.get("graph_context", ""),
+        "graph_chunks": memory_result.get("graph_chunks", []),
+        "graph_entities": memory_result.get("graph_entities", []),
     }
