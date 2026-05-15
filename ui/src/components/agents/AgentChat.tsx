@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Loader2, SendHorizontal } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -29,6 +30,99 @@ function MarkdownMessage({ content }: { content: string }) {
   )
 }
 
+function CitationMarker({
+  citation,
+  index,
+}: {
+  citation: RagChatMessage['citations'][number]
+  index: number
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState({ top: 0, left: 0 })
+
+  const clearHideTimeout = useCallback(() => {
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current)
+      hideTimeoutRef.current = null
+    }
+  }, [])
+
+  const show = useCallback(() => {
+    clearHideTimeout()
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const width = 320
+    const padding = 12
+    const left = Math.min(rect.left, window.innerWidth - width - padding)
+    // Slight overlap so the cursor can cross from the badge into the popup.
+    setPosition({ top: rect.top + 4, left: Math.max(padding, left) })
+    setOpen(true)
+  }, [clearHideTimeout])
+
+  const scheduleHide = useCallback(() => {
+    clearHideTimeout()
+    hideTimeoutRef.current = setTimeout(() => setOpen(false), 120)
+  }, [clearHideTimeout])
+
+  useEffect(() => clearHideTimeout, [clearHideTimeout])
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-border/70 bg-background px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label={`Show citation ${index + 1}`}
+        onMouseEnter={show}
+        onMouseLeave={scheduleHide}
+        onFocus={show}
+        onBlur={scheduleHide}
+      >
+        [{index + 1}]
+      </button>
+      {open &&
+        createPortal(
+          <div
+            role="tooltip"
+            className="fixed z-50 w-80"
+            style={{ top: position.top, left: position.left, transform: 'translateY(-100%)' }}
+            onMouseEnter={show}
+            onMouseLeave={scheduleHide}
+          >
+            <div className="rounded-xl border border-border/80 bg-background/95 p-3 shadow-xl backdrop-blur-sm">
+              <div className="mb-2 flex items-center gap-2">
+                <Badge variant="outline" className="text-[11px] font-normal">
+                  [{index + 1}]
+                </Badge>
+                {citation.source_url ? (
+                  <a
+                    href={citation.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="truncate text-xs font-medium text-foreground hover:underline"
+                  >
+                    {citation.source_title || 'source'}
+                  </a>
+                ) : (
+                  <span className="truncate text-xs font-medium text-foreground">
+                    {citation.source_title || 'source'}
+                  </span>
+                )}
+              </div>
+              <div className="max-h-56 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                {citation.text}
+              </div>
+            </div>
+            <div aria-hidden className="h-3" />
+          </div>,
+          document.body,
+        )}
+    </>
+  )
+}
+
 function CitationMarkers({ citations }: { citations: RagChatMessage['citations'] }) {
   if (citations.length === 0) return null
 
@@ -37,43 +131,7 @@ function CitationMarkers({ citations }: { citations: RagChatMessage['citations']
       {citations.map((citation, index) => {
         const key = citation.chunk_id || citation.source_url || `${citation.source_title}-${index}`
 
-        return (
-          <span key={key} className="group relative inline-flex">
-            <button
-              type="button"
-              className="inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-border/70 bg-background px-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              aria-label={`Show citation ${index + 1}`}
-            >
-              [{index + 1}]
-            </button>
-            <div className="absolute left-0 top-full z-20 hidden w-80 pt-2 group-hover:block group-focus-within:block">
-              <div className="rounded-xl border border-border/80 bg-background/95 p-3 shadow-xl backdrop-blur-sm">
-                <div className="mb-2 flex items-center gap-2">
-                  <Badge variant="outline" className="text-[11px] font-normal">
-                    [{index + 1}]
-                  </Badge>
-                  {citation.source_url ? (
-                    <a
-                      href={citation.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="truncate text-xs font-medium text-foreground hover:underline"
-                    >
-                      {citation.source_title || 'source'}
-                    </a>
-                  ) : (
-                    <span className="truncate text-xs font-medium text-foreground">
-                      {citation.source_title || 'source'}
-                    </span>
-                  )}
-                </div>
-                <div className="max-h-56 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
-                  {citation.text}
-                </div>
-              </div>
-            </div>
-          </span>
-        )
+        return <CitationMarker key={key} citation={citation} index={index} />
       })}
     </div>
   )
