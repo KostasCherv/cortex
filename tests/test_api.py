@@ -1409,5 +1409,26 @@ def test_rag_chat_session_delete():
     assert response.json() == {"session_id": "chat-1", "deleted": True}
 
 
+def test_rag_agent_delete():
+    with patch(
+        "src.api.endpoints.delete_rag_agent_record",
+        new=AsyncMock(return_value=True),
+    ):
+        response = client.delete("/api/rag/agents/agent-1")
+
+    assert response.status_code == 200
+    assert response.json() == {"agent_id": "agent-1", "deleted": True}
+
+
+def test_rag_agent_delete_not_found():
+    with patch(
+        "src.api.endpoints.delete_rag_agent_record",
+        new=AsyncMock(return_value=False),
+    ):
+        response = client.delete("/api/rag/agents/agent-404")
+
+    assert response.status_code == 404
+
+
 def _async_iter(items):
     return _async_iter_impl(items)

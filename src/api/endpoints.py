@@ -55,6 +55,7 @@ from src.rag import (
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
     create_resource_and_ingest,
+    delete_agent as delete_rag_agent_record,
     delete_resource as delete_rag_resource_record,
     get_agent_for_chat,
     get_chat_session as get_rag_chat_session,
@@ -1454,6 +1455,17 @@ async def rag_update_agent(
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
     return {"agent": updated.to_dict()}
+
+
+@app.delete("/api/rag/agents/{agent_id}", tags=["RAG"])
+async def rag_delete_agent(
+    agent_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    deleted = await delete_rag_agent_record(agent_id, current_user.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+    return {"agent_id": agent_id, "deleted": True}
 
 
 @app.post("/api/rag/agents/{agent_id}/resources:link", tags=["RAG"])

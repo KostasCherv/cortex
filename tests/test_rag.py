@@ -7,6 +7,7 @@ from src.rag import (
     RagValidationError,
     _run_ingestion_job,
     create_resource_and_ingest,
+    delete_agent,
     delete_chat_session,
     get_chat_session,
     list_chat_sessions,
@@ -122,6 +123,34 @@ async def test_delete_chat_session_delegates_to_store():
         owner_id="user-1",
         agent_id="agent-1",
     )
+
+
+async def test_delete_agent_delegates_to_store():
+    mock_store = AsyncMock()
+    mock_store.get_rag_agent.return_value = {"agent_id": "agent-1"}
+    mock_store.delete_rag_agent.return_value = True
+
+    with patch("src.rag._get_store", return_value=mock_store):
+        deleted = await delete_agent(agent_id="agent-1", user_id="user-1")
+
+    assert deleted is True
+    mock_store.get_rag_agent.assert_awaited_once()
+    mock_store.delete_rag_agent.assert_awaited_once_with(
+        agent_id="agent-1",
+        owner_id="user-1",
+        workspace_id="user-1",
+    )
+
+
+async def test_delete_agent_returns_false_when_missing():
+    mock_store = AsyncMock()
+    mock_store.get_rag_agent.return_value = None
+
+    with patch("src.rag._get_store", return_value=mock_store):
+        deleted = await delete_agent(agent_id="agent-404", user_id="user-1")
+
+    assert deleted is False
+    mock_store.delete_rag_agent.assert_not_awaited()
 
 
 async def test_suggest_chat_session_title_uses_llm_result():

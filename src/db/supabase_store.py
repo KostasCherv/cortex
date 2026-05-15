@@ -1132,6 +1132,29 @@ class SupabaseSessionStore:
             await self._invalidate_rag_agents_list_cache(owner_id, workspace_id)
         return bool(rows)
 
+    async def delete_rag_agent(
+        self,
+        *,
+        agent_id: str,
+        owner_id: str,
+        workspace_id: str,
+    ) -> bool:
+        response = await self._request(
+            "DELETE",
+            "rag_agents",
+            params={
+                "id": f"eq.{agent_id}",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            await self._invalidate_rag_agents_list_cache(owner_id, workspace_id)
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+        return bool(rows)
+
     async def replace_rag_agent_resources(
         self,
         *,

@@ -628,6 +628,22 @@ async def update_agent(
     return RagAgent(**updated)
 
 
+async def delete_agent(agent_id: str, user_id: str) -> bool:
+    workspace_id = _workspace_id_for_user(user_id)
+    existing = await _get_store().get_rag_agent(
+        agent_id=agent_id,
+        owner_id=user_id,
+        workspace_id=workspace_id,
+    )
+    if not existing:
+        return False
+    return await _get_store().delete_rag_agent(
+        agent_id=agent_id,
+        owner_id=user_id,
+        workspace_id=workspace_id,
+    )
+
+
 async def link_resources(
     *,
     agent_id: str,
