@@ -69,7 +69,8 @@ async def test_store_lists_rag_chat_sessions_with_batched_latest_messages():
     ]
     store._request = AsyncMock(side_effect=[sessions_response, messages_response])  # type: ignore[method-assign]
 
-    summaries = await store.list_rag_chat_sessions(agent_id="agent-1", owner_id="user-1")
+    with patch("src.db.supabase_store.get_cache", return_value=None):
+        summaries = await store.list_rag_chat_sessions(agent_id="agent-1", owner_id="user-1")
 
     assert store._request.await_count == 2
     messages_call = store._request.await_args_list[1]

@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from starlette.datastructures import UploadFile
 
 from src.rag import (
+    CHAT_SCOPE_WORKSPACE,
+    RagChatMessage,
     RagValidationError,
     _run_ingestion_job,
     create_resource_and_ingest,
@@ -55,6 +57,7 @@ async def test_list_chat_sessions_returns_agent_scoped_summaries():
     mock_store.list_rag_chat_sessions.assert_awaited_once_with(
         agent_id="agent-1",
         owner_id="user-1",
+        chat_scope="agent",
     )
     assert sessions[0]["session_id"] == "chat-2"
     assert sessions[0]["last_message_preview"] == "Latest answer"
@@ -80,6 +83,7 @@ async def test_get_chat_session_is_scoped_to_owner_and_agent():
         session_id="chat-1",
         owner_id="user-1",
         agent_id="agent-1",
+        chat_scope="agent",
     )
     assert session is not None
     assert session["session_id"] == "chat-1"
@@ -103,6 +107,7 @@ async def test_update_chat_session_title_delegates_to_store():
         owner_id="user-1",
         agent_id="agent-1",
         title="Updated title",
+        chat_scope="agent",
     )
 
 
@@ -122,6 +127,7 @@ async def test_delete_chat_session_delegates_to_store():
         session_id="chat-1",
         owner_id="user-1",
         agent_id="agent-1",
+        chat_scope="agent",
     )
 
 
@@ -170,6 +176,20 @@ async def test_suggest_chat_session_title_fallback_when_llm_fails():
             await suggest_chat_session_title("How to reset access token quickly")
             == "How to reset access token quickly"
         )
+
+
+def test_rag_chat_message_to_dict_includes_chat_scope():
+    msg = RagChatMessage(
+        message_id="m1",
+        session_id="s1",
+        agent_id=None,
+        owner_id="u1",
+        role="assistant",
+        content="hello",
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    payload = msg.to_dict()
+    assert payload["chat_scope"] == CHAT_SCOPE_WORKSPACE
 
 
 async def test_run_ingestion_job_marks_ready_on_success():

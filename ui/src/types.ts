@@ -121,7 +121,7 @@ export type RagAgent = {
 export type RagChatMessage = {
   message_id: string
   session_id: string
-  agent_id: string
+  agent_id: string | null
   owner_id: string
   role: 'user' | 'assistant'
   content: string
@@ -132,7 +132,7 @@ export type RagChatMessage = {
 
 export type RagChatSessionSummary = {
   session_id: string
-  agent_id: string
+  agent_id: string | null
   owner_id: string
   title: string
   web_search_enabled?: boolean

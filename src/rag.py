@@ -30,6 +30,8 @@ ALLOWED_MIME_TYPES = {
 }
 
 _RESOURCE_STATES = {"uploaded", "processing", "ready", "failed"}
+CHAT_SCOPE_AGENT = "agent"
+CHAT_SCOPE_WORKSPACE = "workspace"
 
 
 @dataclass
@@ -122,12 +124,13 @@ class RagAgent:
 class RagChatMessage:
     message_id: str
     session_id: str
-    agent_id: str
+    agent_id: str | None
     owner_id: str
     role: str
     content: str
     citations: list[dict] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
+    chat_scope: str = CHAT_SCOPE_AGENT
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     def to_dict(self) -> dict:
@@ -140,6 +143,7 @@ class RagChatMessage:
             "content": self.content,
             "citations": self.citations,
             "suggestions": self.suggestions,
+            "chat_scope": self.chat_scope,
             "created_at": self.created_at,
         }
 
@@ -772,58 +776,98 @@ async def create_or_get_chat_session(
     return new_session
 
 
+async def create_or_get_workspace_chat_session(
+    *,
+    user_id: str,
+    session_id: str | None,
+    initial_message: str | None = None,
+    web_search_enabled: bool = True,
+) -> str:
+    if session_id:
+        valid = await _get_store().get_rag_chat_session(
+            session_id=session_id,
+            owner_id=user_id,
+            agent_id=None,
+            chat_scope=CHAT_SCOPE_WORKSPACE,
+        )
+        if valid:
+            return session_id
+
+    new_session = str(uuid.uuid4())
+    await _get_store().create_rag_chat_session(
+        {
+            "session_id": new_session,
+            "owner_id": user_id,
+            "agent_id": None,
+            "workspace_id": _workspace_id_for_user(user_id),
+            "title": await suggest_chat_session_title(initial_message),
+            "web_search_enabled": web_search_enabled,
+            "chat_scope": CHAT_SCOPE_WORKSPACE,
+        }
+    )
+    return new_session
+
+
 async def list_chat_sessions(
-    agent_id: str, user_id: str
+    agent_id: str | None, user_id: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> list[dict[str, str | None]]:
     return await _get_store().list_rag_chat_sessions(
-        agent_id=agent_id, owner_id=user_id
+        agent_id=agent_id, owner_id=user_id, chat_scope=chat_scope
     )
 
 
 async def get_chat_session(
     *,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     user_id: str,
+    chat_scope: str = CHAT_SCOPE_AGENT,
 ) -> dict[str, str | None] | None:
     return await _get_store().get_rag_chat_session(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
+        chat_scope=chat_scope,
     )
 
 
 async def update_chat_session_web_search_enabled(
     *,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     user_id: str,
     web_search_enabled: bool,
+    chat_scope: str = CHAT_SCOPE_AGENT,
 ) -> bool:
     return await _get_store().update_rag_chat_session_web_search_enabled(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
         web_search_enabled=web_search_enabled,
+        chat_scope=chat_scope,
     )
 
 
 async def update_chat_session_title(
-    *, session_id: str, agent_id: str, user_id: str, title: str
+    *, session_id: str, agent_id: str | None, user_id: str, title: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> bool:
     return await _get_store().update_rag_chat_session_title(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
         title=title,
+        chat_scope=chat_scope,
     )
 
 
-async def delete_chat_session(*, session_id: str, agent_id: str, user_id: str) -> bool:
+async def delete_chat_session(
+    *, session_id: str, agent_id: str | None, user_id: str, chat_scope: str = CHAT_SCOPE_AGENT
+) -> bool:
     return await _get_store().delete_rag_chat_session(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
+        chat_scope=chat_scope,
     )
 
 
@@ -852,3 +896,13 @@ async def retrieve_context_for_query(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
     )
+
+
+async def list_workspace_ready_resource_ids(user_id: str) -> list[str]:
+    workspace_id = _workspace_id_for_user(user_id)
+    rows = await _get_store().list_rag_resources(owner_id=user_id, workspace_id=workspace_id)
+    return [
+        row["resource_id"]
+        for row in rows
+        if _normalize_state(str(row.get("state", ""))) == "ready"
+    ]

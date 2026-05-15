@@ -173,10 +173,11 @@ class SupabaseSessionStore:
         )
         await self._cache_delete(key)
 
-    async def _invalidate_rag_chat_sessions_list_cache(self, owner_id: str, agent_id: str) -> None:
+    async def _invalidate_rag_chat_sessions_list_cache(self, owner_id: str, agent_id: str | None, chat_scope: str) -> None:
+        agent_key = agent_id or "__workspace__"
         key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST,
-            f"{owner_id}:{agent_id}",
+            f"{owner_id}:{chat_scope}:{agent_key}",
         )
         await self._cache_delete(key)
 
@@ -1210,6 +1211,7 @@ class SupabaseSessionStore:
             "owner_id": payload["owner_id"],
             "workspace_id": payload["workspace_id"],
             "agent_id": payload["agent_id"],
+            "chat_scope": payload.get("chat_scope") or "agent",
             "title": payload.get("title") or "New chat",
             "web_search_enabled": bool(payload.get("web_search_enabled", False)),
             "created_at": datetime.now(UTC).isoformat(),
@@ -1218,6 +1220,7 @@ class SupabaseSessionStore:
         await self._invalidate_rag_chat_sessions_list_cache(
             payload["owner_id"],
             payload["agent_id"],
+            payload.get("chat_scope") or "agent",
         )
 
     async def get_rag_chat_session(
@@ -1225,16 +1228,20 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
+        chat_scope: str = "agent",
     ) -> dict[str, Any] | None:
+        agent_filter_key = "is" if agent_id is None else "eq"
+        agent_filter_value = "null" if agent_id is None else agent_id
         response = await self._request(
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,title,web_search_enabled,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,web_search_enabled,created_at",
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "chat_scope": f"eq.{chat_scope}",
+                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
                 "limit": "1",
             },
         )
@@ -1247,6 +1254,7 @@ class SupabaseSessionStore:
             "owner_id": row["owner_id"],
             "workspace_id": row["workspace_id"],
             "agent_id": row["agent_id"],
+            "chat_scope": row.get("chat_scope") or "agent",
             "title": row.get("title") or "New chat",
             "web_search_enabled": bool(row.get("web_search_enabled", False)),
             "created_at": row.get("created_at"),
@@ -1255,24 +1263,29 @@ class SupabaseSessionStore:
     async def list_rag_chat_sessions(
         self,
         *,
-        agent_id: str,
+        agent_id: str | None,
         owner_id: str,
+        chat_scope: str = "agent",
     ) -> list[dict[str, Any]]:
+        agent_key = agent_id or "__workspace__"
         cache_key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST,
-            f"{owner_id}:{agent_id}",
+            f"{owner_id}:{chat_scope}:{agent_key}",
         )
         cached = await self._cache_get_list(cache_key)
         if cached is not None:
             return cached
 
+        agent_filter_key = "is" if agent_id is None else "eq"
+        agent_filter_value = "null" if agent_id is None else agent_id
         response = await self._request(
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,title,web_search_enabled,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,web_search_enabled,created_at",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "chat_scope": f"eq.{chat_scope}",
+                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
                 "order": "created_at.desc",
             },
         )
@@ -1288,7 +1301,6 @@ class SupabaseSessionStore:
                 "select": "session_id,content,created_at",
                 "session_id": f"in.({','.join(session_ids)})",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
                 "order": "created_at.desc",
             },
         )
@@ -1307,6 +1319,7 @@ class SupabaseSessionStore:
                     "owner_id": row["owner_id"],
                     "workspace_id": row["workspace_id"],
                     "agent_id": row["agent_id"],
+                    "chat_scope": row.get("chat_scope") or "agent",
                     "title": row.get("title") or "New chat",
                     "web_search_enabled": bool(row.get("web_search_enabled", False)),
                     "created_at": row.get("created_at"),
@@ -1328,23 +1341,27 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
         title: str,
+        chat_scope: str = "agent",
     ) -> bool:
+        agent_filter_key = "is" if agent_id is None else "eq"
+        agent_filter_value = "null" if agent_id is None else agent_id
         response = await self._request(
             "PATCH",
             "rag_chat_sessions",
             params={
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "chat_scope": f"eq.{chat_scope}",
+                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
             },
             json_body={"title": title},
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
         if rows:
-            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id, chat_scope)
         return bool(rows)
 
     async def update_rag_chat_session_web_search_enabled(
@@ -1352,23 +1369,27 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
         web_search_enabled: bool,
+        chat_scope: str = "agent",
     ) -> bool:
+        agent_filter_key = "is" if agent_id is None else "eq"
+        agent_filter_value = "null" if agent_id is None else agent_id
         response = await self._request(
             "PATCH",
             "rag_chat_sessions",
             params={
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "chat_scope": f"eq.{chat_scope}",
+                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
             },
             json_body={"web_search_enabled": web_search_enabled},
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
         if rows:
-            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id, chat_scope)
         return bool(rows)
 
     async def delete_rag_chat_session(
@@ -1376,21 +1397,25 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
+        chat_scope: str = "agent",
     ) -> bool:
+        agent_filter_key = "is" if agent_id is None else "eq"
+        agent_filter_value = "null" if agent_id is None else agent_id
         response = await self._request(
             "DELETE",
             "rag_chat_sessions",
             params={
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "chat_scope": f"eq.{chat_scope}",
+                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
             },
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
         if rows:
-            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id, chat_scope)
             await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
         return bool(rows)
 
@@ -1414,6 +1439,7 @@ class SupabaseSessionStore:
         await self._invalidate_rag_chat_sessions_list_cache(
             payload["owner_id"],
             payload["agent_id"],
+            payload.get("chat_scope") or "agent",
         )
 
     async def list_rag_chat_messages(self, *, session_id: str, owner_id: str) -> list[dict[str, Any]]:

@@ -680,6 +680,84 @@ export async function streamRagAgentChat(
   options.onError?.('Chat stream ended before a terminal event was received.')
 }
 
+export async function streamRagWorkspaceChat(
+  message: string,
+  sessionId: string | null,
+  webSearchEnabled: boolean,
+  accessToken: string | null,
+  options: RagAgentChatStreamOptions,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/rag/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ message, session_id: sessionId, web_search_enabled: webSearchEnabled }),
+    signal: options.signal,
+  })
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to stream workspace chat: ${response.status}`))
+  }
+  if (!response.body) {
+    throw new Error('Streaming not supported.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+
+  const handleEvent = (parsed: RagChatStreamEvent): boolean => {
+    if (parsed.type === 'session') {
+      options.onSession(parsed.session_id, parsed.web_search_enabled, parsed.web_used, parsed.web_provider)
+      return false
+    }
+    if (parsed.type === 'chunk') {
+      options.onChunk(parsed.text)
+      return false
+    }
+    if (parsed.type === 'citations') {
+      options.onCitations(normalizeRagCitations(parsed.citations))
+      return false
+    }
+    if (parsed.type === 'suggestions') {
+      options.onSuggestions?.(parsed.suggestions)
+      return false
+    }
+    if (parsed.type === 'done') {
+      options.onDone()
+      return true
+    }
+    if (parsed.type === 'error') {
+      options.onError?.(parsed.error)
+      return true
+    }
+    return false
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() ?? ''
+    for (const chunk of chunks) {
+      const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'))
+      if (!dataLine) continue
+      let parsed: RagChatStreamEvent
+      try {
+        parsed = JSON.parse(dataLine.replace(/^data:\s?/, '')) as RagChatStreamEvent
+      } catch {
+        continue
+      }
+      if (handleEvent(parsed)) return
+    }
+  }
+  options.onError?.('Chat stream ended before a terminal event was received.')
+}
+
 export async function listRagAgentChatSessions(
   agentId: string,
   accessToken: string | null,
@@ -689,6 +767,18 @@ export async function listRagAgentChatSessions(
   })
   if (!response.ok) {
     throw new Error(`Failed to list RAG agent chat sessions: ${response.status}`)
+  }
+  return (await response.json()) as { sessions: RagChatSessionSummary[] }
+}
+
+export async function listRagWorkspaceChatSessions(
+  accessToken: string | null,
+): Promise<{ sessions: RagChatSessionSummary[] }> {
+  const response = await fetch(`${API_BASE}/api/rag/chat/sessions`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to list workspace chat sessions: ${response.status}`)
   }
   return (await response.json()) as { sessions: RagChatSessionSummary[] }
 }
@@ -710,6 +800,34 @@ export async function getRagAgentChatSessionMessages(
   const parsed = (await response.json()) as {
     session_id: string
     agent_id: string
+    web_search_enabled?: boolean
+    messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
+  }
+  return {
+    session_id: parsed.session_id,
+    agent_id: parsed.agent_id,
+    web_search_enabled: parsed.web_search_enabled,
+    messages: parsed.messages.map((message) => ({
+      ...message,
+      citations: normalizeRagCitations(message.citations),
+      suggestions: normalizeSuggestions(message.suggestions),
+    })),
+  }
+}
+
+export async function getRagWorkspaceChatSessionMessages(
+  sessionId: string,
+  accessToken: string | null,
+): Promise<{ session_id: string; agent_id: string | null; web_search_enabled?: boolean; messages: RagChatMessage[] }> {
+  const response = await fetch(`${API_BASE}/api/rag/chat/sessions/${sessionId}/messages`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to load workspace chat session: ${response.status}`)
+  }
+  const parsed = (await response.json()) as {
+    session_id: string
+    agent_id: string | null
     web_search_enabled?: boolean
     messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
   }
@@ -756,6 +874,39 @@ export async function deleteRagAgentChatSession(
   })
   if (!response.ok) {
     throw new Error(`Failed to delete RAG chat session: ${response.status}`)
+  }
+  return (await response.json()) as { session_id: string; deleted: boolean }
+}
+
+export async function updateRagWorkspaceChatSessionTitle(
+  sessionId: string,
+  title: string,
+  accessToken: string | null,
+): Promise<{ session_id: string; title: string }> {
+  const response = await fetch(`${API_BASE}/api/rag/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to rename workspace chat session: ${response.status}`)
+  }
+  return (await response.json()) as { session_id: string; title: string }
+}
+
+export async function deleteRagWorkspaceChatSession(
+  sessionId: string,
+  accessToken: string | null,
+): Promise<{ session_id: string; deleted: boolean }> {
+  const response = await fetch(`${API_BASE}/api/rag/chat/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to delete workspace chat session: ${response.status}`)
   }
   return (await response.json()) as { session_id: string; deleted: boolean }
 }

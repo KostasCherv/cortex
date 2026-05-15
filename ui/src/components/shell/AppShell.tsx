@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import { createRagAgent, checkHealth, listRagAgents, listRagResources, updateRagAgent } from '@/api/client'
 import { AgentChat } from '@/components/agents/AgentChat'
+import { GenericChat } from '@/components/chat/GenericChat'
 import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { AgentRail } from '@/components/shell/AgentRail'
 import { supabase } from '@/lib/supabase'
@@ -12,6 +13,7 @@ import type { HealthResponse, RagAgent, RagResource } from '@/types'
 type HealthState = 'loading' | 'online' | 'offline'
 
 export type ActiveView =
+  | { type: 'chat' }
   | { type: 'research' }
   | { type: 'rag-agent'; agent: RagAgent }
   | { type: 'resources' }
@@ -19,7 +21,7 @@ export type ActiveView =
 export function AppShell() {
   const [health, setHealth] = useState<HealthState>('loading')
   const [authSession, setAuthSession] = useState<Session | null>(null)
-  const [activeView, setActiveView] = useState<ActiveView>({ type: 'research' })
+  const [activeView, setActiveView] = useState<ActiveView>({ type: 'chat' })
   const [ragAgents, setRagAgents] = useState<RagAgent[]>([])
   const [resources, setResources] = useState<RagResource[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -168,8 +170,25 @@ export function AppShell() {
           setActiveView({ type: 'research' })
           setActiveSessionId(null)
         }}
+        onNewChat={() => {
+          setActiveView({ type: 'chat' })
+          setActiveSessionId(null)
+        }}
       />
       <div className="flex-1 min-w-0 overflow-hidden max-md:min-h-0">
+        {activeView.type === 'chat' &&
+          (authSession ? (
+            <GenericChat
+              accessToken={authSession.access_token}
+              activeSessionId={activeSessionId}
+              onSessionActivated={handleSessionActivated}
+              onSessionsChanged={handleSessionsChanged}
+            />
+          ) : (
+            <main className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+              Sign in to start a workspace chat.
+            </main>
+          ))}
         {activeView.type === 'research' && (
           <ResearchPage
             authSession={authSession}

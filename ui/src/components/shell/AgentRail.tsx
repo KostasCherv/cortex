@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, FolderOpen, Loader2, LogOut, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
+import { Bot, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
   createPortalSession,
   deleteRagAgent,
   deleteRagAgentChatSession,
+  deleteRagWorkspaceChatSession,
   deleteSession,
   getBillingUsage,
   listRagAgentChatSessions,
+  listRagWorkspaceChatSessions,
   listSessions,
   updateRagAgentChatSessionTitle,
+  updateRagWorkspaceChatSessionTitle,
   updateSessionTitle,
 } from '@/api/client'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -52,6 +55,7 @@ type Props = {
   onAgentDeleted: (agentId: string) => void
   onNewAgent: () => void
   onNewResearch: () => void
+  onNewChat: () => void
 }
 
 type ResearchSession = SessionSummary
@@ -569,6 +573,108 @@ function AgentSessionList({
   )
 }
 
+function WorkspaceChatSessionList({
+  accessToken,
+  activeSessionId,
+  refreshToken,
+  onSelect,
+}: {
+  accessToken: string
+  activeSessionId: string | null
+  refreshToken: number
+  onSelect: (id: string | null) => void
+}) {
+  const [sessions, setSessions] = useState<AgentSession[]>([])
+  const [pending, setPending] = useState(true)
+  const fetchedTokenRef = useRef(-1)
+  const [contextMenu, setContextMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (fetchedTokenRef.current === refreshToken) return
+    fetchedTokenRef.current = refreshToken
+    void listRagWorkspaceChatSessions(accessToken)
+      .then(({ sessions: data }) => {
+        setSessions(data)
+        setPending(false)
+      })
+      .catch(() => {
+        setSessions([])
+        setPending(false)
+      })
+  }, [accessToken, refreshToken])
+
+  if (pending) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Loading chats</span>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      {sessions.slice(0, 10).map((s) => (
+        <button
+          key={s.session_id}
+          type="button"
+          onClick={() => onSelect(s.session_id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setContextMenu({
+              id: s.session_id,
+              title: s.title || s.last_message_preview || 'New chat',
+              x: e.clientX,
+              y: e.clientY,
+            })
+          }}
+          className={cn(
+            'w-full truncate rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+            activeSessionId === s.session_id
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+          )}
+        >
+          {s.title || s.last_message_preview || 'New chat'}
+        </button>
+      ))}
+      {contextMenu && (
+        <div className="fixed z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md" style={{ left: contextMenu.x, top: contextMenu.y }}>
+          <button
+            type="button"
+            className="w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              const nextTitle = window.prompt('Rename chat', contextMenu.title)
+              if (!nextTitle?.trim()) return
+              void updateRagWorkspaceChatSessionTitle(contextMenu.id, nextTitle.trim(), accessToken).then(() => {
+                setSessions((prev) => prev.map((session) => (session.session_id === contextMenu.id ? { ...session, title: nextTitle.trim() } : session)))
+              })
+              setContextMenu(null)
+            }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+            onClick={() => {
+              const targetId = contextMenu.id
+              void deleteRagWorkspaceChatSession(targetId, accessToken).then(() => {
+                setSessions((prev) => prev.filter((session) => session.session_id !== targetId))
+                if (activeSessionId === targetId) onSelect(null)
+              })
+              setContextMenu(null)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
 export function AgentRail({
   health,
   authSession,
@@ -584,6 +690,7 @@ export function AgentRail({
   onAgentDeleted,
   onNewAgent,
   onNewResearch,
+  onNewChat,
 }: Props) {
   const { theme, toggle } = useTheme()
   const accessToken = authSession?.access_token ?? null
@@ -614,6 +721,7 @@ export function AgentRail({
     [accessToken, onAgentDeleted],
   )
 
+  const isChat = activeView.type === 'chat'
   const isResearch = activeView.type === 'research'
   const isResources = activeView.type === 'resources'
 
@@ -637,6 +745,40 @@ export function AgentRail({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
         <div className="shrink-0 space-y-0.5 pl-2 pr-4">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onViewChange({ type: 'chat' })}
+              className={cn(
+                'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+                isChat ? 'bg-background text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+              )}
+            >
+              <MessageSquare size={15} className="shrink-0" />
+              Chat
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0 rounded-md border border-border bg-background text-foreground shadow-sm hover:border-primary/30 hover:bg-background hover:text-primary"
+              onClick={authSession ? onNewChat : onSignIn}
+              aria-label={authSession ? 'New chat' : 'Sign in to create a chat session'}
+            >
+              <Plus size={14} />
+            </Button>
+          </div>
+          {isChat && authSession && (
+            <ScrollArea className="max-h-44 shrink-0">
+              <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
+                <WorkspaceChatSessionList
+                  accessToken={authSession.access_token}
+                  activeSessionId={activeSessionId}
+                  refreshToken={sessionRefreshToken}
+                  onSelect={onSessionSelect}
+                />
+              </div>
+            </ScrollArea>
+          )}
           {/* Research */}
           <div className="flex items-center gap-1">
             <button
@@ -663,21 +805,19 @@ export function AgentRail({
               <Plus size={14} />
             </Button>
           </div>
+          {isResearch && authSession && (
+            <ScrollArea className="max-h-44 shrink-0">
+              <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
+                <ResearchSessionList
+                  accessToken={authSession.access_token}
+                  activeSessionId={activeSessionId}
+                  refreshToken={sessionRefreshToken}
+                  onSelect={onSessionSelect}
+                />
+              </div>
+            </ScrollArea>
+          )}
         </div>
-
-        {/* Research sessions */}
-        {isResearch && authSession && (
-          <ScrollArea className="max-h-44 shrink-0">
-            <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
-              <ResearchSessionList
-                accessToken={authSession.access_token}
-                activeSessionId={activeSessionId}
-                refreshToken={sessionRefreshToken}
-                onSelect={onSessionSelect}
-              />
-            </div>
-          </ScrollArea>
-        )}
 
         {/* My Agents section */}
         <div className="flex min-h-0 flex-1 flex-col pt-3">

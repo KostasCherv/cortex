@@ -1013,6 +1013,44 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
     assert suggestions_event["suggestions"] == ["Follow-up one?", "Follow-up two?", "Follow-up three?"]
 
 
+def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing():
+    mock_context = MagicMock()
+    mock_context.context = "Context from workspace docs."
+    mock_context.chunks = []
+
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    with (
+        patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/chat/stream",
+            json={"message": "Hello", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "workspace resources",
+            "source_url": None,
+            "chunk_id": "workspace-context-fallback",
+            "text": "Context from workspace docs.",
+        }
+    ]
+
+
 def test_rag_chat_persists_suggestions_on_assistant_message():
     mock_agent = MagicMock()
     mock_agent.system_instructions = "Keep it concise."

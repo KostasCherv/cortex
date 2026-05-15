@@ -48,12 +48,14 @@ from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
 from src import outbox
 from src.rag import (
+    CHAT_SCOPE_WORKSPACE,
     RagChatMessage,
     RagValidationError,
     append_chat_message,
     delete_chat_session as delete_rag_chat_session,
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
+    create_or_get_workspace_chat_session,
     create_resource_and_ingest,
     delete_agent as delete_rag_agent_record,
     delete_resource as delete_rag_resource_record,
@@ -65,6 +67,7 @@ from src.rag import (
     list_chat_messages as list_rag_chat_messages,
     list_chat_sessions as list_rag_chat_sessions,
     list_resources as list_rag_resources_records,
+    list_workspace_ready_resource_ids,
     retrieve_context_for_query,
     update_chat_session_web_search_enabled,
     update_chat_session_title as update_rag_chat_session_title,
@@ -285,6 +288,25 @@ def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict
     return citations
 
 
+def _build_workspace_fallback_citations(
+    rag_context_text: str,
+    existing_citations: list[dict],
+) -> list[dict]:
+    if existing_citations:
+        return existing_citations
+    cleaned = (rag_context_text or "").strip()
+    if not cleaned:
+        return existing_citations
+    return [
+        {
+            "source_title": "workspace resources",
+            "source_url": None,
+            "chunk_id": "workspace-context-fallback",
+            "text": cleaned[:1200],
+        }
+    ]
+
+
 def _extract_llm_text(content: object) -> str:
     if isinstance(content, str):
         return content
@@ -409,6 +431,64 @@ async def _should_use_web_search(
     use_web = bool(parsed.get("use_web_search", False))
     query = str(parsed.get("query") or "").strip()
     return use_web, query
+
+
+async def _resolve_web_context(
+    *,
+    effective_web_search_enabled: bool,
+    normalized_message: str,
+    rag_context: str,
+    history_block: str,
+) -> tuple[bool, str, list[dict]]:
+    web_provider = settings.web_search_provider.lower()
+    web_used = False
+    web_results: list[dict] = []
+    if not effective_web_search_enabled:
+        return web_used, web_provider, web_results
+
+    should_use_web, decision_query = await _should_use_web_search(
+        message=normalized_message,
+        rag_context=rag_context,
+        history_block=history_block,
+    )
+    if not (should_use_web or _is_explicit_url_fetch_intent(normalized_message)):
+        return web_used, web_provider, web_results
+
+    web_query = decision_query or normalized_message
+    direct_urls = _extract_urls(web_query) or _extract_urls(normalized_message) or _extract_urls(history_block)
+    if direct_urls:
+        url = direct_urls[0]
+        fetched = await fetch_url_content(url)
+        return (
+            True,
+            "direct_fetch",
+            [{"url": url, "title": url, "content": fetched, "raw_content": fetched}],
+        )
+
+    tool = get_web_search_tool()
+    web_results = await asyncio.to_thread(tool.search, web_query, settings.max_search_results)
+    return True, tool.provider_name, web_results
+
+
+def _build_chat_prompt(
+    *,
+    system_instructions: str,
+    history_block: str,
+    rag_context: str,
+    web_results: list[dict],
+    normalized_message: str,
+) -> str:
+    return (
+        "You are a custom RAG assistant.\n\n"
+        "Important: You can use provided web search context when available. "
+        "Do not claim you cannot access URLs or browse the web.\n\n"
+        f"System instructions:\n{system_instructions or 'None'}\n\n"
+        f"Conversation history:\n{history_block or 'None'}\n\n"
+        f"Retrieved context:\n{rag_context or 'No context returned.'}\n\n"
+        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
+        f"User question:\n{normalized_message}\n\n"
+        "Answer clearly and stay grounded in the retrieved context."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1545,65 +1625,33 @@ async def rag_chat_with_agent(
         f"{m.role.upper()}: {m.content}"
         for m in history[-10:]
     )
-    web_provider = settings.web_search_provider.lower()
-    web_used = False
-    web_results: list[dict] = []
-    if effective_web_search_enabled:
-        should_use_web, decision_query = await _should_use_web_search(
-            message=normalized_message,
+    try:
+        web_used, web_provider, web_results = await _resolve_web_context(
+            effective_web_search_enabled=effective_web_search_enabled,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             history_block=history_block,
         )
-        if should_use_web:
-            try:
-                web_query = decision_query or normalized_message
-                direct_urls = _extract_urls(web_query) or _extract_urls(normalized_message) or _extract_urls(history_block)
-                if direct_urls:
-                    url = direct_urls[0]
-                    fetched = await fetch_url_content(url)
-                    web_results = [
-                        {
-                            "url": url,
-                            "title": url,
-                            "content": fetched,
-                            "raw_content": fetched,
-                        }
-                    ]
-                    web_used = True
-                    web_provider = "direct_fetch"
-                else:
-                    tool = get_web_search_tool()
-                    web_results = await asyncio.to_thread(
-                        tool.search,
-                        web_query,
-                        settings.max_search_results,
-                    )
-                    web_used = True
-                    web_provider = tool.provider_name
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        "code": "web_search_unavailable",
-                        "message": (
-                            "Web search is required for this request but the provider failed. "
-                            "Retry with web search disabled for this session."
-                        ),
-                        "provider": web_provider,
-                        "error": str(exc),
-                    },
-                ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "web_search_unavailable",
+                "message": (
+                    "Web search is required for this request but the provider failed. "
+                    "Retry with web search disabled for this session."
+                ),
+                "provider": settings.web_search_provider.lower(),
+                "error": str(exc),
+            },
+        ) from exc
 
-    prompt = (
-        "You are a custom RAG assistant.\n\n"
-        "Important: You can use provided web search context when available. "
-        "Do not claim you cannot access URLs or browse the web.\n\n"
-        f"System instructions:\n{agent.system_instructions or 'None'}\n\n"
-        f"Conversation history:\n{history_block or 'None'}\n\n"
-        f"Retrieved context:\n{rag_context.context or 'No context returned.'}\n\n"
-        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
-        f"User question:\n{normalized_message}\n\n"
-        "Answer clearly and stay grounded in the retrieved context."
+    prompt = _build_chat_prompt(
+        system_instructions=agent.system_instructions or "None",
+        history_block=history_block,
+        rag_context=rag_context.context or "",
+        web_results=web_results,
+        normalized_message=normalized_message,
     )
     llm = get_llm(temperature=0.2)
     result = await llm.ainvoke(prompt)
@@ -1716,64 +1764,32 @@ async def rag_chat_with_agent_stream(
     effective_web_search_enabled = bool((chat_session or {}).get("web_search_enabled", False))
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    web_provider = settings.web_search_provider.lower()
-    web_used = False
-    web_results: list[dict] = []
-    if effective_web_search_enabled:
-        should_use_web, decision_query = await _should_use_web_search(
-            message=normalized_message,
+    try:
+        web_used, web_provider, web_results = await _resolve_web_context(
+            effective_web_search_enabled=effective_web_search_enabled,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             history_block=history_block,
         )
-        if should_use_web:
-            try:
-                web_query = decision_query or normalized_message
-                direct_urls = _extract_urls(web_query) or _extract_urls(normalized_message) or _extract_urls(history_block)
-                if direct_urls:
-                    url = direct_urls[0]
-                    fetched = await fetch_url_content(url)
-                    web_results = [
-                        {
-                            "url": url,
-                            "title": url,
-                            "content": fetched,
-                            "raw_content": fetched,
-                        }
-                    ]
-                    web_used = True
-                    web_provider = "direct_fetch"
-                else:
-                    tool = get_web_search_tool()
-                    web_results = await asyncio.to_thread(
-                        tool.search,
-                        web_query,
-                        settings.max_search_results,
-                    )
-                    web_used = True
-                    web_provider = tool.provider_name
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        "code": "web_search_unavailable",
-                        "message": (
-                            "Web search is required for this request but the provider failed. "
-                            "Retry with web search disabled for this session."
-                        ),
-                        "provider": web_provider,
-                        "error": str(exc),
-                    },
-                ) from exc
-    prompt = (
-        "You are a custom RAG assistant.\n\n"
-        "Important: You can use provided web search context when available. "
-        "Do not claim you cannot access URLs or browse the web.\n\n"
-        f"System instructions:\n{agent.system_instructions or 'None'}\n\n"
-        f"Conversation history:\n{history_block or 'None'}\n\n"
-        f"Retrieved context:\n{rag_context.context or 'No context returned.'}\n\n"
-        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
-        f"User question:\n{normalized_message}\n\n"
-        "Answer clearly and stay grounded in the retrieved context."
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "web_search_unavailable",
+                "message": (
+                    "Web search is required for this request but the provider failed. "
+                    "Retry with web search disabled for this session."
+                ),
+                "provider": settings.web_search_provider.lower(),
+                "error": str(exc),
+            },
+        ) from exc
+    prompt = _build_chat_prompt(
+        system_instructions=agent.system_instructions or "None",
+        history_block=history_block,
+        rag_context=rag_context.context or "",
+        web_results=web_results,
+        normalized_message=normalized_message,
     )
 
     citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
@@ -1937,6 +1953,312 @@ async def delete_rag_agent_chat_session(
         session_id=session_id,
         agent_id=agent_id,
         user_id=current_user.user_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    return {"session_id": session_id, "deleted": True}
+
+
+@app.post("/api/rag/chat", tags=["RAG"])
+async def rag_chat_workspace(
+    body: RagChatRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _consume_usage_or_429(current_user.user_id, UsageIncrement(total_questions=1))
+    normalized_message = body.message.strip()
+    if not normalized_message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
+    if not resource_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "processing_failed", "message": "Workspace has no ready resources."},
+        )
+
+    rag_context = await retrieve_context_for_query(
+        agent_id="workspace",
+        user_id=current_user.user_id,
+        resource_ids=resource_ids,
+        question=normalized_message,
+    )
+    chat_session_id = await create_or_get_workspace_chat_session(
+        user_id=current_user.user_id,
+        session_id=body.session_id,
+        initial_message=normalized_message,
+        web_search_enabled=True if body.web_search_enabled is None else bool(body.web_search_enabled),
+    )
+    if body.web_search_enabled is not None:
+        await update_chat_session_web_search_enabled(
+            session_id=chat_session_id,
+            agent_id=None,
+            user_id=current_user.user_id,
+            web_search_enabled=body.web_search_enabled,
+            chat_scope=CHAT_SCOPE_WORKSPACE,
+        )
+    chat_session = await get_rag_chat_session(
+        session_id=chat_session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    effective_web_search_enabled = bool((chat_session or {}).get("web_search_enabled", True))
+    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
+    history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    try:
+        web_used, web_provider, web_results = await _resolve_web_context(
+            effective_web_search_enabled=effective_web_search_enabled,
+            normalized_message=normalized_message,
+            rag_context=rag_context.context or "",
+            history_block=history_block,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
+
+    prompt = _build_chat_prompt(
+        system_instructions="You are a generic workspace chat assistant.",
+        history_block=history_block,
+        rag_context=rag_context.context or "",
+        web_results=web_results,
+        normalized_message=normalized_message,
+    )
+    llm = get_llm(temperature=0.2)
+    result = await llm.ainvoke(prompt)
+    answer = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
+    if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+        answer = await _repair_url_access_refusal_if_needed(
+            answer=answer,
+            normalized_message=normalized_message,
+            rag_context=rag_context.context or "",
+            web_results=web_results,
+            llm=llm,
+        )
+    suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
+    user_msg = RagChatMessage(
+        message_id=str(uuid.uuid4()),
+        session_id=chat_session_id,
+        agent_id=None,
+        owner_id=current_user.user_id,
+        role="user",
+        content=normalized_message,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
+    assistant_msg = RagChatMessage(
+        message_id=str(uuid.uuid4()),
+        session_id=chat_session_id,
+        agent_id=None,
+        owner_id=current_user.user_id,
+        role="assistant",
+        content=answer,
+        citations=citations,
+        suggestions=suggestions,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    await append_chat_message(user_msg)
+    await append_chat_message(assistant_msg)
+    updated_history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
+    return {
+        "session_id": chat_session_id,
+        "agent_id": None,
+        "web_search_enabled": effective_web_search_enabled,
+        "web_used": web_used,
+        "web_provider": web_provider if web_used else None,
+        "reply": assistant_msg.to_dict(),
+        "messages": [m.to_dict() for m in updated_history],
+    }
+
+
+@app.post("/api/rag/chat/stream", tags=["RAG"])
+async def rag_chat_workspace_stream(
+    body: RagChatRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _consume_usage_or_429(current_user.user_id, UsageIncrement(total_questions=1))
+    normalized_message = body.message.strip()
+    if not normalized_message:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
+    if not resource_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "processing_failed", "message": "Workspace has no ready resources."},
+        )
+    rag_context = await retrieve_context_for_query(
+        agent_id="workspace",
+        user_id=current_user.user_id,
+        resource_ids=resource_ids,
+        question=normalized_message,
+    )
+    chat_session_id = await create_or_get_workspace_chat_session(
+        user_id=current_user.user_id,
+        session_id=body.session_id,
+        initial_message=normalized_message,
+        web_search_enabled=True if body.web_search_enabled is None else bool(body.web_search_enabled),
+    )
+    if body.web_search_enabled is not None:
+        await update_chat_session_web_search_enabled(
+            session_id=chat_session_id,
+            agent_id=None,
+            user_id=current_user.user_id,
+            web_search_enabled=body.web_search_enabled,
+            chat_scope=CHAT_SCOPE_WORKSPACE,
+        )
+    chat_session = await get_rag_chat_session(
+        session_id=chat_session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    effective_web_search_enabled = bool((chat_session or {}).get("web_search_enabled", True))
+    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
+    history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    try:
+        web_used, web_provider, web_results = await _resolve_web_context(
+            effective_web_search_enabled=effective_web_search_enabled,
+            normalized_message=normalized_message,
+            rag_context=rag_context.context or "",
+            history_block=history_block,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
+    prompt = _build_chat_prompt(
+        system_instructions="You are a generic workspace chat assistant.",
+        history_block=history_block,
+        rag_context=rag_context.context or "",
+        web_results=web_results,
+        normalized_message=normalized_message,
+    )
+    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
+
+    async def _stream_chat() -> AsyncGenerator[str, None]:
+        llm = get_llm(temperature=0.2)
+        answer_parts: list[str] = []
+        try:
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': web_used, 'web_provider': web_provider if web_used else None})}\n\n"
+            async for chunk in llm.astream(prompt):
+                text = _extract_llm_text(chunk.content if hasattr(chunk, "content") else chunk)
+                if not text:
+                    continue
+                answer_parts.append(text)
+                yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
+            answer = "".join(answer_parts).strip()
+            if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+                answer = await _repair_url_access_refusal_if_needed(
+                    answer=answer,
+                    normalized_message=normalized_message,
+                    rag_context=rag_context.context or "",
+                    web_results=web_results,
+                    llm=llm,
+                )
+            suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
+            await append_chat_message(
+                RagChatMessage(
+                    message_id=str(uuid.uuid4()),
+                    session_id=chat_session_id,
+                    agent_id=None,
+                    owner_id=current_user.user_id,
+                    role="user",
+                    content=normalized_message,
+                    chat_scope=CHAT_SCOPE_WORKSPACE,
+                )
+            )
+            await append_chat_message(
+                RagChatMessage(
+                    message_id=str(uuid.uuid4()),
+                    session_id=chat_session_id,
+                    agent_id=None,
+                    owner_id=current_user.user_id,
+                    role="assistant",
+                    content=answer,
+                    citations=citations,
+                    suggestions=suggestions,
+                    chat_scope=CHAT_SCOPE_WORKSPACE,
+                )
+            )
+            yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
+            if suggestions:
+                yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        _stream_chat(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/rag/chat/sessions", tags=["RAG"])
+async def list_rag_workspace_chat_sessions(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    sessions = await list_rag_chat_sessions(
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    return {"sessions": sessions}
+
+
+@app.get("/api/rag/chat/sessions/{session_id}/messages", tags=["RAG"])
+async def list_rag_workspace_chat_session_messages(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    messages = await list_rag_chat_messages(session_id, current_user.user_id)
+    return {
+        "session_id": session_id,
+        "agent_id": None,
+        "web_search_enabled": bool(session.get("web_search_enabled", True)),
+        "messages": [m.to_dict() for m in messages],
+    }
+
+
+@app.patch("/api/rag/chat/sessions/{session_id}", tags=["RAG"])
+async def update_rag_workspace_chat_session_title(
+    session_id: str,
+    body: UpdateSessionTitleRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    title = " ".join(body.title.strip().split())
+    if not title:
+        raise HTTPException(status_code=400, detail="Session title cannot be empty.")
+    if len(title) > 120:
+        raise HTTPException(status_code=400, detail="Session title is too long.")
+    updated = await update_rag_chat_session_title(
+        session_id=session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        title=title,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    return {"session_id": session_id, "title": title}
+
+
+@app.delete("/api/rag/chat/sessions/{session_id}", tags=["RAG"])
+async def delete_rag_workspace_chat_session(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    deleted = await delete_rag_chat_session(
+        session_id=session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
