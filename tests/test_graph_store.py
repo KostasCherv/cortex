@@ -2,6 +2,9 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
+from src.config import settings
 from src.tools.neo4j_graph_store import Neo4jGraphStore
 
 
@@ -153,6 +156,89 @@ def test_query_context_fuses_scores_and_applies_scope_filters():
     assert result.chunks[0]["chunk_id"] == "chunk-a"
     assert "openai" in result.entities
     assert "source:A" in result.context
+
+
+def test_query_context_excludes_chunks_below_min_cosine(monkeypatch):
+    monkeypatch.setattr(settings, "graph_rag_min_cosine_score", 0.15)
+
+    def side_effect(query, params, database_):
+        if "SEARCH node IN" in query or "db.index.vector.queryNodes" in query:
+            return [
+                {
+                    "chunk_id": "low",
+                    "text": "Noisy chunk with many entities",
+                    "source_url": "https://low.com",
+                    "source_title": "Low",
+                    "chunk_index": 0,
+                    "score": 0.14,
+                },
+                {
+                    "chunk_id": "high",
+                    "text": "Relevant chunk",
+                    "source_url": "https://high.com",
+                    "source_title": "High",
+                    "chunk_index": 1,
+                    "score": 0.5,
+                },
+            ]
+        if "UNWIND $chunk_ids" in query:
+            return [
+                {
+                    "chunk_id": "low",
+                    "mentions": ["openai", "model", "agent", "retrieval"],
+                    "neighbors": ["citation", "ranking"],
+                },
+                {"chunk_id": "high", "mentions": [], "neighbors": []},
+            ]
+        return []
+
+    driver = _fake_driver_with_side_effect(side_effect)
+    embed = MagicMock()
+    embed.embed_texts.return_value = [[0.2] * 4]
+
+    store = Neo4jGraphStore(driver=driver, embedding_client=embed)
+    result = store.query_context(query="OpenAI model", owner_id="u-1", workspace_id="u-1")
+
+    assert [chunk["chunk_id"] for chunk in result.chunks] == ["high"]
+
+
+def test_query_context_caps_entity_and_neighbor_bonus(monkeypatch):
+    monkeypatch.setattr(settings, "graph_rag_min_cosine_score", 0.15)
+
+    def side_effect(query, params, database_):
+        if "SEARCH node IN" in query or "db.index.vector.queryNodes" in query:
+            return [
+                {
+                    "chunk_id": "chunk-a",
+                    "text": "OpenAI model agent retrieval citation ranking",
+                    "source_url": "https://a.com",
+                    "source_title": "A",
+                    "chunk_index": 0,
+                    "score": 0.4,
+                }
+            ]
+        if "UNWIND $chunk_ids" in query:
+            return [
+                {
+                    "chunk_id": "chunk-a",
+                    "mentions": ["openai", "model", "agent", "retrieval", "citation", "ranking"],
+                    "neighbors": ["n1", "n2", "n3", "n4", "n5", "n6"],
+                }
+            ]
+        return []
+
+    driver = _fake_driver_with_side_effect(side_effect)
+    embed = MagicMock()
+    embed.embed_texts.return_value = [[0.2] * 4]
+
+    store = Neo4jGraphStore(driver=driver, embedding_client=embed)
+    result = store.query_context(
+        query="OpenAI model agent retrieval",
+        owner_id="u-1",
+        workspace_id="u-1",
+    )
+
+    assert result.chunks[0]["score"] == pytest.approx(0.65)
 
 
 def test_delete_resource_documents_scopes_delete_by_owner_and_workspace():

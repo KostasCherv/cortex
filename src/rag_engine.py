@@ -12,6 +12,7 @@ import httpx
 
 from src.db.supabase_store import SupabaseSessionStore
 from src.tools.neo4j_graph_store import Neo4jGraphStore
+from src.tools.reranker import rerank_chunks
 
 
 @dataclass
@@ -115,9 +116,15 @@ async def query_resource_context(
                 "source_url": row.get("source_url", ""),
             }
         )
+    reranked = await asyncio.to_thread(rerank_chunks, query=query, chunks=top)
+    context = "\n\n".join(
+        f"[source:{row['source_title']} chunk:{row['chunk_id']}]\n{row['text']}"
+        for row in reranked
+        if row.get("text")
+    )
     return RagQueryResult(
-        context=result.context,
-        chunks=top,
+        context=context,
+        chunks=reranked,
         entities=result.entities,
     )
 

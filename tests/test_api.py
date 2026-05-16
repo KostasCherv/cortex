@@ -795,6 +795,72 @@ def test_followup_stream_includes_suggestions_event():
     assert suggestions_idx < done_idx
 
 
+def test_followup_stream_citations_match_reranked_chunks():
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    mock_session = Session(
+        session_id="session-1",
+        runs=[SessionRun(run_id="run-1", query="q", source_urls=[], report="", created_at="2026")],
+        conversation=[],
+        created_at="2026",
+    )
+
+    raw_chunks = [
+        {
+            "chunk_id": "raw-1",
+            "text": "Less relevant",
+            "source_url": "https://a.com",
+            "source_title": "A",
+        },
+        {
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+            "source_url": "https://b.com",
+            "source_title": "B",
+        },
+    ]
+    reranked_chunks = [raw_chunks[1]]
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.endpoints.rerank_chunks", return_value=reranked_chunks),
+        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(
+            context="ctx",
+            chunks=raw_chunks,
+            entities=["a"],
+        )
+        mock_graph_cls.return_value = mock_graph
+        response = client.post(
+            "/sessions/session-1/followup",
+            json={"question": "What did you find?", "run_id": "run-1"},
+        )
+
+    assert response.status_code == 200
+    events = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "B",
+            "source_url": "https://b.com",
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+        }
+    ]
+
+
 async def _async_iter_impl(items):
     for item in items:
         yield item
@@ -1200,6 +1266,54 @@ def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
     mock_tool.search.assert_not_called()
 
 
+def test_rag_chat_explicit_url_fetch_forces_direct_fetch_when_session_web_disabled():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "Irrelevant SaaS Starter Kit context."
+    mock_context.chunks = [
+        {
+            "source_title": "SaaS_Starter_Kit.pdf",
+            "source_url": "https://storage.example/saas.pdf",
+            "chunk_id": "saas-1",
+            "text": "SaaS Starter Kit Guide",
+        }
+    ]
+    llm_result = MagicMock()
+    llm_result.content = "Archon page answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Archon page content")),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "check their page https://archon.diy"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["web_used"] is True
+    assert payload["web_provider"] == "direct_fetch"
+    assert payload["reply"]["citations"] == [
+        {
+            "source_title": "https://archon.diy",
+            "source_url": "https://archon.diy",
+            "chunk_id": "direct_fetch-web-1",
+            "text": "Archon page content",
+        }
+    ]
+
+
 def test_rag_chat_uses_prior_url_reference_for_direct_fetch():
     mock_agent = MagicMock()
     mock_agent.system_instructions = ""
@@ -1323,6 +1437,99 @@ def test_rag_chat_stream_repairs_url_access_refusal_when_web_content_exists():
     final_text = "".join(chunks).lower()
     assert "don't have the capability" not in final_text
     assert "cannot access" not in final_text
+
+
+def test_rag_chat_stream_direct_fetch_omits_stale_rag_citations_when_web_disabled():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "Irrelevant SaaS Starter Kit context."
+    mock_context.chunks = [
+        {
+            "source_title": "SaaS_Starter_Kit.pdf",
+            "source_url": "https://storage.example/saas.pdf",
+            "chunk_id": "saas-1",
+            "text": "SaaS Starter Kit Guide",
+        }
+    ]
+    llm_result = MagicMock()
+    llm_result.content = "Archon page answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Archon page content")),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={"message": "check their page https://archon.diy"},
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "https://archon.diy",
+            "source_url": "https://archon.diy",
+            "chunk_id": "direct_fetch-web-1",
+            "text": "Archon page content",
+        }
+    ]
+
+
+def test_rag_chat_stream_direct_fetches_bare_url_questions_and_omits_stale_rag_prompt():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "Irrelevant SaaS Starter Kit context."
+    mock_context.chunks = [
+        {
+            "source_title": "SaaS_Starter_Kit.pdf",
+            "source_url": "https://storage.example/saas.pdf",
+            "chunk_id": "saas-1",
+            "text": "SaaS Starter Kit Guide",
+        }
+    ]
+    llm_result = MagicMock()
+    llm_result.content = "Archon is a coding assistant platform."
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.fetch_url_content", new=AsyncMock(return_value="Archon page content")),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={"message": "is this a good tool to add in my stack? https://archon.diy and why?"},
+        )
+
+    assert response.status_code == 200
+    should_use_web.assert_not_awaited()
+    prompt = mock_llm.ainvoke.await_args.args[0]
+    assert "Archon page content" in prompt
+    assert "Irrelevant SaaS Starter Kit context" not in prompt
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    session_event = next(event for event in events if event["type"] == "session")
+    assert session_event["web_used"] is True
+    assert session_event["web_provider"] == "direct_fetch"
 
 
 def test_rag_chat_sessions_returns_agent_scoped_summaries():

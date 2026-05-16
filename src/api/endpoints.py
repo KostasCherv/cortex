@@ -43,6 +43,7 @@ from src.sessions import (
     get_session_run,
 )
 from src.tools.neo4j_graph_store import Neo4jGraphStore
+from src.tools.reranker import rerank_chunks
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
@@ -103,6 +104,8 @@ _inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_resea
 async def validate_session_store_configuration() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     validate_web_search_provider_health()
+    if not settings.cohere_api_key:
+        logger.warning("[startup] Cohere reranking is disabled (COHERE_API_KEY not set).")
 
     # Session persistence is optional for non-session routes.
     has_url = bool(settings.supabase_url)
@@ -288,6 +291,19 @@ def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict
     return citations
 
 
+def _build_chat_citations(
+    *,
+    rag_chunks: list[dict] | None,
+    web_results: list[dict] | None,
+    web_provider: str,
+    prefer_web: bool = False,
+) -> list[dict]:
+    web_citations = _build_web_citations(web_results, web_provider)
+    if prefer_web and web_citations:
+        return web_citations
+    return _build_rag_citations(rag_chunks) + web_citations
+
+
 def _build_workspace_fallback_citations(
     rag_context_text: str,
     existing_citations: list[dict],
@@ -325,9 +341,20 @@ def _extract_urls(text: str) -> list[str]:
 
 def _is_explicit_url_fetch_intent(message: str) -> bool:
     lower = message.lower()
+    if _extract_urls(message):
+        return True
     asks_to_fetch = any(
         phrase in lower
-        for phrase in ("fetch", "retrieve", "read", "summarize", "open")
+        for phrase in (
+            "fetch",
+            "retrieve",
+            "read",
+            "summarize",
+            "open",
+            "check",
+            "visit",
+            "look at",
+        )
     )
     mentions_urlish = any(
         phrase in lower
@@ -443,15 +470,27 @@ async def _resolve_web_context(
     web_provider = settings.web_search_provider.lower()
     web_used = False
     web_results: list[dict] = []
-    if not effective_web_search_enabled:
+    explicit_url_fetch = _is_explicit_url_fetch_intent(normalized_message)
+    if not effective_web_search_enabled and not explicit_url_fetch:
         return web_used, web_provider, web_results
+
+    if explicit_url_fetch:
+        direct_urls = _extract_urls(normalized_message) or _extract_urls(history_block)
+        if direct_urls:
+            url = direct_urls[0]
+            fetched = await fetch_url_content(url)
+            return (
+                True,
+                "direct_fetch",
+                [{"url": url, "title": url, "content": fetched, "raw_content": fetched}],
+            )
 
     should_use_web, decision_query = await _should_use_web_search(
         message=normalized_message,
         rag_context=rag_context,
         history_block=history_block,
     )
-    if not (should_use_web or _is_explicit_url_fetch_intent(normalized_message)):
+    if not (should_use_web or explicit_url_fetch):
         return web_used, web_provider, web_results
 
     web_query = decision_query or normalized_message
@@ -468,6 +507,12 @@ async def _resolve_web_context(
     tool = get_web_search_tool()
     web_results = await asyncio.to_thread(tool.search, web_query, settings.max_search_results)
     return True, tool.provider_name, web_results
+
+
+def _rag_context_for_answer(rag_context: str, web_provider: str) -> str:
+    if web_provider == "direct_fetch":
+        return ""
+    return rag_context
 
 
 def _build_chat_prompt(
@@ -617,7 +662,6 @@ async def _record_session_run(
     """Finalize an existing run with metadata."""
 
     retrieved = final_state.get("retrieved_contents") or []
-    summaries = final_state.get("summaries") or []
     source_urls = [s.get("url", "") for s in retrieved if s.get("url")]
 
     finalized = await update_session_run(
@@ -992,13 +1036,18 @@ async def _stream_followup(
             run_id=run_id,
             top_k=5,
         )
-        chunks = result.chunks
+        chunks = await asyncio.to_thread(
+            rerank_chunks,
+            query=question,
+            chunks=result.chunks,
+        )
     except Exception as exc:
         logger.warning("[followup] source retrieval failed: %s", exc)
         chunks = []
 
     context_block = "\n\n".join(
-        f"[Source: {c['source_title']} ({c['source_url']})]\n{c['text']}"
+        f"[Source: {c.get('source_title', '')} ({c.get('source_url', '')})]\n"
+        f"{c.get('text', '')}"
         for c in chunks
     )
 
@@ -1027,15 +1076,7 @@ async def _stream_followup(
         yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
         return
 
-    # Build citations from retrieved chunks (deduplicate by URL)
-    seen: set[str] = set()
-    citations: list[dict] = []
-    for c in chunks:
-        url = c["source_url"]
-        if url and url not in seen:
-            seen.add(url)
-            citations.append({"source_url": url, "source_title": c["source_title"]})
-
+    citations = _build_rag_citations(chunks)
     yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
 
     # Generate suggestions before persisting so they are stored with the turn
@@ -1646,10 +1687,11 @@ async def rag_chat_with_agent(
             },
         ) from exc
 
+    answer_rag_context = _rag_context_for_answer(rag_context.context or "", web_provider)
     prompt = _build_chat_prompt(
         system_instructions=agent.system_instructions or "None",
         history_block=history_block,
-        rag_context=rag_context.context or "",
+        rag_context=answer_rag_context,
         web_results=web_results,
         normalized_message=normalized_message,
     )
@@ -1662,18 +1704,18 @@ async def rag_chat_with_agent(
             for part in content
         )
     answer = content.strip()
-    if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+    if web_used and _is_explicit_url_fetch_intent(normalized_message):
         answer = await _repair_url_access_refusal_if_needed(
             answer=answer,
             normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
+            rag_context=answer_rag_context,
             web_results=web_results,
             llm=llm,
         )
     suggestions = await _generate_suggestions(
         normalized_message,
         answer,
-        rag_context.context or "",
+        answer_rag_context,
     )
 
     user_msg = RagChatMessage(
@@ -1684,7 +1726,12 @@ async def rag_chat_with_agent(
         role="user",
         content=normalized_message,
     )
-    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_chat_citations(
+        rag_chunks=rag_context.chunks,
+        web_results=web_results,
+        web_provider=web_provider,
+        prefer_web=web_provider == "direct_fetch",
+    )
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -1784,15 +1831,21 @@ async def rag_chat_with_agent_stream(
                 "error": str(exc),
             },
         ) from exc
+    answer_rag_context = _rag_context_for_answer(rag_context.context or "", web_provider)
     prompt = _build_chat_prompt(
         system_instructions=agent.system_instructions or "None",
         history_block=history_block,
-        rag_context=rag_context.context or "",
+        rag_context=answer_rag_context,
         web_results=web_results,
         normalized_message=normalized_message,
     )
 
-    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_chat_citations(
+        rag_chunks=rag_context.chunks,
+        web_results=web_results,
+        web_provider=web_provider,
+        prefer_web=web_provider == "direct_fetch",
+    )
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
         llm = get_llm(temperature=0.2)
@@ -1808,7 +1861,7 @@ async def rag_chat_with_agent_stream(
                 answer = await _repair_url_access_refusal_if_needed(
                     answer=answer,
                     normalized_message=normalized_message,
-                    rag_context=rag_context.context or "",
+                    rag_context=answer_rag_context,
                     web_results=web_results,
                     llm=llm,
                 )
@@ -1835,7 +1888,7 @@ async def rag_chat_with_agent_stream(
             suggestions = await _generate_suggestions(
                 normalized_message,
                 answer,
-                rag_context.context or "",
+                answer_rag_context,
             )
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -2015,25 +2068,26 @@ async def rag_chat_workspace(
     except Exception as exc:
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
 
+    answer_rag_context = _rag_context_for_answer(rag_context.context or "", web_provider)
     prompt = _build_chat_prompt(
         system_instructions="You are a generic workspace chat assistant.",
         history_block=history_block,
-        rag_context=rag_context.context or "",
+        rag_context=answer_rag_context,
         web_results=web_results,
         normalized_message=normalized_message,
     )
     llm = get_llm(temperature=0.2)
     result = await llm.ainvoke(prompt)
     answer = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-    if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+    if web_used and _is_explicit_url_fetch_intent(normalized_message):
         answer = await _repair_url_access_refusal_if_needed(
             answer=answer,
             normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
+            rag_context=answer_rag_context,
             web_results=web_results,
             llm=llm,
         )
-    suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
+    suggestions = await _generate_suggestions(normalized_message, answer, answer_rag_context)
     user_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -2043,7 +2097,12 @@ async def rag_chat_workspace(
         content=normalized_message,
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
-    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_chat_citations(
+        rag_chunks=rag_context.chunks,
+        web_results=web_results,
+        web_provider=web_provider,
+        prefer_web=web_provider == "direct_fetch",
+    )
     citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
@@ -2123,14 +2182,20 @@ async def rag_chat_workspace_stream(
         )
     except Exception as exc:
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
+    answer_rag_context = _rag_context_for_answer(rag_context.context or "", web_provider)
     prompt = _build_chat_prompt(
         system_instructions="You are a generic workspace chat assistant.",
         history_block=history_block,
-        rag_context=rag_context.context or "",
+        rag_context=answer_rag_context,
         web_results=web_results,
         normalized_message=normalized_message,
     )
-    citations = _build_rag_citations(rag_context.chunks) + _build_web_citations(web_results, web_provider)
+    citations = _build_chat_citations(
+        rag_chunks=rag_context.chunks,
+        web_results=web_results,
+        web_provider=web_provider,
+        prefer_web=web_provider == "direct_fetch",
+    )
     citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
@@ -2145,15 +2210,15 @@ async def rag_chat_workspace_stream(
                 answer_parts.append(text)
                 yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
             answer = "".join(answer_parts).strip()
-            if effective_web_search_enabled and web_used and _is_explicit_url_fetch_intent(normalized_message):
+            if web_used and _is_explicit_url_fetch_intent(normalized_message):
                 answer = await _repair_url_access_refusal_if_needed(
                     answer=answer,
                     normalized_message=normalized_message,
-                    rag_context=rag_context.context or "",
+                    rag_context=answer_rag_context,
                     web_results=web_results,
                     llm=llm,
                 )
-            suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
+            suggestions = await _generate_suggestions(normalized_message, answer, answer_rag_context)
             await append_chat_message(
                 RagChatMessage(
                     message_id=str(uuid.uuid4()),

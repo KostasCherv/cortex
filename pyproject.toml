@@ -38,6 +38,7 @@ dependencies = [
     "stripe>=11.0.0",
     "redis>=5.0.0",
     "neo4j>=5.26.0",
+    "cohere>=5.0.0",
 ]
 
 [project.optional-dependencies]

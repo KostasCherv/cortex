@@ -81,6 +81,23 @@ class Settings(BaseSettings):
         default=2,
         description="Max RELATES_TO hop expansion during graph retrieval (1-2).",
     )
+    graph_rag_min_cosine_score: float = Field(
+        default=0.15,
+        description="Minimum chunk cosine similarity before graph score fusion.",
+    )
+    cohere_api_key: str = Field(default="", description="Cohere API key for reranking.")
+    rerank_top_k: int = Field(
+        default=5,
+        description="Maximum RAG chunks to keep after cross-encoder reranking.",
+    )
+    rerank_relevance_threshold: float = Field(
+        default=0.3,
+        description="Minimum reranker relevance score required for a citation.",
+    )
+    rerank_timeout_seconds: float = Field(
+        default=10.0,
+        description="HTTP timeout in seconds for Cohere reranking requests.",
+    )
 
     # API
     api_host: str = Field(default="0.0.0.0")

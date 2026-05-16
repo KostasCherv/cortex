@@ -24,6 +24,13 @@ _CHUNK_OVERLAP = 120
 _MAX_LLM_EXTRACTION_CHUNKS = 5
 _DEFAULT_MENTION_CONFIDENCE = 0.7
 _DEFAULT_RELATION_CONFIDENCE = 0.6
+_MENTION_OVERLAP_BONUS = 0.08
+_MENTION_COUNT_BONUS = 0.05
+_MENTION_BONUS_CAP = 0.15
+_NEIGHBOR_COUNT_BONUS = 0.03
+_NEIGHBOR_BONUS_CAP = 0.10
+_MAX_BONUS_MENTIONS = 3
+_MAX_BONUS_NEIGHBORS = 5
 
 
 @dataclass
@@ -552,15 +559,24 @@ class Neo4jGraphStore:
         query_tokens = {token for token in re.split(r"\W+", query.lower()) if token}
         scored_rows: list[dict[str, Any]] = []
         for row in candidate_rows:
+            cosine = float(row.get("score") or 0.0)
+            if cosine < settings.graph_rag_min_cosine_score:
+                continue
+
             chunk_id = row["chunk_id"]
             enrich = enrichment.get(chunk_id, {"mentions": [], "neighbors": []})
             mention_overlap = len(query_tokens & set(enrich["mentions"]))
-            fused_score = (
-                float(row.get("score") or 0.0)
-                + (0.05 * len(enrich["mentions"]))
-                + (0.03 * len(enrich["neighbors"]))
-                + (0.08 * mention_overlap)
+            entity_bonus = min(
+                _MENTION_OVERLAP_BONUS * mention_overlap
+                + _MENTION_COUNT_BONUS * min(len(enrich["mentions"]), _MAX_BONUS_MENTIONS),
+                _MENTION_BONUS_CAP,
             )
+            neighbor_bonus = min(
+                _NEIGHBOR_COUNT_BONUS
+                * min(len(enrich["neighbors"]), _MAX_BONUS_NEIGHBORS),
+                _NEIGHBOR_BONUS_CAP,
+            )
+            fused_score = cosine + entity_bonus + neighbor_bonus
 
             scored_rows.append(
                 {
@@ -579,6 +595,9 @@ class Neo4jGraphStore:
 
         scored_rows.sort(key=lambda item: item["score"], reverse=True)
         top_rows = scored_rows[:effective_top_k]
+
+        if not top_rows:
+            return GraphQueryResult(context="", chunks=[], entities=[])
 
         entities: list[str] = []
         seen_entities = set()

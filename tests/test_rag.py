@@ -18,6 +18,7 @@ from src.rag import (
     suggest_chat_session_title,
     update_chat_session_title,
 )
+from src.rag_engine import query_resource_context
 
 
 async def test_create_resource_rejects_unsupported_extension():
@@ -176,6 +177,58 @@ async def test_suggest_chat_session_title_fallback_when_llm_fails():
             await suggest_chat_session_title("How to reset access token quickly")
             == "How to reset access token quickly"
         )
+
+
+async def test_query_resource_context_returns_reranked_chunks_and_context():
+    raw_result = MagicMock()
+    raw_result.chunks = [
+        {
+            "resource_id": "res-1",
+            "chunk_id": "raw-1",
+            "text": "Less relevant",
+            "source_title": "Doc",
+            "source_url": "https://example.com/1",
+        },
+        {
+            "resource_id": "res-1",
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+            "source_title": "Doc",
+            "source_url": "https://example.com/2",
+        },
+    ]
+    raw_result.entities = ["entity"]
+
+    reranked = [
+        {
+            "resource_id": "res-1",
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+            "source_title": "Doc",
+            "source_url": "https://example.com/2",
+            "rerank_score": 0.92,
+        }
+    ]
+
+    with (
+        patch("src.rag_engine.Neo4jGraphStore") as graph_cls,
+        patch("src.rag_engine.rerank_chunks", return_value=reranked) as rerank_mock,
+    ):
+        graph_cls.return_value.query_context.return_value = raw_result
+
+        result = await query_resource_context(
+            store=AsyncMock(),
+            resource_ids=["res-1"],
+            owner_id="user-1",
+            workspace_id="user-1",
+            query="What is relevant?",
+        )
+
+    rerank_mock.assert_called_once()
+    assert [chunk["chunk_id"] for chunk in result.chunks] == ["raw-2"]
+    assert result.chunks[0]["rerank_score"] == 0.92
+    assert "[source:Doc chunk:raw-2]" in result.context
+    assert "Less relevant" not in result.context
 
 
 def test_rag_chat_message_to_dict_includes_chat_scope():
