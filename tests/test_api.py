@@ -1262,6 +1262,47 @@ def test_workspace_rag_chat_stream_empty_context_searches_web_without_toggle():
     ]
 
 
+def test_workspace_rag_chat_uses_prior_topic_when_current_message_is_generic():
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Online answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://archon.diy", "title": "Archon", "content": "Fact"}]
+    prior_user = MagicMock()
+    prior_user.role = "user"
+    prior_user.content = "is archon a good tool to add in my stack and why?"
+    prior_user.to_dict.return_value = {"role": "user", "content": prior_user.content}
+
+    with (
+        patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(side_effect=[[prior_user], []])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/chat",
+            json={"message": "search online for infos"},
+        )
+
+    assert response.status_code == 200
+    should_use_web.assert_not_awaited()
+    mock_tool.search.assert_called_once_with(
+        "is archon a good tool to add in my stack and why?",
+        endpoints.settings.max_search_results,
+    )
+
+
 def test_rag_chat_persists_suggestions_on_assistant_message():
     mock_agent = MagicMock()
     mock_agent.system_instructions = "Keep it concise."
@@ -1443,6 +1484,49 @@ def test_rag_chat_semantically_wrong_context_searches_web_and_omits_stale_citati
             "text": "Archon YAML setup details.",
         }
     ]
+
+
+def test_rag_chat_uses_prior_topic_when_current_message_is_generic():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Online answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://archon.diy", "title": "Archon", "content": "Fact"}]
+    prior_user = MagicMock()
+    prior_user.role = "user"
+    prior_user.content = "is archon a good tool to add in my stack and why?"
+    prior_user.to_dict.return_value = {"role": "user", "content": prior_user.content}
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(side_effect=[[prior_user], []])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "search online for infos"},
+        )
+
+    assert response.status_code == 200
+    should_use_web.assert_not_awaited()
+    mock_tool.search.assert_called_once_with(
+        "is archon a good tool to add in my stack and why?",
+        endpoints.settings.max_search_results,
+    )
 
 
 def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed():

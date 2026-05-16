@@ -449,21 +449,19 @@ def _is_weak_topic_query(message: str) -> bool:
     return len(_query_signal_tokens(message)) <= 1
 
 
-def _select_followup_web_query(question: str, conversation: list[ConversationTurn]) -> str:
-    if not _is_weak_topic_query(question):
-        return question
+def _normalize_web_lookup_query(message: str, prior_user_messages: list[str]) -> str:
+    if not _is_weak_topic_query(message):
+        return message
 
-    for turn in reversed(conversation):
-        if turn.role != "user":
-            continue
-        candidate = (turn.content or "").strip()
+    for prior in reversed(prior_user_messages):
+        candidate = (prior or "").strip()
         if not candidate:
             continue
         if _is_weak_topic_query(candidate):
             continue
         return candidate
 
-    return question
+    return message
 
 
 def _is_rag_context_insufficient(
@@ -1192,8 +1190,8 @@ async def _stream_followup(
     history_block = "\n".join(
         f"{t.role.upper()}: {t.content}" for t in session.conversation[-6:]
     )
-
-    web_query = _select_followup_web_query(question, session.conversation)
+    prior_user_messages = [t.content for t in session.conversation if t.role == "user"]
+    web_query = _normalize_web_lookup_query(question, prior_user_messages)
 
     try:
         resolved_web = await _resolve_web_context(
@@ -1812,9 +1810,11 @@ async def rag_chat_with_agent(
         f"{m.role.upper()}: {m.content}"
         for m in history[-10:]
     )
+    prior_user_messages = [m.content for m in history if m.role == "user"]
+    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
+            normalized_message=web_query,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -1945,9 +1945,11 @@ async def rag_chat_with_agent_stream(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    prior_user_messages = [m.content for m in history if m.role == "user"]
+    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
+            normalized_message=web_query,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -2178,9 +2180,11 @@ async def rag_chat_workspace(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    prior_user_messages = [m.content for m in history if m.role == "user"]
+    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
+            normalized_message=web_query,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -2279,9 +2283,11 @@ async def rag_chat_workspace_stream(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
+    prior_user_messages = [m.content for m in history if m.role == "user"]
+    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
+            normalized_message=web_query,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
