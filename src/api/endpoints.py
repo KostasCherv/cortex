@@ -14,6 +14,7 @@ import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from src.graph.graph import build_graph
@@ -651,25 +652,33 @@ def _rag_context_for_answer(rag_context: str, resolved_web: _ResolvedWebContext)
     return rag_context
 
 
-def _build_chat_prompt(
+def _build_chat_messages(
     *,
     system_instructions: str,
-    history_block: str,
+    history: list,
     rag_context: str,
     web_results: list[dict],
     normalized_message: str,
-) -> str:
-    return (
+) -> list[BaseMessage]:
+    system_content = (
         "You are a custom RAG assistant.\n\n"
         "Important: You can use provided web search context when available. "
         "Do not claim you cannot access URLs or browse the web.\n\n"
         f"System instructions:\n{system_instructions or 'None'}\n\n"
-        f"Conversation history:\n{history_block or 'None'}\n\n"
         f"Retrieved context:\n{rag_context or 'No context returned.'}\n\n"
         f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
-        f"User question:\n{normalized_message}\n\n"
         "Answer clearly and stay grounded in the retrieved context."
     )
+    messages: list[BaseMessage] = [SystemMessage(content=system_content)]
+    for turn in history:
+        role = turn.role if hasattr(turn, "role") else turn.get("role", "")
+        content = turn.content if hasattr(turn, "content") else turn.get("content", "")
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=normalized_message))
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -1834,15 +1843,15 @@ async def rag_chat_with_agent(
         ) from exc
 
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    prompt = _build_chat_prompt(
+    messages = _build_chat_messages(
         system_instructions=agent.system_instructions or "None",
-        history_block=history_block,
+        history=history,
         rag_context=answer_rag_context,
         web_results=resolved_web.results,
         normalized_message=normalized_message,
     )
     llm = get_llm(temperature=0.2)
-    result = await llm.ainvoke(prompt)
+    result = await llm.ainvoke(messages)
     content = result.content
     if not isinstance(content, str):
         content = "".join(
@@ -1968,9 +1977,9 @@ async def rag_chat_with_agent_stream(
             },
         ) from exc
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    prompt = _build_chat_prompt(
+    messages = _build_chat_messages(
         system_instructions=agent.system_instructions or "None",
-        history_block=history_block,
+        history=history,
         rag_context=answer_rag_context,
         web_results=resolved_web.results,
         normalized_message=normalized_message,
@@ -1990,7 +1999,7 @@ async def rag_chat_with_agent_stream(
             yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
             explicit_url_fetch = _is_explicit_url_fetch_intent(normalized_message)
             if resolved_web.used and explicit_url_fetch:
-                result = await llm.ainvoke(prompt)
+                result = await llm.ainvoke(messages)
                 answer = _extract_llm_text(
                     result.content if hasattr(result, "content") else result
                 ).strip()
@@ -2004,7 +2013,7 @@ async def rag_chat_with_agent_stream(
                 if answer:
                     yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             else:
-                async for chunk in llm.astream(prompt):
+                async for chunk in llm.astream(messages):
                     content = chunk.content if hasattr(chunk, "content") else chunk
                     token = ""
                     if isinstance(content, str):
@@ -2193,15 +2202,15 @@ async def rag_chat_workspace(
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
 
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    prompt = _build_chat_prompt(
+    messages = _build_chat_messages(
         system_instructions="You are a generic workspace chat assistant.",
-        history_block=history_block,
+        history=history,
         rag_context=answer_rag_context,
         web_results=resolved_web.results,
         normalized_message=normalized_message,
     )
     llm = get_llm(temperature=0.2)
-    result = await llm.ainvoke(prompt)
+    result = await llm.ainvoke(messages)
     answer = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
     if resolved_web.used and _is_explicit_url_fetch_intent(normalized_message):
         answer = await _repair_url_access_refusal_if_needed(
@@ -2295,9 +2304,9 @@ async def rag_chat_workspace_stream(
     except Exception as exc:
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    prompt = _build_chat_prompt(
+    messages = _build_chat_messages(
         system_instructions="You are a generic workspace chat assistant.",
-        history_block=history_block,
+        history=history,
         rag_context=answer_rag_context,
         web_results=resolved_web.results,
         normalized_message=normalized_message,
@@ -2315,7 +2324,7 @@ async def rag_chat_workspace_stream(
         answer_parts: list[str] = []
         try:
             yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
-            async for chunk in llm.astream(prompt):
+            async for chunk in llm.astream(messages):
                 text = _extract_llm_text(chunk.content if hasattr(chunk, "content") else chunk)
                 if not text:
                     continue

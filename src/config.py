@@ -91,7 +91,7 @@ class Settings(BaseSettings):
         description="Maximum RAG chunks to keep after cross-encoder reranking.",
     )
     rerank_relevance_threshold: float = Field(
-        default=0.3,
+        default=0.4,
         description="Minimum reranker relevance score required for a citation.",
     )
     rerank_timeout_seconds: float = Field(

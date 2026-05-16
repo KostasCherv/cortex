@@ -1856,9 +1856,10 @@ def test_rag_chat_stream_direct_fetches_bare_url_questions_and_omits_stale_rag_p
 
     assert response.status_code == 200
     should_use_web.assert_not_awaited()
-    prompt = mock_llm.ainvoke.await_args.args[0]
-    assert "Archon page content" in prompt
-    assert "Irrelevant SaaS Starter Kit context" not in prompt
+    messages = mock_llm.ainvoke.await_args.args[0]
+    all_content = " ".join(m.content for m in messages)
+    assert "Archon page content" in all_content
+    assert "Irrelevant SaaS Starter Kit context" not in all_content
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     session_event = next(event for event in events if event["type"] == "session")
     assert session_event["web_used"] is True

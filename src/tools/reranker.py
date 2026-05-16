@@ -121,7 +121,7 @@ def _rerank_with_cohere(
 
     if ranked:
         return ranked[:top_k]
-    if best_overall is not None:
+    if best_overall is not None and best_overall["rerank_score"] >= threshold:
         return [best_overall]
     return []
 
