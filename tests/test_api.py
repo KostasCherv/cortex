@@ -14,7 +14,7 @@ from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
 from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary, UserSubscription
 from src.rag import RagValidationError
-from src.sessions import Session, SessionRun
+from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
 
 with patch("src.api.endpoints.validate_web_search_provider_health"):
@@ -861,6 +861,103 @@ def test_followup_stream_citations_match_reranked_chunks():
     ]
 
 
+def test_followup_stream_empty_context_searches_web_and_emits_web_citations():
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Online follow-up answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://web.example", "title": "Web", "content": "Fact"}]
+
+    mock_session = Session(
+        session_id="session-1",
+        runs=[SessionRun(run_id="run-1", query="q", source_urls=[], report="", created_at="2026")],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.endpoints.rerank_chunks", return_value=[]),
+        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
+        response = client.post(
+            "/sessions/session-1/followup",
+            json={"question": "What is Archon?", "run_id": "run-1"},
+        )
+
+    assert response.status_code == 200
+    mock_tool.search.assert_called_once_with("What is Archon?", endpoints.settings.max_search_results)
+    events = [
+        json.loads(line[6:])
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "Web",
+            "source_url": "https://web.example",
+            "chunk_id": "tavily-web-1",
+            "text": "Fact",
+        }
+    ]
+
+
+def test_followup_stream_uses_prior_topic_when_followup_query_is_generic():
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Online follow-up answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://archon.diy", "title": "Archon", "content": "Fact"}]
+
+    mock_session = Session(
+        session_id="session-1",
+        runs=[SessionRun(run_id="run-1", query="q", source_urls=[], report="", created_at="2026")],
+        conversation=[
+                ConversationTurn(
+                    role="user",
+                    content="is archon a good tool to add in my stack and why?",
+                    run_id="run-1",
+                )
+        ],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.endpoints.rerank_chunks", return_value=[]),
+        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
+        response = client.post(
+            "/sessions/session-1/followup",
+            json={"question": "search online for infos", "run_id": "run-1"},
+        )
+
+    assert response.status_code == 200
+    mock_tool.search.assert_called_once_with(
+        "is archon a good tool to add in my stack and why?",
+        endpoints.settings.max_search_results,
+    )
+
+
 async def _async_iter_impl(items):
     for item in items:
         yield item
@@ -1117,6 +1214,54 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
     ]
 
 
+def test_workspace_rag_chat_stream_empty_context_searches_web_without_toggle():
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Online workspace answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://web.example", "title": "Web", "content": "Fact"}]
+
+    with (
+        patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/chat/stream",
+            json={"message": "What is Archon?", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    should_use_web.assert_not_awaited()
+    mock_tool.search.assert_called_once_with("What is Archon?", endpoints.settings.max_search_results)
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    session_event = next(event for event in events if event["type"] == "session")
+    assert session_event["web_used"] is True
+    assert session_event["web_provider"] == "tavily"
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "Web",
+            "source_url": "https://web.example",
+            "chunk_id": "tavily-web-1",
+            "text": "Fact",
+        }
+    ]
+
+
 def test_rag_chat_persists_suggestions_on_assistant_message():
     mock_agent = MagicMock()
     mock_agent.system_instructions = "Keep it concise."
@@ -1173,7 +1318,6 @@ def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
@@ -1189,6 +1333,116 @@ def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
     assert response.status_code == 200
     assert response.json()["web_used"] is True
     mock_tool.search.assert_called_once()
+
+
+def test_rag_chat_empty_context_searches_web_without_toggle():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "Online answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://web.example", "title": "Web", "content": "Fact"}]
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "What is Archon?"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["web_used"] is True
+    assert payload["web_provider"] == "tavily"
+    should_use_web.assert_not_awaited()
+    mock_tool.search.assert_called_once_with("What is Archon?", endpoints.settings.max_search_results)
+    assert payload["reply"]["citations"] == [
+        {
+            "source_title": "Web",
+            "source_url": "https://web.example",
+            "chunk_id": "tavily-web-1",
+            "text": "Fact",
+        }
+    ]
+
+
+def test_rag_chat_semantically_wrong_context_searches_web_and_omits_stale_citations():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = ""
+    mock_context = MagicMock()
+    mock_context.context = "SaaS Starter Kit guide for launching subscription templates."
+    mock_context.chunks = [
+        {
+            "source_title": "SaaS_Starter_Kit.pdf",
+            "source_url": "https://storage.example/saas.pdf",
+            "chunk_id": "saas-1",
+            "text": "SaaS Starter Kit guide for launching subscription templates.",
+        }
+    ]
+    llm_result = MagicMock()
+    llm_result.content = "Use this Archon YAML configuration."
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [
+        {
+            "url": "https://archon.diy/docs/setup",
+            "title": "Archon setup",
+            "content": "Archon YAML setup details.",
+        }
+    ]
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))) as should_use_web,
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "give me example of a yaml file for the setup of archon in my project"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["web_used"] is True
+    assert payload["web_provider"] == "tavily"
+    should_use_web.assert_not_awaited()
+    mock_tool.search.assert_called_once_with(
+        "give me example of a yaml file for the setup of archon in my project",
+        endpoints.settings.max_search_results,
+    )
+    assert payload["reply"]["citations"] == [
+        {
+            "source_title": "Archon setup",
+            "source_url": "https://archon.diy/docs/setup",
+            "chunk_id": "tavily-web-1",
+            "text": "Archon YAML setup details.",
+        }
+    ]
 
 
 def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed():
@@ -1208,7 +1462,6 @@ def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed()
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
@@ -1244,7 +1497,6 @@ def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
@@ -1332,7 +1584,6 @@ def test_rag_chat_uses_prior_url_reference_for_direct_fetch():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[prior_msg])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
@@ -1375,7 +1626,6 @@ def test_rag_chat_repairs_url_access_refusal_when_web_content_exists():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
@@ -1416,7 +1666,6 @@ def test_rag_chat_stream_repairs_url_access_refusal_when_web_content_exists():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.update_chat_session_web_search_enabled", new=AsyncMock(return_value=True)),
         patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),

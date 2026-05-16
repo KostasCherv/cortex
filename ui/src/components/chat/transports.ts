@@ -10,7 +10,7 @@ import type { RagChatMessage, RagChatSessionSummary } from '@/types'
 
 export type StreamCallbacks = {
   signal?: AbortSignal
-  onSession: (sessionId: string, webSearchEnabled?: boolean, webUsed?: boolean, webProvider?: string | null) => void
+  onSession: (sessionId: string, webUsed?: boolean, webProvider?: string | null) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagChatMessage['citations']) => void
   onSuggestions?: (suggestions: string[]) => void
@@ -28,7 +28,6 @@ export type ChatTransport = {
   streamMessage: (
     message: string,
     sessionId: string | null,
-    webSearchEnabled: boolean,
     accessToken: string,
     callbacks: StreamCallbacks,
   ) => Promise<void>
@@ -49,8 +48,8 @@ export function createAgentChatTransport(agentId: string): ChatTransport {
         messages: res.messages,
       }
     },
-    streamMessage: async (message, sessionId, webSearchEnabled, accessToken, callbacks) => {
-      await streamRagAgentChat(agentId, message, sessionId, webSearchEnabled, accessToken, callbacks)
+    streamMessage: async (message, sessionId, accessToken, callbacks) => {
+      await streamRagAgentChat(agentId, message, sessionId, accessToken, callbacks)
     },
   }
 }
@@ -69,7 +68,7 @@ export const workspaceChatTransport: ChatTransport = {
       messages: res.messages,
     }
   },
-  streamMessage: async (message, sessionId, webSearchEnabled, accessToken, callbacks) => {
-    await streamRagWorkspaceChat(message, sessionId, webSearchEnabled, accessToken, callbacks)
+  streamMessage: async (message, sessionId, accessToken, callbacks) => {
+    await streamRagWorkspaceChat(message, sessionId, accessToken, callbacks)
   },
 }

@@ -25,7 +25,6 @@ export function AgentChat({ agent, accessToken, activeSessionId, onSessionActiva
       subtitle={agent.description || undefined}
       emptyState={`Ask ${agent.name} about its linked resources.`}
       resourceLabel={`${agent.linked_resource_ids.length} resources`}
-      defaultWebSearchEnabled={false}
     />
   )
 }

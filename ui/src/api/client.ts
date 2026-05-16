@@ -542,7 +542,7 @@ export async function chatWithRagAgent(
 
 type RagAgentChatStreamOptions = {
   signal?: AbortSignal
-  onSession: (sessionId: string, webSearchEnabled?: boolean, webUsed?: boolean, webProvider?: string | null) => void
+  onSession: (sessionId: string, webUsed?: boolean, webProvider?: string | null) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagCitation[]) => void
   onSuggestions?: (suggestions: string[]) => void
@@ -588,7 +588,6 @@ export async function streamRagAgentChat(
   agentId: string,
   message: string,
   sessionId: string | null,
-  webSearchEnabled: boolean,
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
 ): Promise<void> {
@@ -599,7 +598,7 @@ export async function streamRagAgentChat(
       Accept: 'text/event-stream',
       ...authHeaders(accessToken),
     },
-    body: JSON.stringify({ message, session_id: sessionId, web_search_enabled: webSearchEnabled }),
+    body: JSON.stringify({ message, session_id: sessionId }),
     signal: options.signal,
   })
 
@@ -616,7 +615,7 @@ export async function streamRagAgentChat(
 
   const handleEvent = (parsed: RagChatStreamEvent): boolean => {
     if (parsed.type === 'session') {
-      options.onSession(parsed.session_id, parsed.web_search_enabled, parsed.web_used, parsed.web_provider)
+      options.onSession(parsed.session_id, parsed.web_used, parsed.web_provider)
       return false
     }
     if (parsed.type === 'chunk') {
@@ -683,7 +682,6 @@ export async function streamRagAgentChat(
 export async function streamRagWorkspaceChat(
   message: string,
   sessionId: string | null,
-  webSearchEnabled: boolean,
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
 ): Promise<void> {
@@ -694,7 +692,7 @@ export async function streamRagWorkspaceChat(
       Accept: 'text/event-stream',
       ...authHeaders(accessToken),
     },
-    body: JSON.stringify({ message, session_id: sessionId, web_search_enabled: webSearchEnabled }),
+    body: JSON.stringify({ message, session_id: sessionId }),
     signal: options.signal,
   })
 
@@ -711,7 +709,7 @@ export async function streamRagWorkspaceChat(
 
   const handleEvent = (parsed: RagChatStreamEvent): boolean => {
     if (parsed.type === 'session') {
-      options.onSession(parsed.session_id, parsed.web_search_enabled, parsed.web_used, parsed.web_provider)
+      options.onSession(parsed.session_id, parsed.web_used, parsed.web_provider)
       return false
     }
     if (parsed.type === 'chunk') {

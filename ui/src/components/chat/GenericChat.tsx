@@ -19,7 +19,6 @@ export function GenericChat({ accessToken, activeSessionId, onSessionActivated, 
       title="Chat"
       subtitle="Workspace-wide chat across your uploaded resources."
       emptyState="Ask anything about your resources or the web."
-      defaultWebSearchEnabled
     />
   )
 }

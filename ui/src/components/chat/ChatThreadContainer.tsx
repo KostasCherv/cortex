@@ -6,7 +6,6 @@ import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { RagChatMessage } from '@/types'
@@ -22,7 +21,6 @@ type Props = {
   subtitle?: string
   emptyState: string
   resourceLabel?: string
-  defaultWebSearchEnabled?: boolean
 }
 
 function MarkdownMessage({ content }: { content: string }) {
@@ -132,7 +130,6 @@ export function ChatThreadContainer({
   subtitle,
   emptyState,
   resourceLabel,
-  defaultWebSearchEnabled = false,
 }: Props) {
   const [messages, setMessages] = useState<RagChatMessage[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -140,7 +137,6 @@ export function ChatThreadContainer({
   const [chatting, setChatting] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [webSearchEnabled, setWebSearchEnabled] = useState(defaultWebSearchEnabled)
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
 
@@ -164,10 +160,9 @@ export function ChatThreadContainer({
     setInput('')
     setStreamingText('')
     setError(null)
-    setWebSearchEnabled(defaultWebSearchEnabled)
     setWebUsedLastReply(false)
     setLatestSuggestions([])
-  }, [transport.key, defaultWebSearchEnabled])
+  }, [transport.key])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -183,7 +178,6 @@ export function ChatThreadContainer({
         loadedSessionRef.current = res.session_id
         setSessionId(res.session_id)
         setMessages(res.messages)
-        setWebSearchEnabled(Boolean(res.web_search_enabled))
         setError(null)
       } catch (err) {
         if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
@@ -239,14 +233,13 @@ export function ChatThreadContainer({
     let streamFailed = false
 
     try {
-      await transport.streamMessage(question, sessionId, webSearchEnabled, accessToken, {
+      await transport.streamMessage(question, sessionId, accessToken, {
         signal: controller.signal,
-        onSession: (nextSessionId, nextWebSearchEnabled, webUsed) => {
+        onSession: (nextSessionId, webUsed) => {
           if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
           streamedSessionId = nextSessionId
           loadedSessionRef.current = nextSessionId
           setSessionId(nextSessionId)
-          if (typeof nextWebSearchEnabled === 'boolean') setWebSearchEnabled(nextWebSearchEnabled)
           setWebUsedLastReply(Boolean(webUsed))
           if (!sessionId) onSessionActivated(nextSessionId)
         },
@@ -325,10 +318,6 @@ export function ChatThreadContainer({
           {subtitle && <p className="text-xs text-muted-foreground truncate max-w-md">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Web search</span>
-            <Switch checked={webSearchEnabled} onCheckedChange={setWebSearchEnabled} disabled={chatting} aria-label="Enable web search" />
-          </div>
           {resourceLabel && <span className="shrink-0 text-xs text-muted-foreground">{resourceLabel}</span>}
           {webUsedLastReply && <Badge variant="outline">Web used</Badge>}
         </div>
