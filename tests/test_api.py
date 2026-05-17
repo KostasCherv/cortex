@@ -2011,3 +2011,157 @@ def test_rag_agent_delete_not_found():
 
 def _async_iter(items):
     return _async_iter_impl(items)
+
+
+# ── delete last-exchange: workspace ──────────────────────────────────────────
+
+
+def test_delete_workspace_last_exchange_removes_pair():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(True, None)),
+        ),
+    ):
+        response = client.delete("/api/rag/chat/sessions/sess-1/last-exchange")
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "sess-1", "deleted": True}
+
+
+def test_delete_workspace_last_exchange_404_when_session_missing():
+    with patch(
+        "src.api.endpoints.get_rag_chat_session",
+        new=AsyncMock(return_value=None),
+    ):
+        response = client.delete("/api/rag/chat/sessions/missing/last-exchange")
+
+    assert response.status_code == 404
+
+
+def test_delete_workspace_last_exchange_404_when_empty():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(False, "empty")),
+        ),
+    ):
+        response = client.delete("/api/rag/chat/sessions/sess-1/last-exchange")
+
+    assert response.status_code == 404
+
+
+def test_delete_workspace_last_exchange_409_when_pair_invalid():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(False, "not_user_assistant_pair")),
+        ),
+    ):
+        response = client.delete("/api/rag/chat/sessions/sess-1/last-exchange")
+
+    assert response.status_code == 409
+
+
+def test_delete_workspace_last_exchange_requires_auth():
+    app.dependency_overrides.pop(get_authenticated_user, None)
+    try:
+        response = client.delete("/api/rag/chat/sessions/sess-1/last-exchange")
+    finally:
+        app.dependency_overrides[get_authenticated_user] = _auth_override
+
+    assert response.status_code == 401
+
+
+# ── delete last-exchange: agent ──────────────────────────────────────────────
+
+
+def test_delete_agent_last_exchange_removes_pair():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(True, None)),
+        ),
+    ):
+        response = client.delete(
+            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "sess-1", "deleted": True}
+
+
+def test_delete_agent_last_exchange_404_when_session_missing():
+    with patch(
+        "src.api.endpoints.get_rag_chat_session",
+        new=AsyncMock(return_value=None),
+    ):
+        response = client.delete(
+            "/api/rag/agents/agent-1/chat/sessions/missing/last-exchange"
+        )
+
+    assert response.status_code == 404
+
+
+def test_delete_agent_last_exchange_404_when_empty():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(False, "empty")),
+        ),
+    ):
+        response = client.delete(
+            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
+        )
+
+    assert response.status_code == 404
+
+
+def test_delete_agent_last_exchange_409_when_pair_invalid():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "sess-1"}),
+        ),
+        patch(
+            "src.api.endpoints.delete_last_exchange",
+            new=AsyncMock(return_value=(False, "not_user_assistant_pair")),
+        ),
+    ):
+        response = client.delete(
+            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
+        )
+
+    assert response.status_code == 409
+
+
+def test_delete_agent_last_exchange_requires_auth():
+    app.dependency_overrides.pop(get_authenticated_user, None)
+    try:
+        response = client.delete(
+            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
+        )
+    finally:
+        app.dependency_overrides[get_authenticated_user] = _auth_override
+
+    assert response.status_code == 401

@@ -11,6 +11,7 @@ from src.rag import (
     create_resource_and_ingest,
     delete_agent,
     delete_chat_session,
+    delete_last_exchange,
     get_chat_session,
     list_chat_sessions,
     process_queued_ingestion_jobs,
@@ -406,3 +407,28 @@ async def test_run_ingestion_job_now_skips_when_already_terminal():
 
     assert result is False
     mock_run.assert_not_awaited()
+
+
+async def test_delete_last_exchange_uses_store_method():
+    mock_store = AsyncMock()
+    mock_store.delete_last_user_assistant_pair.return_value = (True, None)
+
+    with patch("src.rag._get_store", return_value=mock_store):
+        deleted, err = await delete_last_exchange(session_id="sess-1", user_id="user-1")
+
+    assert deleted is True
+    assert err is None
+    mock_store.delete_last_user_assistant_pair.assert_awaited_once_with(
+        session_id="sess-1", owner_id="user-1"
+    )
+
+
+async def test_delete_last_exchange_propagates_empty_error():
+    mock_store = AsyncMock()
+    mock_store.delete_last_user_assistant_pair.return_value = (False, "empty")
+
+    with patch("src.rag._get_store", return_value=mock_store):
+        deleted, err = await delete_last_exchange(session_id="sess-1", user_id="user-1")
+
+    assert deleted is False
+    assert err == "empty"

@@ -875,6 +875,14 @@ async def append_chat_message(message: RagChatMessage) -> None:
     await _get_store().create_rag_chat_message(message.to_dict())
 
 
+async def delete_last_exchange(
+    *, session_id: str, user_id: str
+) -> tuple[bool, str | None]:
+    return await _get_store().delete_last_user_assistant_pair(
+        session_id=session_id, owner_id=user_id
+    )
+
+
 async def list_chat_messages(session_id: str, user_id: str) -> list[RagChatMessage]:
     rows = await _get_store().list_rag_chat_messages(
         session_id=session_id, owner_id=user_id

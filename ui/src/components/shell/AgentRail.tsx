@@ -697,13 +697,18 @@ export function AgentRail({
   const [billingUsage, setBillingUsage] = useState<BillingUsageSummary | null>(null)
 
   useEffect(() => {
-    if (!accessToken) {
-      setBillingUsage(null)
-      return
-    }
-    void getBillingUsage(accessToken)
-      .then(setBillingUsage)
-      .catch(() => setBillingUsage(null))
+    void (async () => {
+      if (!accessToken) {
+        setBillingUsage(null)
+        return
+      }
+      try {
+        const usage = await getBillingUsage(accessToken)
+        setBillingUsage(usage)
+      } catch {
+        setBillingUsage(null)
+      }
+    })()
   }, [accessToken, sessionRefreshToken])
 
   const handleDeleteAgent = useCallback(

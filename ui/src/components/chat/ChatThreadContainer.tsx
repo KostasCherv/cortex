@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Loader2, SendHorizontal } from 'lucide-react'
+import { SendHorizontal, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import { cn } from '@/lib/utils'
 import type { RagChatMessage } from '@/types'
 import type { ChatTransport } from './transports'
+import { getStopEditState, replaceLastEditableUserMessage } from './chatThreadState'
 
 type Props = {
   transport: ChatTransport
@@ -139,12 +139,16 @@ export function ChatThreadContainer({
   const [error, setError] = useState<string | null>(null)
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
   const currentTransportKeyRef = useRef(transport.key)
   const chatAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // Tracks whether the last user+assistant exchange in `messages` has been persisted server-side.
+  // Set to true in onDone; reset to false when a new send begins.
+  const lastExchangePersistedRef = useRef(false)
 
   useEffect(() => {
     currentTransportKeyRef.current = transport.key
@@ -155,6 +159,7 @@ export function ChatThreadContainer({
     chatAbortRef.current?.abort()
     chatAbortRef.current = null
     loadedSessionRef.current = null
+    lastExchangePersistedRef.current = false
     setSessionId(null)
     setMessages([])
     setInput('')
@@ -162,6 +167,7 @@ export function ChatThreadContainer({
     setError(null)
     setWebUsedLastReply(false)
     setLatestSuggestions([])
+    setEditingMessageId(null)
   }, [transport.key])
 
   useEffect(() => {
@@ -179,6 +185,8 @@ export function ChatThreadContainer({
         setSessionId(res.session_id)
         setMessages(res.messages)
         setError(null)
+        // Messages loaded from server are persisted
+        lastExchangePersistedRef.current = true
       } catch (err) {
         if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
           setError(err instanceof Error ? err.message : 'Failed to load chat session.')
@@ -192,6 +200,7 @@ export function ChatThreadContainer({
     if (!activeSessionId) {
       if (activeSessionId === null && loadedSessionRef.current !== null) {
         loadedSessionRef.current = null
+        lastExchangePersistedRef.current = false
         setSessionId(null)
         setMessages([])
       }
@@ -200,22 +209,34 @@ export function ChatThreadContainer({
     void openSession(activeSessionId)
   }, [activeSessionId, openSession])
 
-  const send = async (overrideText?: string) => {
+  const send = async (
+    overrideText?: string,
+    opts?: {
+      skipOptimisticAppend?: boolean
+      previouslyPersisted?: boolean
+      restoreDraftOnFailure?: { input: string; editingMessageId: string }
+    },
+  ) => {
     const text = overrideText ?? input
     if (!text.trim() || chatting) return
     const question = text.trim()
     const requestId = ++messagesRequestRef.current
-    const optimisticUserMessage: RagChatMessage = {
-      message_id: `tmp-user-${requestId}`,
-      session_id: sessionId ?? 'pending',
-      agent_id: null,
-      owner_id: '',
-      role: 'user',
-      content: question,
-      citations: [],
-      created_at: new Date().toISOString(),
+    lastExchangePersistedRef.current = false
+
+    if (!opts?.skipOptimisticAppend) {
+      const optimisticUserMessage: RagChatMessage = {
+        message_id: `tmp-user-${requestId}`,
+        session_id: sessionId ?? 'pending',
+        agent_id: null,
+        owner_id: '',
+        role: 'user',
+        content: question,
+        citations: [],
+        created_at: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, optimisticUserMessage])
     }
-    setMessages((prev) => [...prev, optimisticUserMessage])
+
     setInput('')
     setStreamingText('')
     setChatting(true)
@@ -225,6 +246,21 @@ export function ChatThreadContainer({
     chatAbortRef.current?.abort()
     const controller = new AbortController()
     chatAbortRef.current = controller
+
+    if (opts?.previouslyPersisted && sessionId !== null) {
+      try {
+        await transport.deleteLastExchange(sessionId, accessToken)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete previous exchange.')
+        if (opts.restoreDraftOnFailure) {
+          setInput(opts.restoreDraftOnFailure.input)
+          setEditingMessageId(opts.restoreDraftOnFailure.editingMessageId)
+        }
+        setChatting(false)
+        if (chatAbortRef.current === controller) chatAbortRef.current = null
+        return
+      }
+    }
 
     let streamedSessionId = sessionId
     let accumulated = ''
@@ -278,6 +314,7 @@ export function ChatThreadContainer({
           setSessionId(finalSessionId)
           setMessages((prev) => [...prev, assistantMessage])
           setStreamingText('')
+          lastExchangePersistedRef.current = true
           onSessionsChanged()
         },
         onError: (streamError) => {
@@ -302,12 +339,33 @@ export function ChatThreadContainer({
     }
   }
 
+  const submitEdit = async () => {
+    const text = input.trim()
+    if (!text || !editingMessageId) return
+    const previouslyPersisted = lastExchangePersistedRef.current && sessionId !== null
+    setEditingMessageId(null)
+    setMessages((prev) => {
+      return replaceLastEditableUserMessage(prev, text)
+    })
+    setInput('')
+    await send(text, {
+      skipOptimisticAppend: true,
+      previouslyPersisted,
+      restoreDraftOnFailure: { input: text, editingMessageId },
+    })
+  }
+
   const suggestions = useMemo(
     () =>
       latestSuggestions.length > 0
         ? latestSuggestions
         : ([...messages].reverse().find((m) => m.role === 'assistant')?.suggestions ?? []),
     [latestSuggestions, messages],
+  )
+
+  const lastUserMessageId = useMemo(
+    () => [...messages].reverse().find((m) => m.role === 'user')?.message_id ?? null,
+    [messages],
   )
 
   return (
@@ -328,8 +386,22 @@ export function ChatThreadContainer({
           {messages.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyState}</p>}
           {messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.message_id} className="flex justify-end">
+              <div key={m.message_id} className="flex flex-col items-end gap-1">
                 <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{m.content}</div>
+                {!chatting && lastUserMessageId === m.message_id && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs text-muted-foreground"
+                    onClick={() => {
+                      setInput(m.content)
+                      setEditingMessageId(m.message_id)
+                    }}
+                  >
+                    Edit
+                  </Button>
+                )}
               </div>
             ) : (
               <div key={m.message_id} className="flex flex-col gap-2">
@@ -367,6 +439,23 @@ export function ChatThreadContainer({
       {error && <p role="alert" className="mx-6 mb-2 shrink-0 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive max-md:mx-4">{error}</p>}
 
       <div className="shrink-0 border-t bg-background px-6 py-4 max-md:px-4">
+        {editingMessageId && (
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Editing message</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={() => {
+                setEditingMessageId(null)
+                setInput('')
+              }}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
           <Textarea
             className="resize-none min-h-10 max-h-32 text-sm"
@@ -377,20 +466,40 @@ export function ChatThreadContainer({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
-                void send()
+                void (editingMessageId ? submitEdit() : send())
               }
             }}
             disabled={chatting}
           />
-          <Button
-            size="icon"
-            onClick={() => void send()}
-            disabled={!input.trim() || chatting}
-            className={cn(chatting && 'opacity-50')}
-            aria-label={chatting ? 'Sending message' : 'Send message'}
-          >
-            {chatting ? <Loader2 size={15} className="animate-spin" /> : <SendHorizontal size={15} />}
-          </Button>
+          {chatting ? (
+            <Button
+              size="icon"
+              variant="secondary"
+              onClick={() => {
+                chatAbortRef.current?.abort()
+                setStreamingText('')
+                setChatting(false)
+                setError(null)
+                const stopEditState = getStopEditState(messages)
+                if (stopEditState) {
+                  setInput(stopEditState.draft)
+                  setEditingMessageId(stopEditState.editingMessageId)
+                }
+              }}
+              aria-label="Stop generating"
+            >
+              <Square size={15} />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              onClick={() => void (editingMessageId ? submitEdit() : send())}
+              disabled={!input.trim()}
+              aria-label={editingMessageId ? 'Update and resend' : 'Send message'}
+            >
+              <SendHorizontal size={15} />
+            </Button>
+          )}
         </div>
       </div>
     </div>

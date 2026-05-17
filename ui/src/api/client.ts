@@ -944,3 +944,34 @@ export async function createPortalSession(accessToken: string | null): Promise<{
   }
   return (await response.json()) as { url: string }
 }
+
+export async function deleteRagWorkspaceChatLastExchange(
+  sessionId: string,
+  accessToken: string | null,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/api/rag/chat/sessions/${sessionId}/last-exchange`,
+    { method: 'DELETE', headers: authHeaders(accessToken) },
+  )
+  if (!response.ok) {
+    throw new Error(
+      await parseApiError(response, `Failed to delete last exchange: ${response.status}`),
+    )
+  }
+}
+
+export async function deleteRagAgentChatLastExchange(
+  agentId: string,
+  sessionId: string,
+  accessToken: string | null,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/last-exchange`,
+    { method: 'DELETE', headers: authHeaders(accessToken) },
+  )
+  if (!response.ok) {
+    throw new Error(
+      await parseApiError(response, `Failed to delete last exchange: ${response.status}`),
+    )
+  }
+}

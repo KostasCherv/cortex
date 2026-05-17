@@ -51,10 +51,12 @@ from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
 from src import outbox
 from src.rag import (
+    CHAT_SCOPE_AGENT,
     CHAT_SCOPE_WORKSPACE,
     RagChatMessage,
     RagValidationError,
     append_chat_message,
+    delete_last_exchange,
     delete_chat_session as delete_rag_chat_session,
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
@@ -2157,6 +2159,31 @@ async def delete_rag_agent_chat_session(
     return {"session_id": session_id, "deleted": True}
 
 
+@app.delete(
+    "/api/rag/agents/{agent_id}/chat/sessions/{session_id}/last-exchange",
+    tags=["RAG"],
+)
+async def delete_rag_agent_chat_last_exchange(
+    agent_id: str,
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_AGENT,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    deleted, err = await delete_last_exchange(session_id=session_id, user_id=current_user.user_id)
+    if not deleted:
+        if err == "empty":
+            raise HTTPException(status_code=404, detail="Session has no messages to delete.")
+        raise HTTPException(status_code=409, detail="Last two messages are not a user/assistant pair.")
+    return {"session_id": session_id, "deleted": True}
+
+
 @app.post("/api/rag/chat", tags=["RAG"])
 async def rag_chat_workspace(
     body: RagChatRequest,
@@ -2448,4 +2475,25 @@ async def delete_rag_workspace_chat_session(
     )
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    return {"session_id": session_id, "deleted": True}
+
+
+@app.delete("/api/rag/chat/sessions/{session_id}/last-exchange", tags=["RAG"])
+async def delete_rag_workspace_chat_last_exchange(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=None,
+        user_id=current_user.user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    deleted, err = await delete_last_exchange(session_id=session_id, user_id=current_user.user_id)
+    if not deleted:
+        if err == "empty":
+            raise HTTPException(status_code=404, detail="Session has no messages to delete.")
+        raise HTTPException(status_code=409, detail="Last two messages are not a user/assistant pair.")
     return {"session_id": session_id, "deleted": True}

@@ -1,4 +1,6 @@
 import {
+  deleteRagAgentChatLastExchange,
+  deleteRagWorkspaceChatLastExchange,
   getRagAgentChatSessionMessages,
   getRagWorkspaceChatSessionMessages,
   listRagAgentChatSessions,
@@ -31,6 +33,7 @@ export type ChatTransport = {
     accessToken: string,
     callbacks: StreamCallbacks,
   ) => Promise<void>
+  deleteLastExchange: (sessionId: string, accessToken: string) => Promise<void>
 }
 
 export function createAgentChatTransport(agentId: string): ChatTransport {
@@ -51,6 +54,9 @@ export function createAgentChatTransport(agentId: string): ChatTransport {
     streamMessage: async (message, sessionId, accessToken, callbacks) => {
       await streamRagAgentChat(agentId, message, sessionId, accessToken, callbacks)
     },
+    deleteLastExchange: async (sessionId, accessToken) => {
+      await deleteRagAgentChatLastExchange(agentId, sessionId, accessToken)
+    },
   }
 }
 
@@ -70,5 +76,8 @@ export const workspaceChatTransport: ChatTransport = {
   },
   streamMessage: async (message, sessionId, accessToken, callbacks) => {
     await streamRagWorkspaceChat(message, sessionId, accessToken, callbacks)
+  },
+  deleteLastExchange: async (sessionId, accessToken) => {
+    await deleteRagWorkspaceChatLastExchange(sessionId, accessToken)
   },
 }

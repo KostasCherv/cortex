@@ -1442,6 +1442,45 @@ class SupabaseSessionStore:
             payload.get("chat_scope") or "agent",
         )
 
+    async def delete_rag_chat_message(
+        self, *, message_id: str, session_id: str, owner_id: str
+    ) -> bool:
+        response = await self._request(
+            "DELETE",
+            "rag_chat_messages",
+            params={
+                "id": f"eq.{message_id}",
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
+        return bool(rows)
+
+    async def delete_last_user_assistant_pair(
+        self, *, session_id: str, owner_id: str
+    ) -> tuple[bool, str | None]:
+        """Delete the most recent assistant + user message in order.
+
+        Returns (deleted, error_code). error_code is one of:
+          None, "empty", "not_user_assistant_pair".
+        """
+        rows = await self.list_rag_chat_messages(session_id=session_id, owner_id=owner_id)
+        if not rows:
+            return False, "empty"
+        if len(rows) < 2 or rows[-1]["role"] != "assistant" or rows[-2]["role"] != "user":
+            return False, "not_user_assistant_pair"
+        await self.delete_rag_chat_message(
+            message_id=rows[-1]["message_id"], session_id=session_id, owner_id=owner_id
+        )
+        await self.delete_rag_chat_message(
+            message_id=rows[-2]["message_id"], session_id=session_id, owner_id=owner_id
+        )
+        return True, None
+
     async def list_rag_chat_messages(self, *, session_id: str, owner_id: str) -> list[dict[str, Any]]:
         cache_key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
