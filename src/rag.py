@@ -441,32 +441,6 @@ async def _run_ingestion_job(job_id: str) -> None:
             return
 
 
-async def process_queued_ingestion_jobs(limit: int = 5) -> int:
-    """Process queued ingestion jobs in FIFO order.
-
-    Returns the number of jobs processed.
-    """
-    store = _get_store()
-    jobs = await store.list_rag_ingestion_jobs_for_processing(limit=limit)
-    processed = 0
-    for row in jobs:
-        job_id = row.get("job_id")
-        if not job_id:
-            continue
-        await _run_ingestion_job(job_id)
-        processed += 1
-    return processed
-
-
-async def run_ingestion_job_now(job_id: str) -> bool:
-    """Claim the job atomically and run it. Returns False if already claimed."""
-    claimed = await _get_store().claim_rag_ingestion_job(job_id)
-    if not claimed:
-        return False
-    await _run_ingestion_job(job_id)
-    return True
-
-
 async def get_resource_status(resource_id: str, user_id: str) -> dict:
     workspace_id = _workspace_id_for_user(user_id)
     resource_row = await _get_store().get_rag_resource(
@@ -831,23 +805,6 @@ async def get_chat_session(
     )
 
 
-async def update_chat_session_web_search_enabled(
-    *,
-    session_id: str,
-    agent_id: str | None,
-    user_id: str,
-    web_search_enabled: bool,
-    chat_scope: str = CHAT_SCOPE_AGENT,
-) -> bool:
-    return await _get_store().update_rag_chat_session_web_search_enabled(
-        session_id=session_id,
-        owner_id=user_id,
-        agent_id=agent_id,
-        web_search_enabled=web_search_enabled,
-        chat_scope=chat_scope,
-    )
-
-
 async def update_chat_session_title(
     *, session_id: str, agent_id: str | None, user_id: str, title: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> bool:
@@ -892,7 +849,6 @@ async def list_chat_messages(session_id: str, user_id: str) -> list[RagChatMessa
 
 async def retrieve_context_for_query(
     *,
-    agent_id: str,
     user_id: str,
     resource_ids: list[str],
     question: str,

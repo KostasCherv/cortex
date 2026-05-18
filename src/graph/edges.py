@@ -8,41 +8,6 @@ from src.observability.langsmith import start_step_span
 logger = logging.getLogger(__name__)
 
 
-def should_abort(state: ResearchState) -> str:
-    """Route to 'abort' if the search node surfaced an error, else continue.
-
-    Returns:
-        ``"abort"`` if ``state["error"]`` is set, otherwise ``"continue"``.
-    """
-    with start_step_span(
-        name="edge.should_abort",
-        run_type="tool",
-        node_name="search",
-        inputs={"has_error": bool(state.get("error"))},
-        tags=["routing"],
-    ):
-        if state.get("error"):
-            logger.warning("Pipeline aborting due to error: %s", state["error"])
-            return "abort"
-        return "continue"
-
-
-def has_results(state: ResearchState) -> str:
-    """Check whether there are search results to process.
-
-    Returns:
-        ``"ok"`` if results exist, ``"empty"`` otherwise.
-    """
-    with start_step_span(
-        name="edge.has_results",
-        run_type="tool",
-        node_name="search",
-        inputs={"result_count": len(state.get("search_results", []))},
-        tags=["routing"],
-    ):
-        return "ok" if state.get("search_results") else "empty"
-
-
 def route_after_search(state: ResearchState) -> str:
     """Route after search_and_memory_node: abort on error, empty if no results.
 

@@ -198,7 +198,6 @@ class RagAgentLinkRequest(BaseModel):
 class RagChatRequest(BaseModel):
     message: str
     session_id: str | None = None
-    web_search_enabled: bool | None = None
 
 
 class BillingCheckoutRequest(BaseModel):
@@ -589,115 +588,6 @@ def _build_chat_messages(
 # ---------------------------------------------------------------------------
 # Shared streaming logic
 # ---------------------------------------------------------------------------
-
-async def _stream_research(
-    query: str,
-    session: Session | None = None,
-    run_id: str | None = None,
-    user_id: str | None = None,
-) -> AsyncGenerator[str, None]:
-    """Run the research graph and stream node events as SSE.
-
-    When ``session`` and ``run_id`` are provided the final state is recorded
-    on the session and source chunks are persisted for follow-up retrieval.
-    """
-    graph = build_graph()
-    initial_state: dict = {
-        "query": query,
-        "error": None,
-        "session_id": session.session_id if session else None,
-        "run_id": run_id,
-        "user_id": user_id,
-        "conversation_history": (
-            [t.to_dict() for t in session.conversation] if session else []
-        ),
-    }
-
-    _GRAPH_NODES = {
-        "search_and_memory", "rerank", "summarize", "report",
-        "abort", "empty",
-    }
-
-    with start_workflow_run(
-        entrypoint="api",
-        query=query,
-    ) as trace_ctx:
-        final_node_state: dict | None = None
-        try:
-            async for event in graph.astream_events(initial_state, version="v2"):
-                event_type = event["event"]
-                meta = event.get("metadata", {})
-                langgraph_node = meta.get("langgraph_node")
-
-                # Forward LLM token chunks from the report node as they arrive
-                if event_type == "on_chat_model_stream" and meta.get("langgraph_node") == "report":
-                    chunk = event["data"].get("chunk")
-                    if chunk:
-                        content = chunk.content if hasattr(chunk, "content") else ""
-                        token = ""
-                        if isinstance(content, str):
-                            token = content
-                        elif isinstance(content, list):
-                            token = "".join(
-                                b.get("text", "") if isinstance(b, dict) else str(b)
-                                for b in content
-                            )
-                        if token:
-                            yield f"data: {json.dumps({'workflow_id': trace_ctx.workflow_id, 'node': 'report_stream', 'data': {'chunk': token}})}\n\n"
-
-                # Emit node-completion events (preserves existing SSE format).
-                # Use metadata.langgraph_node — the event ``name`` may differ from graph node ids.
-                elif event_type == "on_chain_end" and langgraph_node in _GRAPH_NODES:
-                    node_state = event["data"].get("output", {})
-                    if isinstance(node_state, dict):
-                        final_node_state = node_state
-                        payload = {
-                            "workflow_id": trace_ctx.workflow_id,
-                            "node": langgraph_node,
-                            "data": {
-                                k: v
-                                for k, v in node_state.items()
-                                if k in {"error", "report"}
-                            },
-                        }
-                        yield f"data: {json.dumps(payload)}\n\n"
-
-            # Persist session state after a successful run
-            if session is not None and run_id is not None and final_node_state and user_id:
-                if not final_node_state.get("langfuse_trace_id"):
-                    fallback_trace_id = create_trace_id_for_workflow(trace_ctx.workflow_id)
-                    if fallback_trace_id:
-                        final_node_state["langfuse_trace_id"] = fallback_trace_id
-                await _record_session_run(session, user_id, run_id, query, final_node_state)
-
-            end_workflow_run(
-                trace_ctx,
-                status="success",
-                outputs={
-                    "node": "__end__",
-                    "has_report": bool(final_node_state and final_node_state.get("report")),
-                    "has_error": bool(final_node_state and final_node_state.get("error")),
-                },
-            )
-            yield (
-                f"data: {json.dumps({'workflow_id': trace_ctx.workflow_id, 'node': '__end__', 'data': {}})}\n\n"
-            )
-        except Exception as exc:
-            end_workflow_run(trace_ctx, status="error", error=str(exc))
-            error_payload = {
-                "workflow_id": trace_ctx.workflow_id,
-                "node": "__error__",
-                "data": {"error": str(exc)},
-            }
-            yield f"data: {json.dumps(error_payload)}\n\n"
-        finally:
-            if not trace_ctx.ended:
-                end_workflow_run(
-                    trace_ctx,
-                    status="error",
-                    error="stream exited before workflow trace was explicitly ended",
-                )
-
 
 async def _record_session_run(
     session: Session,
@@ -1713,7 +1603,6 @@ async def rag_chat_with_agent(
         )
 
     rag_context = await retrieve_context_for_query(
-        agent_id=agent_id,
         user_id=current_user.user_id,
         resource_ids=resource_ids,
         question=normalized_message,
@@ -1850,7 +1739,6 @@ async def rag_chat_with_agent_stream(
         )
 
     rag_context = await retrieve_context_for_query(
-        agent_id=agent_id,
         user_id=current_user.user_id,
         resource_ids=resource_ids,
         question=normalized_message,
@@ -2104,7 +1992,6 @@ async def rag_chat_workspace(
 
     resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
     rag_context = await retrieve_context_for_query(
-        agent_id="workspace",
         user_id=current_user.user_id,
         resource_ids=resource_ids,
         question=normalized_message,
@@ -2200,7 +2087,6 @@ async def rag_chat_workspace_stream(
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
     rag_context = await retrieve_context_for_query(
-        agent_id="workspace",
         user_id=current_user.user_id,
         resource_ids=resource_ids,
         question=normalized_message,

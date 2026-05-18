@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
-from src.api.endpoints import _stream_research, app
+from src.api.endpoints import app
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
@@ -99,40 +99,6 @@ def test_billing_usage_endpoint():
     assert data["limits"]["research_queries_daily"] == 3
     assert data["subscription"]["status"] == "active"
     assert data["subscription"]["cancel_at_period_end"] is True
-
-
-def test_stream_research_emits_node_completion_from_langgraph_node_metadata():
-    """astream_events may use a runnable ``name`` that differs from the graph node key."""
-
-    async def fake_astream_events(initial_state, version="v2"):
-        yield {
-            "event": "on_chain_end",
-            "name": "RunnableSequence",
-            "metadata": {"langgraph_node": "report"},
-            "data": {"output": {"report": "# From metadata", "error": None}},
-        }
-
-    mock_graph = MagicMock()
-    mock_graph.astream_events = fake_astream_events
-
-    async def collect():
-        lines: list[str] = []
-        async for line in _stream_research("q"):
-            lines.append(line)
-        return lines
-
-    with patch("src.api.endpoints.build_graph", return_value=mock_graph):
-        raw_lines = asyncio.run(collect())
-
-    events = []
-    for line in raw_lines:
-        if line.startswith("data: "):
-            events.append(json.loads(line[6:]))
-
-    report_events = [e for e in events if e.get("node") == "report"]
-    assert len(report_events) == 1
-    assert report_events[0]["data"]["report"] == "# From metadata"
-    assert any(e.get("node") == "__end__" for e in events)
 
 
 # ---------------------------------------------------------------------------

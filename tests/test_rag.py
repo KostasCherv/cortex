@@ -14,9 +14,7 @@ from src.rag import (
     delete_last_exchange,
     get_chat_session,
     list_chat_sessions,
-    process_queued_ingestion_jobs,
     retrieve_context_for_query,
-    run_ingestion_job_now,
     suggest_chat_session_title,
     update_chat_session_title,
 )
@@ -26,7 +24,6 @@ from src.rag_engine import query_resource_context
 async def test_retrieve_context_for_query_returns_empty_without_resource_ids():
     with patch("src.rag.query_resource_context", new=AsyncMock()) as query_mock:
         result = await retrieve_context_for_query(
-            agent_id="workspace",
             user_id="user-1",
             resource_ids=[],
             question="Hello?",
@@ -352,23 +349,6 @@ async def test_run_ingestion_job_marks_failed_after_retries():
     )
 
 
-async def test_process_queued_ingestion_jobs_processes_all_selected_jobs():
-    mock_store = AsyncMock()
-    mock_store.list_rag_ingestion_jobs_for_processing.return_value = [
-        {"job_id": "job-1"},
-        {"job_id": "job-2"},
-    ]
-
-    with (
-        patch("src.rag._get_store", return_value=mock_store),
-        patch("src.rag._run_ingestion_job", new=AsyncMock(return_value=None)) as mock_run,
-    ):
-        processed = await process_queued_ingestion_jobs(limit=10)
-
-    assert processed == 2
-    assert mock_run.await_count == 2
-
-
 async def test_create_resource_writes_outbox_event():
     file = UploadFile(
         filename="notes.txt",
@@ -397,31 +377,6 @@ async def test_create_resource_writes_outbox_event():
     # resource and job must NOT be written separately — the RPC handles everything
     mock_store.create_rag_resource.assert_not_awaited()
     mock_store.create_rag_ingestion_job.assert_not_awaited()
-
-
-async def test_claim_succeeds_for_queued_job_and_fails_on_second_attempt():
-    mock_store = AsyncMock()
-    mock_store.claim_rag_ingestion_job.side_effect = [True, False]
-
-    with patch("src.rag._get_store", return_value=mock_store):
-        with patch("src.rag._run_ingestion_job", new=AsyncMock()):
-            first = await run_ingestion_job_now("job-1")
-            second = await run_ingestion_job_now("job-1")
-
-    assert first is True
-    assert second is False
-
-
-async def test_run_ingestion_job_now_skips_when_already_terminal():
-    mock_store = AsyncMock()
-    mock_store.claim_rag_ingestion_job.return_value = False
-
-    with patch("src.rag._get_store", return_value=mock_store):
-        with patch("src.rag._run_ingestion_job", new=AsyncMock()) as mock_run:
-            result = await run_ingestion_job_now("job-succeeded")
-
-    assert result is False
-    mock_run.assert_not_awaited()
 
 
 async def test_delete_last_exchange_uses_store_method():

@@ -819,23 +819,6 @@ class SupabaseSessionStore:
             return None
         return self._map_rag_ingestion_row(rows[0])
 
-    async def list_rag_ingestion_jobs_for_processing(self, *, limit: int = 5) -> list[dict[str, Any]]:
-        response = await self._request(
-            "GET",
-            "rag_ingestion_jobs",
-            params={
-                "select": (
-                    "id,resource_id,owner_id,workspace_id,status,stage,retries,max_retries,"
-                    "error_details,created_at,updated_at"
-                ),
-                "status": "eq.queued",
-                "order": "created_at.asc",
-                "limit": str(limit),
-            },
-        )
-        rows = response.json()
-        return [self._map_rag_ingestion_row(row) for row in rows]
-
     async def claim_rag_ingestion_job(self, job_id: str) -> bool:
         """Atomically transition job status from 'queued' to 'running'.
 
@@ -1357,34 +1340,6 @@ class SupabaseSessionStore:
                 "agent_id": f"{agent_filter_key}.{agent_filter_value}",
             },
             json_body={"title": title},
-            extra_headers={"Prefer": "return=representation"},
-        )
-        rows = response.json()
-        if rows:
-            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id, chat_scope)
-        return bool(rows)
-
-    async def update_rag_chat_session_web_search_enabled(
-        self,
-        *,
-        session_id: str,
-        owner_id: str,
-        agent_id: str | None,
-        web_search_enabled: bool,
-        chat_scope: str = "agent",
-    ) -> bool:
-        agent_filter_key = "is" if agent_id is None else "eq"
-        agent_filter_value = "null" if agent_id is None else agent_id
-        response = await self._request(
-            "PATCH",
-            "rag_chat_sessions",
-            params={
-                "id": f"eq.{session_id}",
-                "owner_id": f"eq.{owner_id}",
-                "chat_scope": f"eq.{chat_scope}",
-                "agent_id": f"{agent_filter_key}.{agent_filter_value}",
-            },
-            json_body={"web_search_enabled": web_search_enabled},
             extra_headers={"Prefer": "return=representation"},
         )
         rows = response.json()
