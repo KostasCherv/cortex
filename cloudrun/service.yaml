@@ -112,14 +112,14 @@ spec:
             - name: STRIPE_PRO_PRICE_ID
               value: "price_1TWXZlRWPGTvI9HrxX2hUI3r"
             - name: STRIPE_SUCCESS_URL
-              value: "https://YOUR_FRONTEND_DOMAIN/billing/success"
+              value: "https://cortex-ai-prod.vercel.app/billing/success"
             - name: STRIPE_CANCEL_URL
-              value: "https://YOUR_FRONTEND_DOMAIN/billing/cancel"
+              value: "https://cortex-ai-prod.vercel.app/billing/cancel"
             - name: STRIPE_PORTAL_RETURN_URL
-              value: "https://YOUR_FRONTEND_DOMAIN"
+              value: "https://cortex-ai-prod.vercel.app"
             # --- CORS ---
             - name: CORS_ORIGINS
-              value: "https://YOUR_FRONTEND_DOMAIN"
+              value: '["https://cortex-ai-prod.vercel.app"]'
             # --- Internal ---
             - name: INTERNAL_DISPATCH_SECRET
               valueFrom:

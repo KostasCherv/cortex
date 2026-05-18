@@ -48,10 +48,15 @@ gcloud container images add-tag "$TAG" "$LATEST" --quiet
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
+# Inject the SHA-tagged image so Cloud Run sees a spec change and creates a new revision
+TMP_YAML=$(mktemp /tmp/service-XXXXXX.yaml)
+sed "s|$IMAGE:latest|$TAG|g" "$SERVICE_YAML" > "$TMP_YAML"
+
 echo "▶ Deploying to Cloud Run..."
-gcloud run services replace "$SERVICE_YAML" \
+gcloud run services replace "$TMP_YAML" \
   --region="$REGION" \
   --project="$PROJECT"
+rm -f "$TMP_YAML"
 
 # Ensure unauthenticated access (idempotent)
 gcloud run services add-iam-policy-binding cortex \
