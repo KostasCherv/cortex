@@ -31,7 +31,7 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         os.environ["LANGSMITH_TRACING"] = "true"
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
         os.environ["LANGSMITH_PROJECT"] = str(
-            getattr(settings, "langsmith_project", "research-agent")
+            getattr(settings, "langsmith_project", "cortex")
         )
         langsmith_api_key = getattr(settings, "langsmith_api_key", "")
         if langsmith_api_key:

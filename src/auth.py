@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.cache.client import get_cache
 from src.config import settings
+from src.supabase_keys import supabase_api_headers
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -46,15 +47,12 @@ async def _verify_with_supabase_userinfo(token: str) -> AuthenticatedUser:
                 email=cached.get("email"),
             )
 
-    apikey = settings.supabase_service_role_key or ""
+    server_key = settings.supabase_secret_key or ""
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(
                 f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "apikey": apikey,
-                },
+                headers=supabase_api_headers(server_key, user_access_token=token),
             )
     except Exception as exc:
         raise HTTPException(

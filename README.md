@@ -22,7 +22,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
 - LLM and agent layer: `LangChain`, `OpenAI`, `OpenRouter`, `Ollama`
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
-- Retrieval and reranking: `Pinecone`
+- Retrieval and reranking: `Neo4j` (GraphRAG), `Cohere`
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
 - Auth, sessions, and storage: `Supabase` (Postgres, Auth, Storage)
 - Caching: `Redis` (optional for auth, search, and session hot paths; graceful degradation when unavailable)
@@ -40,7 +40,7 @@ flowchart LR
     apiResearch --> search["search (Tavily)"]
     search -->|"continue"| retrieve["retrieve (httpx + BeautifulSoup)"]
     search -->|"abort"| abortNode["abort"]
-    retrieve -->|"ok"| memoryContext["memory_context (Pinecone search)"]
+    retrieve -->|"ok"| memoryContext["memory_context (Neo4j GraphRAG)"]
     retrieve -->|"empty"| emptyNode["empty"]
     memoryContext --> rerank["rerank"]
     rerank --> summarize["summarize (LLM)"]
@@ -97,7 +97,7 @@ Optional Redis caching:
 2) Start backend API:
 
 ```bash
-uv run python -m src.main serve --reload
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 3) Start frontend UI:
@@ -115,7 +115,7 @@ npm run dev
 npx --ignore-scripts=false inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery
 
 # Terminal B: Outbox dispatcher loop
-while true; do uv run python -m src.main rag-dispatch-outbox --limit 100; sleep 2; done
+while true; do uv run python scripts/dispatch_outbox.py --limit 100; sleep 2; done
 ```
 
 ## API surface
@@ -143,7 +143,7 @@ Example research request:
 curl -N -X POST http://localhost:8000/sessions/<session_id>/research \
   -H "Authorization: Bearer <supabase_access_token>" \
   -H "Content-Type: application/json" \
-  -d '{"query": "What is LangGraph?", "use_vector_store": false}'
+  -d '{"query": "What is LangGraph?"}'
 ```
 
 ### Billing flow (production)

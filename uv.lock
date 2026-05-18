@@ -487,6 +487,94 @@ wheels = [
 ]
 
 [[package]]
+name = "cortex"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "cohere" },
+    { name = "deepeval" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "inngest" },
+    { name = "jinja2" },
+    { name = "langchain" },
+    { name = "langchain-community" },
+    { name = "langchain-ollama" },
+    { name = "langchain-openai" },
+    { name = "langfuse" },
+    { name = "langgraph" },
+    { name = "langsmith" },
+    { name = "llama-index-core" },
+    { name = "llama-index-embeddings-ollama" },
+    { name = "llama-index-embeddings-openai" },
+    { name = "neo4j" },
+    { name = "openai" },
+    { name = "pandas" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "pypdf" },
+    { name = "python-docx" },
+    { name = "python-dotenv" },
+    { name = "python-multipart" },
+    { name = "redis" },
+    { name = "stripe" },
+    { name = "tavily-python" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12.0" },
+    { name = "cohere", specifier = ">=5.0.0" },
+    { name = "deepeval", specifier = ">=3.0.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "inngest", specifier = ">=0.5.18" },
+    { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "langchain", specifier = ">=0.3.0" },
+    { name = "langchain-community", specifier = ">=0.3.0" },
+    { name = "langchain-ollama", specifier = ">=0.1.0" },
+    { name = "langchain-openai", specifier = ">=0.2.0" },
+    { name = "langfuse", specifier = ">=2.0.0" },
+    { name = "langgraph", specifier = ">=0.2.0" },
+    { name = "langsmith", specifier = ">=0.1.147" },
+    { name = "llama-index-core", specifier = ">=0.12.0" },
+    { name = "llama-index-embeddings-ollama", specifier = ">=0.3.0" },
+    { name = "llama-index-embeddings-openai", specifier = ">=0.3.0" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
+    { name = "neo4j", specifier = ">=5.26.0" },
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "pandas", specifier = ">=2.2.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
+    { name = "pypdf", specifier = ">=4.2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "python-docx", specifier = ">=1.1.2" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "redis", specifier = ">=5.0.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
+    { name = "stripe", specifier = ">=11.0.0" },
+    { name = "tavily-python", specifier = ">=0.5.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "coverage"
 version = "7.13.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1783,19 +1871,6 @@ wheels = [
 ]
 
 [[package]]
-name = "llama-index-vector-stores-pinecone"
-version = "0.8.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "llama-index-core" },
-    { name = "pinecone" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/69/f51173b041d7273e0486634f14a6b437d147d40bbd1f767c4293c19f42c0/llama_index_vector_stores_pinecone-0.8.0.tar.gz", hash = "sha256:19e3ef74f638f4b693619d797d914fbcd55973ffa9f0ba28b3eb40ac3ff2da89", size = 7852, upload-time = "2026-03-12T20:47:52.405Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/5c/4f3560524f97e89318350e78ba81af69fd435debf47d77740df4a3066444/llama_index_vector_stores_pinecone-0.8.0-py3-none-any.whl", hash = "sha256:49f324299ae06cae61231c1ed902d69a75c06083efb37087a484294c34344a3e", size = 8039, upload-time = "2026-03-12T20:47:51.419Z" },
-]
-
-[[package]]
 name = "llama-index-workflows"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2715,45 +2790,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pinecone"
-version = "7.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "certifi" },
-    { name = "pinecone-plugin-assistant" },
-    { name = "pinecone-plugin-interface" },
-    { name = "python-dateutil" },
-    { name = "typing-extensions" },
-    { name = "urllib3", marker = "python_full_version < '4'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/fa/38/12731d4af470851b4963eba616605868a8599ef4df51c7b6c928e5f3166d/pinecone-7.3.0.tar.gz", hash = "sha256:307edc155621d487c20dc71b76c3ad5d6f799569ba42064190d03917954f9a7b", size = 235256, upload-time = "2025-06-27T20:03:51.498Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/a6/c5d54a5fb1de3983a8739c1a1660e7a7074db2cbadfa875b823fcf29b629/pinecone-7.3.0-py3-none-any.whl", hash = "sha256:315b8fef20320bef723ecbb695dec0aafa75d8434d86e01e5a0e85933e1009a8", size = 587563, upload-time = "2025-06-27T20:03:50.249Z" },
-]
-
-[[package]]
-name = "pinecone-plugin-assistant"
-version = "1.8.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "packaging" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/01/65c4c3a81732fa379f8e7f78a8c18aa57a1139f5b79d58b93a69f2fc8cb0/pinecone_plugin_assistant-1.8.0.tar.gz", hash = "sha256:8e8682cff30f9bae9243b384021aba71c91f4e6ef1650e9d63ee64aab83cba87", size = 150435, upload-time = "2025-08-31T14:31:18.046Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/dd/49/62ab8e2f9098bf8593e36bbe6e729fcc0500bafca7d88be7b62eac66c8b0/pinecone_plugin_assistant-1.8.0-py3-none-any.whl", hash = "sha256:71ae42c3b4478d23138cbc4fe3505db561319a826f5aff4ef2e306a25ac56686", size = 259281, upload-time = "2025-08-31T14:31:16.587Z" },
-]
-
-[[package]]
-name = "pinecone-plugin-interface"
-version = "0.0.7"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f4/fb/e8a4063264953ead9e2b24d9b390152c60f042c951c47f4592e9996e57ff/pinecone_plugin_interface-0.0.7.tar.gz", hash = "sha256:b8e6675e41847333aa13923cc44daa3f85676d7157324682dc1640588a982846", size = 3370, upload-time = "2024-06-05T01:57:52.093Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/1d/a21fdfcd6d022cb64cef5c2a29ee6691c6c103c4566b41646b080b7536a5/pinecone_plugin_interface-0.0.7-py3-none-any.whl", hash = "sha256:875857ad9c9fc8bbc074dbe780d187a2afd21f5bfe0f3b08601924a61ef1bba8", size = 6249, upload-time = "2024-06-05T01:57:50.583Z" },
-]
-
-[[package]]
 name = "platformdirs"
 version = "4.9.6"
 source = { registry = "https://pypi.org/simple" }
@@ -3437,102 +3473,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/f3/61/d7545dafb7ac2230c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl", hash = "sha256:cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06", size = 54481, upload-time = "2023-05-01T04:11:28.427Z" },
 ]
-
-[[package]]
-name = "research-agent"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "cohere" },
-    { name = "deepeval" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "inngest" },
-    { name = "jinja2" },
-    { name = "langchain" },
-    { name = "langchain-community" },
-    { name = "langchain-ollama" },
-    { name = "langchain-openai" },
-    { name = "langfuse" },
-    { name = "langgraph" },
-    { name = "langsmith" },
-    { name = "llama-index-core" },
-    { name = "llama-index-embeddings-ollama" },
-    { name = "llama-index-embeddings-openai" },
-    { name = "llama-index-vector-stores-pinecone" },
-    { name = "neo4j" },
-    { name = "openai" },
-    { name = "pandas" },
-    { name = "pinecone" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "pypdf" },
-    { name = "python-docx" },
-    { name = "python-dotenv" },
-    { name = "python-multipart" },
-    { name = "redis" },
-    { name = "rich" },
-    { name = "stripe" },
-    { name = "tavily-python" },
-    { name = "typer" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.12.0" },
-    { name = "cohere", specifier = ">=5.0.0" },
-    { name = "deepeval", specifier = ">=3.0.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "inngest", specifier = ">=0.5.18" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "langchain", specifier = ">=0.3.0" },
-    { name = "langchain-community", specifier = ">=0.3.0" },
-    { name = "langchain-ollama", specifier = ">=0.1.0" },
-    { name = "langchain-openai", specifier = ">=0.2.0" },
-    { name = "langfuse", specifier = ">=2.0.0" },
-    { name = "langgraph", specifier = ">=0.2.0" },
-    { name = "langsmith", specifier = ">=0.1.147" },
-    { name = "llama-index-core", specifier = ">=0.12.0" },
-    { name = "llama-index-embeddings-ollama", specifier = ">=0.3.0" },
-    { name = "llama-index-embeddings-openai", specifier = ">=0.3.0" },
-    { name = "llama-index-vector-stores-pinecone", specifier = ">=0.4.0" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
-    { name = "neo4j", specifier = ">=5.26.0" },
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "pandas", specifier = ">=2.2.0" },
-    { name = "pinecone", specifier = ">=5.0.0" },
-    { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10.1" },
-    { name = "pypdf", specifier = ">=4.2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "python-docx", specifier = ">=1.1.2" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "redis", specifier = ">=5.0.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
-    { name = "stripe", specifier = ">=11.0.0" },
-    { name = "tavily-python", specifier = ">=0.5.0" },
-    { name = "typer", extras = ["all"], specifier = ">=0.12.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "rich"

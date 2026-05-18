@@ -11,6 +11,7 @@ import httpx
 
 from src.cache.client import get_cache
 from src.config import settings
+from src.supabase_keys import supabase_api_headers
 
 if TYPE_CHECKING:
     from src.sessions import ConversationTurn, Session, SessionRun
@@ -22,16 +23,15 @@ class SupabaseSessionStore:
     """Persist sessions in Supabase PostgREST with strict user scoping."""
 
     def __init__(self) -> None:
-        if not settings.supabase_url or not settings.supabase_service_role_key:
+        if not settings.supabase_url or not settings.supabase_secret_key:
             raise RuntimeError(
-                "Supabase persistence is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+                "Supabase persistence is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY."
             )
         self._base_url = f"{settings.supabase_url.rstrip('/')}/rest/v1"
-        self._headers = {
-            "apikey": settings.supabase_service_role_key,
-            "Authorization": f"Bearer {settings.supabase_service_role_key}",
-            "Content-Type": "application/json",
-        }
+        self._headers = supabase_api_headers(
+            settings.supabase_secret_key,
+            content_type="application/json",
+        )
         self._session_run_extended_fields_supported: bool | None = None
 
     _SESSION_RUN_BASE_SELECT = (

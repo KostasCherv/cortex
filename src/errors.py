@@ -1,29 +1,29 @@
-"""Custom exceptions for the research agent."""
+"""Custom exceptions for Cortex."""
 
 
-class ResearchAgentError(Exception):
-    """Base exception for all research agent errors."""
+class CortexError(Exception):
+    """Base exception for all Cortex errors."""
 
 
-class SearchError(ResearchAgentError):
+class SearchError(CortexError):
     """Raised when the Tavily search fails after all retries."""
 
 
-class FetchError(ResearchAgentError):
+class FetchError(CortexError):
     """Raised when URL content fetching fails."""
 
 
-class LLMError(ResearchAgentError):
+class LLMError(CortexError):
     """Raised when an LLM call fails."""
 
 
-class VectorStoreError(ResearchAgentError):
+class VectorStoreError(CortexError):
     """Raised when a vector store operation fails."""
 
 
-class ConfigurationError(ResearchAgentError):
+class ConfigurationError(CortexError):
     """Raised when required configuration is missing or invalid."""
 
 
-class CacheError(ResearchAgentError):
+class CacheError(CortexError):
     """Raised when a Redis cache operation fails."""

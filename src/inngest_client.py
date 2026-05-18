@@ -10,7 +10,7 @@ import inngest.fast_api
 _is_production = os.environ.get("INNGEST_DEV", "").strip() != "1"
 
 inngest_client = inngest.Inngest(
-    app_id="research-agent",
+    app_id="cortex",
     is_production=_is_production,
 )
 
@@ -41,3 +41,14 @@ async def handle_research_run(ctx: inngest.Context) -> dict:
 
     await _execute_research_run(**ctx.event.data)
     return {"done": True, "run_id": ctx.event.data.get("run_id")}
+
+
+@inngest_client.create_function(
+    fn_id="outbox-dispatcher",
+    trigger=inngest.TriggerCron(cron="* * * * *"),
+)
+async def dispatch_outbox_cron(ctx: inngest.Context) -> dict:
+    from src.outbox import dispatch_outbox_events
+
+    sent = await dispatch_outbox_events(limit=50)
+    return {"dispatched": sent}

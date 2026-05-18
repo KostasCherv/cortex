@@ -235,7 +235,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   }, [])
 
   const handleSubmit = useCallback(
-    async (query: string, useVectorStore: boolean) => {
+    async (query: string) => {
       if (!query.trim()) {
         setError('Please enter a research query.')
         return
@@ -279,7 +279,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       try {
         const started = await startSessionResearch(
           currentSessionId,
-          { query: normalizedQuery, use_vector_store: useVectorStore },
+          { query: normalizedQuery },
           authSession.access_token,
         )
         void refreshBillingUsage()

@@ -34,7 +34,7 @@ export function Navbar({ health, authSession, onSignIn, onSignOut }: NavbarProps
       <div className="max-w-screen-xl mx-auto px-4 h-14 flex items-center gap-6">
         <div className="flex items-center gap-2 font-semibold text-sm">
           <FlaskConical size={18} className="text-primary" />
-          Research Agent
+          Cortex
         </div>
 
         <nav className="flex items-center gap-1">

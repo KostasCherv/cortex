@@ -47,7 +47,7 @@ async def fetch_url_content(url: str) -> str:
     """
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=_TIMEOUT) as client:
-            response = await client.get(url, headers={"User-Agent": "ResearchAgent/0.1"})
+            response = await client.get(url, headers={"User-Agent": "Cortex/0.1"})
             response.raise_for_status()
             return clean_html(response.text)
     except httpx.HTTPStatusError as exc:

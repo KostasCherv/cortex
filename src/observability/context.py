@@ -67,7 +67,7 @@ def build_trace_metadata(extra: dict[str, object] | None = None) -> dict[str, ob
 
 
 def build_trace_tags(extra: list[str] | None = None) -> list[str]:
-    tags: list[str] = ["research-agent"]
+    tags: list[str] = ["cortex"]
     entrypoint = get_entrypoint()
     node = get_node()
     if entrypoint:

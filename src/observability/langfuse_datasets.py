@@ -10,7 +10,7 @@ from typing import Any
 from src.observability.langfuse import require_client
 
 
-DEFAULT_DATASET_NAME = "research-agent/golden-queries"
+DEFAULT_DATASET_NAME = "cortex/golden-queries"
 DEFAULT_GOLDEN_QUERIES_PATH = Path("tests/fixtures/langfuse_golden_queries.json")
 
 
@@ -69,7 +69,7 @@ def sync_dataset(
     except Exception:
         client.create_dataset(
             name=dataset_name,
-            description="Production golden queries for the research agent.",
+            description="Production golden queries for Cortex.",
             metadata={"source_path": source_path},
         )
 

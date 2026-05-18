@@ -1,0 +1,141 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: cortex
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      timeoutSeconds: 300
+      containers:
+        - image: gcr.io/cortex-496709/cortex:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              memory: 1Gi
+              cpu: "1"
+          env:
+            # --- LLM ---
+            - name: LLM_PROVIDER
+              value: "openai"
+            - name: OPENAI_MODEL
+              value: "gpt-4o-mini"
+            - name: EMBEDDING_PROVIDER
+              value: "openai"
+            - name: EMBEDDING_MODEL
+              value: "text-embedding-3-small"
+            - name: EMBEDDING_DIMENSIONS
+              value: "1536"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openai-api-key
+                  key: latest
+            # --- Search / Reranking ---
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tavily-api-key
+                  key: latest
+            - name: COHERE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cohere-api-key
+                  key: latest
+            # --- Graph store ---
+            - name: NEO4J_URI
+              valueFrom:
+                secretKeyRef:
+                  name: neo4j-uri
+                  key: latest
+            - name: NEO4J_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: neo4j-username
+                  key: latest
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: neo4j-password
+                  key: latest
+            - name: NEO4J_DATABASE
+              value: "neo4j"
+            # --- Supabase ---
+            - name: SUPABASE_URL
+              value: "https://oukmugleriangmcdkocn.supabase.co"
+            - name: SUPABASE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secret-key
+                  key: latest
+            - name: SUPABASE_JWKS_URL
+              value: "https://oukmugleriangmcdkocn.supabase.co/auth/v1/.well-known/jwks.json"
+            - name: SUPABASE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-jwt-secret
+                  key: latest
+            # --- Inngest ---
+            - name: INNGEST_EVENT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: inngest-event-key
+                  key: latest
+            - name: INNGEST_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: inngest-signing-key
+                  key: latest
+            # --- Redis ---
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redis-url
+                  key: latest
+            # --- Stripe ---
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stripe-secret-key
+                  key: latest
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stripe-webhook-secret
+                  key: latest
+            - name: STRIPE_PRO_PRICE_ID
+              value: "price_1TWXZlRWPGTvI9HrxX2hUI3r"
+            - name: STRIPE_SUCCESS_URL
+              value: "https://YOUR_FRONTEND_DOMAIN/billing/success"
+            - name: STRIPE_CANCEL_URL
+              value: "https://YOUR_FRONTEND_DOMAIN/billing/cancel"
+            - name: STRIPE_PORTAL_RETURN_URL
+              value: "https://YOUR_FRONTEND_DOMAIN"
+            # --- CORS ---
+            - name: CORS_ORIGINS
+              value: "https://YOUR_FRONTEND_DOMAIN"
+            # --- Internal ---
+            - name: INTERNAL_DISPATCH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: internal-dispatch-secret
+                  key: latest
+            # --- Observability ---
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-public-key
+                  key: latest
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secret-key
+                  key: latest
+            - name: LANGFUSE_ENV
+              value: "prod"

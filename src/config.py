@@ -1,7 +1,7 @@
 """Application settings loaded from environment variables."""
 
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
 
 
 class Settings(BaseSettings):
@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     )
     embedding_dimensions: int = Field(
         default=1536,
-        description="Expected embedding vector size for the configured Pinecone index.",
+        description="Expected embedding vector size for Neo4j vector indexes.",
     )
 
     # Search
@@ -48,12 +48,6 @@ class Settings(BaseSettings):
     web_search_provider: str = Field(
         default="tavily",
         description="Active web search provider for agent chat tool calls.",
-    )
-
-    # Vector store (Pinecone)
-    pinecone_api_key: str = Field(default="", description="Pinecone API key")
-    pinecone_index_name: str = Field(
-        default="research-agent", description="Pinecone index name"
     )
 
     # Graph store (Neo4j)
@@ -106,16 +100,35 @@ class Settings(BaseSettings):
         default=["*"],
         description="Allowed CORS origins. Comma-separated in env: CORS_ORIGINS=https://app.example.com,https://staging.example.com",
     )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
+        return v
+
     enforce_session_auth: bool = Field(
         default=True,
         description="Require authentication for session endpoints.",
     )
+    internal_dispatch_secret: str = Field(
+        default="",
+        description="Secret token required to call POST /internal/dispatch-outbox. Set a strong random value in prod.",
+    )
 
     # Supabase
     supabase_url: str = Field(default="", description="Supabase project URL")
-    supabase_service_role_key: str = Field(
+    supabase_secret_key: str = Field(
         default="",
-        description="Supabase service role key used by backend for PostgREST.",
+        validation_alias=AliasChoices(
+            "SUPABASE_SECRET_KEY",
+            "SUPABASE_SERVICE_ROLE_KEY",
+        ),
+        description=(
+            "Supabase secret API key (sb_secret_...) for backend PostgREST/Storage. "
+            "Legacy service_role JWT is still accepted via SUPABASE_SERVICE_ROLE_KEY."
+        ),
     )
     supabase_jwks_url: str = Field(
         default="",
@@ -136,7 +149,7 @@ class Settings(BaseSettings):
         description="Enable LangSmith tracing for workflow and node spans.",
     )
     langsmith_project: str = Field(
-        default="research-agent",
+        default="cortex",
         description="LangSmith project name for traced runs.",
     )
     langsmith_api_key: str = Field(default="", description="LangSmith API key")

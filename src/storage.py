@@ -8,6 +8,7 @@ from urllib.parse import quote
 import httpx
 
 from src.config import settings
+from src.supabase_keys import supabase_api_headers
 
 
 @dataclass
@@ -32,24 +33,18 @@ def parse_storage_uri(storage_uri: str) -> SupabaseObjectRef:
 
 
 class SupabaseStorageAdapter:
-    """Minimal Storage API wrapper using Supabase service-role auth."""
+    """Minimal Storage API wrapper using Supabase secret-key auth."""
 
     def __init__(self) -> None:
-        if not settings.supabase_url or not settings.supabase_service_role_key:
+        if not settings.supabase_url or not settings.supabase_secret_key:
             raise RuntimeError(
-                "Supabase storage requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+                "Supabase storage requires SUPABASE_URL and SUPABASE_SECRET_KEY."
             )
         self._base = settings.supabase_url.rstrip("/")
-        self._key = settings.supabase_service_role_key
+        self._key = settings.supabase_secret_key
 
     def _headers(self, *, content_type: str | None = None) -> dict[str, str]:
-        headers = {
-            "Authorization": f"Bearer {self._key}",
-            "apikey": self._key,
-        }
-        if content_type:
-            headers["Content-Type"] = content_type
-        return headers
+        return supabase_api_headers(self._key, content_type=content_type)
 
     async def upload_bytes(self, *, key: str, content: bytes, content_type: str) -> str:
         bucket = settings.rag_storage_bucket

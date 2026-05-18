@@ -117,7 +117,7 @@ def test_stream_research_emits_node_completion_from_langgraph_node_metadata():
 
     async def collect():
         lines: list[str] = []
-        async for line in _stream_research("q", False):
+        async for line in _stream_research("q"):
             lines.append(line)
         return lines
 
@@ -245,7 +245,7 @@ def test_session_research_queues_background_run():
     ):
         response = client.post(
             "/sessions/session-1/research",
-            json={"query": "What is LangGraph?", "use_vector_store": False},
+            json={"query": "What is LangGraph?"},
         )
 
     assert response.status_code == 200
@@ -262,7 +262,7 @@ def test_session_research_returns_429_when_quota_exceeded():
     with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
         response = client.post(
             "/sessions/session-1/research",
-            json={"query": "What is LangGraph?", "use_vector_store": False},
+            json={"query": "What is LangGraph?"},
         )
     assert response.status_code == 429
     payload = response.json()["detail"]
@@ -468,7 +468,6 @@ def test_execute_research_run_marks_completed_and_records():
                 run_id="run-1",
                 user_id="user-1",
                 query="What is LangGraph?",
-                use_vector_store=False,
             )
         )
 
@@ -509,7 +508,6 @@ def test_execute_research_run_marks_failed_on_error():
                     run_id="run-1",
                     user_id="user-1",
                     query="What is LangGraph?",
-                    use_vector_store=False,
                 )
             )
         except RuntimeError:
@@ -562,7 +560,6 @@ def test_execute_research_run_ignores_live_state_persist_errors():
                 run_id="run-1",
                 user_id="user-1",
                 query="What is LangGraph?",
-                use_vector_store=False,
             )
         )
 
@@ -615,14 +612,12 @@ def test_execute_research_runs_can_overlap_in_time():
                     run_id="run-a",
                     user_id="user-1",
                     query="What is LangGraph?",
-                    use_vector_store=False,
                 ),
                 _execute_research_run(
                     session_id="session-1",
                     run_id="run-b",
                     user_id="user-1",
                     query="What is LangGraph?",
-                    use_vector_store=False,
                 ),
             )
 
@@ -668,7 +663,7 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
         patch("src.api.endpoints.settings.supabase_url", ""),
-        patch("src.api.endpoints.settings.supabase_service_role_key", ""),
+        patch("src.api.endpoints.settings.supabase_secret_key", ""),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
     ):
@@ -681,7 +676,7 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
         patch("src.api.endpoints.settings.supabase_url", "https://example.supabase.co"),
-        patch("src.api.endpoints.settings.supabase_service_role_key", "service-role"),
+        patch("src.api.endpoints.settings.supabase_secret_key", "service-role"),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
     ):

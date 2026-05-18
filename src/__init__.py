@@ -1,3 +1,3 @@
-"""Research Agent - A multi-step LangGraph research orchestration system."""
+"""Cortex — multi-step LangGraph research and RAG orchestration."""
 
 __version__ = "0.1.0"

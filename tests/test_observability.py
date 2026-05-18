@@ -33,7 +33,6 @@ def test_workflow_run_context_populates_metadata_when_disabled(monkeypatch):
     with start_workflow_run(
         entrypoint="test",
         query="hello",
-        use_vector_store=False,
     ) as ctx:
         assert ctx.workflow_id
         assert ctx.entrypoint == "test"

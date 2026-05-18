@@ -10,7 +10,6 @@ from src.graph.nodes import (
     rerank_node,
     summarize_node,
     report_node,
-    vector_store_node,
 )
 from src.graph.edges import route_after_search
 from src.observability.langsmith import start_step_span
@@ -57,7 +56,6 @@ def build_graph():
     builder.add_node("rerank",            rerank_node)
     builder.add_node("summarize",         summarize_node)
     builder.add_node("report",            report_node)
-    builder.add_node("vector_store",      vector_store_node)
     builder.add_node("abort",             _abort_node)
     builder.add_node("empty",             _empty_node)
 
@@ -74,10 +72,9 @@ def build_graph():
     # Linear tail of the pipeline
     builder.add_edge("rerank",       "summarize")
     builder.add_edge("summarize",    "report")
-    builder.add_edge("report",       "vector_store")
+    builder.add_edge("report",       END)
 
     # Terminal edges
-    builder.add_edge("vector_store", END)
     builder.add_edge("abort",        END)
     builder.add_edge("empty",        END)
 

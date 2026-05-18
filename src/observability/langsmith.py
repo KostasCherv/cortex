@@ -70,7 +70,6 @@ def start_workflow_run(
     *,
     entrypoint: str,
     query: str,
-    use_vector_store: bool,
 ) -> Iterator[WorkflowTraceContext]:
     """Start a root workflow run and propagate context."""
     workflow_id = str(uuid4())
@@ -83,7 +82,7 @@ def start_workflow_run(
     redaction_mode = settings.langsmith_redaction_mode
     run_name = "research-workflow"
     run_inputs = redact_payload(
-        {"query": query, "use_vector_store": use_vector_store},
+        {"query": query},
         mode=redaction_mode,
     )
     tags = build_trace_tags(["workflow"])

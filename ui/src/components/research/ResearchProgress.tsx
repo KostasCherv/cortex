@@ -5,35 +5,32 @@ import type { ResearchStreamEvent } from '@/types'
 
 const NODE_ALIASES: Record<string, string> = {
   search: 'search_node',
+  search_and_memory: 'search_and_memory_node',
   retrieve: 'retrieve_node',
   memory_context: 'memory_context_node',
   rerank: 'rerank_node',
   summarize: 'summarize_node',
   report: 'report_node',
-  vector_store: 'vector_store_node',
   abort: '__error__',
 }
 
 const NODE_LABELS: Record<string, string> = {
+  search_and_memory_node: 'Searching & Context',
   search_node: 'Searching',
   retrieve_node: 'Retrieving Sources',
   memory_context_node: 'Building Context',
   rerank_node: 'Reranking Sources',
   summarize_node: 'Summarizing Sources',
   report_node: 'Drafting Final Report',
-  vector_store_node: 'Storing Report',
   __end__: 'Completed',
   __error__: 'Failed',
 }
 
 const PIPELINE_PHASES = [
-  'search_node',
-  'retrieve_node',
-  'memory_context_node',
+  'search_and_memory_node',
   'rerank_node',
   'summarize_node',
   'report_node',
-  'vector_store_node',
 ]
 
 // Customize this list to display only selected phases in the UI.

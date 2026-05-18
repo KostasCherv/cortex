@@ -1,7 +1,7 @@
 [project]
-name = "research-agent"
+name = "cortex"
 version = "0.1.0"
-description = "Multi-step research agent using LangGraph, Tavily, and LLMs"
+description = "Cortex — multi-step research and RAG orchestration with LangGraph, Tavily, and LLMs"
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2.0",
@@ -10,12 +10,9 @@ dependencies = [
     "langchain-openai>=0.2.0",
     "langchain-ollama>=0.1.0",
     "tavily-python>=0.5.0",
-    "pinecone>=5.0.0",
     "openai>=1.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
-    "typer[all]>=0.12.0",
-    "rich>=13.0.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
@@ -34,7 +31,6 @@ dependencies = [
     "llama-index-core>=0.12.0",
     "llama-index-embeddings-openai>=0.3.0",
     "llama-index-embeddings-ollama>=0.3.0",
-    "llama-index-vector-stores-pinecone>=0.4.0",
     "stripe>=11.0.0",
     "redis>=5.0.0",
     "neo4j>=5.26.0",
@@ -49,9 +45,6 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.13.0",
 ]
-
-[project.scripts]
-research-agent = "src.main:app"
 
 [build-system]
 requires = ["setuptools>=70"]

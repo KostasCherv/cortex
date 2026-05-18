@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from pydantic import BaseModel
 
 from src.graph.graph import build_graph
-from src.errors import ResearchAgentError
+from src.errors import CortexError
 from src.observability.langfuse import (
     create_feedback_anchor_for_run,
     create_trace_id_for_workflow,
@@ -77,7 +78,7 @@ from src.rag import (
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
 )
-from src.inngest_client import handle_rag_ingestion, handle_research_run, inngest_client
+from src.inngest_client import handle_rag_ingestion, handle_research_run, dispatch_outbox_cron, inngest_client
 from src.storage import ensure_rag_storage_ready
 from src.billing.application import BillingService, UsageIncrement
 from src.billing.domain import BillingSyncError, QuotaExceededError
@@ -87,7 +88,7 @@ logger = logging.getLogger(__name__)
 _LIVE_REPORT_FLUSH_SECONDS = 0.3
 
 app = FastAPI(
-    title="Research Agent API",
+    title="Cortex API",
     description="Multi-step LangGraph research orchestration with SSE streaming.",
     version="0.1.0",
 )
@@ -100,7 +101,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_research_run])
+_inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_research_run, dispatch_outbox_cron])
 
 
 @app.on_event("startup")
@@ -112,7 +113,7 @@ async def validate_session_store_configuration() -> None:
 
     # Session persistence is optional for non-session routes.
     has_url = bool(settings.supabase_url)
-    has_key = bool(settings.supabase_service_role_key)
+    has_key = bool(settings.supabase_secret_key)
 
     if not has_url and not has_key:
         logger.info(
@@ -121,7 +122,7 @@ async def validate_session_store_configuration() -> None:
     elif not has_url or not has_key:
         logger.warning(
             "[startup] Supabase session persistence is partially configured; "
-            "session endpoints may fail until SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are both set."
+            "session endpoints may fail until SUPABASE_URL and SUPABASE_SECRET_KEY are both set."
         )
     else:
         ensure_store_initialized()
@@ -149,8 +150,6 @@ async def validate_session_store_configuration() -> None:
 
 class ResearchRequest(BaseModel):
     query: str
-    # Deprecated compatibility flag. Graph-first persistence/retrieval is always active.
-    use_vector_store: bool = False
 
 
 class FollowupRequest(BaseModel):
@@ -208,8 +207,8 @@ class BillingCheckoutRequest(BaseModel):
 # Exception handlers
 # ---------------------------------------------------------------------------
 
-@app.exception_handler(ResearchAgentError)
-async def research_agent_error_handler(request: Request, exc: ResearchAgentError):
+@app.exception_handler(CortexError)
+async def cortex_error_handler(request: Request, exc: CortexError):
     raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -689,7 +688,6 @@ def _build_chat_messages(
 
 async def _stream_research(
     query: str,
-    use_vector_store: bool,
     session: Session | None = None,
     run_id: str | None = None,
     user_id: str | None = None,
@@ -702,7 +700,6 @@ async def _stream_research(
     graph = build_graph()
     initial_state: dict = {
         "query": query,
-        "use_vector_store": use_vector_store,
         "error": None,
         "session_id": session.session_id if session else None,
         "run_id": run_id,
@@ -714,13 +711,12 @@ async def _stream_research(
 
     _GRAPH_NODES = {
         "search_and_memory", "rerank", "summarize", "report",
-        "vector_store", "abort", "empty",
+        "abort", "empty",
     }
 
     with start_workflow_run(
         entrypoint="api",
         query=query,
-        use_vector_store=use_vector_store,
     ) as trace_ctx:
         final_node_state: dict | None = None
         try:
@@ -899,15 +895,13 @@ async def _execute_research_run(
     run_id: str,
     user_id: str,
     query: str,
-    use_vector_store: bool,
 ) -> None:
     """Execute one research run in the background and persist terminal status."""
     logger.info(
-        "[run] start run_id=%s session_id=%s user_id=%s use_vector_store=%s",
+        "[run] start run_id=%s session_id=%s user_id=%s",
         run_id,
         session_id,
         user_id,
-        use_vector_store,
     )
     session = await get_session(session_id, user_id)
     if session is None:
@@ -930,7 +924,6 @@ async def _execute_research_run(
     graph = build_graph()
     initial_state: dict = {
         "query": query,
-        "use_vector_store": use_vector_store,
         "error": None,
         "session_id": session.session_id,
         "run_id": run_id,
@@ -940,7 +933,7 @@ async def _execute_research_run(
 
     graph_nodes = {
         "search_and_memory", "rerank", "summarize", "report",
-        "vector_store", "abort", "empty",
+        "abort", "empty",
     }
     partial_report = ""
     last_report_flush_at = 0.0
@@ -977,7 +970,6 @@ async def _execute_research_run(
     with start_workflow_run(
         entrypoint="background",
         query=query,
-        use_vector_store=use_vector_store,
     ) as trace_ctx:
         final_node_state: dict | None = None
         try:
@@ -1279,6 +1271,26 @@ async def health():
     return HealthResponse(status="ok", version="0.1.0")
 
 
+@app.post("/internal/dispatch-outbox", tags=["Internal"])
+async def dispatch_outbox_endpoint(request: Request):
+    """Trigger outbox dispatch manually (Cloud Scheduler fallback). Requires Authorization: Bearer <secret>."""
+    from src.outbox import dispatch_outbox_events
+
+    configured_secret = settings.internal_dispatch_secret
+    if not configured_secret:
+        raise HTTPException(status_code=503, detail="Internal dispatch not configured")
+
+    token = request.headers.get("Authorization", "")
+    if not token.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    provided = token.removeprefix("Bearer ")
+    if not secrets.compare_digest(provided, configured_secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    sent = await dispatch_outbox_events(limit=50)
+    return {"dispatched": sent}
+
+
 @app.get("/api/billing/usage", tags=["Billing"])
 async def billing_usage(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
@@ -1468,7 +1480,6 @@ async def session_research(
             "run_id": run_id,
             "user_id": current_user.user_id,
             "query": body.query,
-            "use_vector_store": body.use_vector_store,
         },
     )
     background_tasks.add_task(outbox.dispatch_outbox_events, limit=10)

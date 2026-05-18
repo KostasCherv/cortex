@@ -70,7 +70,9 @@ def test_ingest_document_writes_document_chunk_and_entity_batches():
     assert any("MERGE (c)-[m:MENTIONS]->(e)" in query for query, _, _ in calls)
 
 
-def test_ingest_document_caps_llm_extraction_to_three_chunks():
+def test_ingest_document_caps_llm_extraction_to_max_chunks():
+    from src.tools.neo4j_graph_store import _MAX_LLM_EXTRACTION_CHUNKS
+
     driver = _fake_driver_with_side_effect(lambda *_args, **_kwargs: [])
     embed = MagicMock()
     embed.embed_texts.side_effect = lambda texts: [[0.1] * 4 for _ in texts]
@@ -79,7 +81,7 @@ def test_ingest_document_caps_llm_extraction_to_three_chunks():
     store._extract_entities_relations = MagicMock(return_value=([], []))
     store._heuristic_entities_relations = MagicMock(return_value=([], []))
 
-    # Produces >3 chunks with current chunking config.
+    # Produces more chunks than the LLM extraction cap.
     long_text = ("Long chunk text segment. " * 260)
     ingested = store.ingest_document(
         document_id="doc-long",
@@ -92,9 +94,9 @@ def test_ingest_document_caps_llm_extraction_to_three_chunks():
         run_id="run-1",
     )
 
-    assert ingested > 3
-    assert store._extract_entities_relations.call_count == 3
-    assert store._heuristic_entities_relations.call_count == ingested - 3
+    assert ingested > _MAX_LLM_EXTRACTION_CHUNKS
+    assert store._extract_entities_relations.call_count == _MAX_LLM_EXTRACTION_CHUNKS
+    assert store._heuristic_entities_relations.call_count == ingested - _MAX_LLM_EXTRACTION_CHUNKS
 
 
 def test_query_context_fuses_scores_and_applies_scope_filters():

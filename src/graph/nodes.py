@@ -486,27 +486,7 @@ async def report_node(state: ResearchState) -> ResearchState:
 
 
 # ---------------------------------------------------------------------------
-# Node 6: Vector Store
-# ---------------------------------------------------------------------------
-
-
-async def vector_store_node(state: ResearchState) -> ResearchState:
-    """Legacy compatibility node retained for graph-first mode.
-
-    Report persistence now happens in the API run finalization path using Neo4j.
-    """
-    with start_step_span(
-        name="vector_store_node",
-        run_type="chain",
-        node_name="vector_store",
-        inputs={"enabled": bool(state.get("use_vector_store", False))},
-    ):
-        logger.info("[vector_store_node] graph-first mode active; no-op compatibility node")
-        return state
-
-
-# ---------------------------------------------------------------------------
-# Node 7: Memory Context
+# Memory Context
 # ---------------------------------------------------------------------------
 
 
@@ -564,7 +544,7 @@ async def memory_context_node(state: ResearchState) -> ResearchState:
 
 
 async def search_and_memory_node(state: ResearchState) -> ResearchState:
-    """Run Tavily search and Pinecone memory lookup concurrently.
+    """Run Tavily search and Neo4j memory lookup concurrently.
 
     Combines search_node and memory_context_node via asyncio.gather so both
     network calls happen in parallel. Joins their results before reranking.

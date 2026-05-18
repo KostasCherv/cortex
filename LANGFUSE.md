@@ -60,15 +60,15 @@ This artifact is intentionally rubric-based rather than exact-output based so th
 
 ## Dataset Sync
 
-Use the CLI to sync the checked-in artifact into LangFuse:
+Sync the checked-in artifact into LangFuse:
 
 ```bash
-uv run python -m src.main langfuse-sync-dataset
+uv run python scripts/sync_langfuse_dataset.py
 ```
 
 Optional flags:
 
-- `--dataset-name research-agent/golden-queries`
+- `--dataset-name cortex/golden-queries`
 - `--source tests/fixtures/langfuse_golden_queries.json`
 
 The sync is explicit and idempotent. It creates the dataset if missing and upserts items by stable item id.

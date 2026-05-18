@@ -364,32 +364,6 @@ def test_report_node_includes_domain_section_when_present():
 
 
 # ---------------------------------------------------------------------------
-# vector_store_node
-# ---------------------------------------------------------------------------
-
-def test_vector_store_node_skips_when_disabled():
-    from src.graph.nodes import vector_store_node
-    state = asyncio.run(vector_store_node({"query": "test", "use_vector_store": False, "report": "# R"}))
-    # Should pass through unchanged (no VectorStoreManager call)
-    assert state["query"] == "test"
-
-
-def test_vector_store_node_saves_when_enabled():
-    from src.graph.nodes import vector_store_node
-    state = asyncio.run(
-        vector_store_node(
-            {
-                "query": "LangGraph",
-                "use_vector_store": True,
-                "report": "# Report",
-                "report_metadata": {"title": "LangGraph"},
-            }
-        )
-    )
-    assert state["query"] == "LangGraph"
-
-
-# ---------------------------------------------------------------------------
 # memory_context_node
 # ---------------------------------------------------------------------------
 

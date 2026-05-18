@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import { Loader2, SendHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 
 type Props = {
-  onSubmit: (query: string, useVectorStore: boolean) => Promise<void>
+  onSubmit: (query: string) => Promise<void>
   disabled: boolean
   isStreaming: boolean
   showSubmit?: boolean
@@ -14,12 +12,11 @@ type Props = {
 
 export function QueryComposer({ onSubmit, disabled, isStreaming, showSubmit = true }: Props) {
   const [query, setQuery] = useState('')
-  const [useVectorStore, setUseVectorStore] = useState(true)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!query.trim() || disabled) return
-    await onSubmit(query, useVectorStore)
+    await onSubmit(query)
     setQuery('')
   }
 
@@ -40,19 +37,8 @@ export function QueryComposer({ onSubmit, disabled, isStreaming, showSubmit = tr
           }
         }}
       />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Switch
-            id="vector-toggle"
-            checked={useVectorStore}
-            onCheckedChange={setUseVectorStore}
-            disabled={disabled}
-          />
-          <Label htmlFor="vector-toggle" className="text-sm text-muted-foreground cursor-pointer">
-            Store in knowledge base
-          </Label>
-        </div>
-        {showSubmit && (
+      {showSubmit && (
+        <div className="flex justify-end">
           <Button type="submit" disabled={disabled || !query.trim()} size="sm">
             {isStreaming ? (
               <>
@@ -66,8 +52,8 @@ export function QueryComposer({ onSubmit, disabled, isStreaming, showSubmit = tr
               </>
             )}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
     </form>
   )
 }

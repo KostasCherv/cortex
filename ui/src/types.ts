@@ -5,7 +5,6 @@ export type HealthResponse = {
 
 export type ResearchRequest = {
   query: string
-  use_vector_store: boolean
 }
 
 export type ResearchStreamEvent = {

@@ -120,7 +120,7 @@ def test_verify_with_supabase_userinfo_miss_calls_supabase_and_writes_cache():
         patch("src.auth.httpx.AsyncClient", return_value=mock_ctx),
     ):
         mock_settings.supabase_url = "https://example.supabase.co"
-        mock_settings.supabase_service_role_key = "service-key"
+        mock_settings.supabase_secret_key = "service-key"
         mock_settings.redis_cache_ttl_auth_seconds = 300
         user = asyncio.run(_verify_with_supabase_userinfo("token-1"))
 
@@ -144,7 +144,7 @@ def test_verify_with_supabase_userinfo_without_cache_calls_supabase_directly():
         patch("src.auth.httpx.AsyncClient", return_value=mock_ctx),
     ):
         mock_settings.supabase_url = "https://example.supabase.co"
-        mock_settings.supabase_service_role_key = "service-key"
+        mock_settings.supabase_secret_key = "service-key"
         user = asyncio.run(_verify_with_supabase_userinfo("token-1"))
 
     assert user.user_id == "user-1"

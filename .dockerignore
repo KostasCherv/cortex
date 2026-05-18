@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+ui/
+tests/
+docs/
+node_modules
+.worktrees
+worktrees

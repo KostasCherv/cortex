@@ -41,7 +41,6 @@ class ResearchState(TypedDict, total=False):
 
     # Control flow
     error: str | None               # Set on unrecoverable errors
-    use_vector_store: bool          # Deprecated compatibility flag (graph-first mode ignores it)
 
     memory_context: str | None      # Memory context for the LLM
     graph_context: str | None       # Graph-aware context block for prompting

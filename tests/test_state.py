@@ -14,7 +14,6 @@ def test_state_is_typed_dict():
         "report": "",
         "report_metadata": {},
         "error": None,
-        "use_vector_store": False,
     }
     assert state["query"] == "What is LangGraph?"
     assert state["error"] is None

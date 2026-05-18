@@ -53,7 +53,7 @@ def test_sync_dataset_upserts_items_with_rubric_metadata():
 
     sync_dataset(
         client=client,
-        dataset_name="research-agent/golden-queries",
+        dataset_name="cortex/golden-queries",
         records=[
             GoldenQueryRecord(
                 id="langgraph-overview",

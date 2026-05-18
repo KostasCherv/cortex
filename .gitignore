@@ -1,12 +1,13 @@
 .venv
 .env
 .env.local
+.env.prod
 .env.*.local
 ui/.env
 ui/.env.local
 __pycache__
 *.pyc
-research_agent.egg-info
+cortex.egg-info
 .ruff_cache
 .pytest_cache
 .mypy_cache

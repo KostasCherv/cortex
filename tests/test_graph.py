@@ -36,7 +36,7 @@ def test_graph_invoke_with_error_reaches_abort(monkeypatch):
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "test", "use_vector_store": False, "error": None, "user_id": "u-1"})
+            graph.ainvoke({"query": "test", "error": None, "user_id": "u-1"})
         )
 
     # Pipeline should abort and set an error
@@ -71,7 +71,7 @@ def test_graph_invoke_happy_path(monkeypatch):
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None, "user_id": "u-1"})
+            graph.ainvoke({"query": "LangGraph", "error": None, "user_id": "u-1"})
         )
 
     assert "report" in final
@@ -107,7 +107,7 @@ def test_graph_invoke_continues_when_memory_lookup_fails():
         from src.graph.graph import build_graph
         graph = build_graph()
         final = asyncio.run(
-            graph.ainvoke({"query": "LangGraph", "use_vector_store": False, "error": None, "user_id": "u-1"})
+            graph.ainvoke({"query": "LangGraph", "error": None, "user_id": "u-1"})
         )
 
     assert "report" in final
