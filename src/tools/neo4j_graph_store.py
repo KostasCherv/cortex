@@ -71,6 +71,7 @@ class Neo4jGraphStore:
         self._driver = GraphDatabase.driver(
             settings.neo4j_uri,
             auth=(settings.neo4j_username, settings.neo4j_password),
+            notifications_min_severity="OFF",
         )
         try:
             self._driver.verify_connectivity()

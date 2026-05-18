@@ -65,7 +65,7 @@ spec:
                   name: neo4j-password
                   key: latest
             - name: NEO4J_DATABASE
-              value: "neo4j"
+              value: "7c6ba8b4"
             # --- Supabase ---
             - name: SUPABASE_URL
               value: "https://oukmugleriangmcdkocn.supabase.co"
