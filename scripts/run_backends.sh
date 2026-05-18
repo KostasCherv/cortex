@@ -12,7 +12,6 @@ escape_for_applescript() {
 
 CMD_API="$(escape_for_applescript "cd ${ROOT_DIR} && ${VENV_ACTIVATE} && INNGEST_DEV=1 uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload")"
 CMD_INNGEST="$(escape_for_applescript "cd ${ROOT_DIR} && npx --ignore-scripts=false inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery")"
-CMD_OUTBOX="$(escape_for_applescript "cd ${ROOT_DIR} && ${VENV_ACTIVATE} && while true; do INNGEST_DEV=1 python scripts/dispatch_outbox.py --limit 100; sleep 2; done")"
 
 echo "Starting all backend components..."
 
@@ -26,13 +25,10 @@ tell application "iTerm"
         tell current session
             write text "${CMD_INNGEST}"
         end tell
-        create tab with default profile
-        tell current session
-            write text "${CMD_OUTBOX}"
-        end tell
     end tell
 end tell
 APPLESCRIPT
 
-echo "All backend components started in iTerm2 tabs (API | Inngest | Outbox)."
+echo "All backend components started in iTerm2 tabs (API | Inngest)."
+echo "The Inngest dev server fires the outbox-dispatcher cron automatically every 2 minutes."
 echo "Close the window or press Ctrl+C in each tab to stop the services."

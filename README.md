@@ -28,6 +28,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Caching: `Redis` (optional for auth, search, and session hot paths; graceful degradation when unavailable)
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
+- Billing: `Stripe` (subscriptions, webhooks, customer portal)
 - Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`
 
 ## Architecture
@@ -75,12 +76,26 @@ flowchart LR
 
 ## Run locally
 
-1) Install dependencies and configure environment:
+### 1. Install dependencies and configure environment
 
 ```bash
 uv sync
 cp .env.example .env
 ```
+
+### 2. Start local services (Redis + Neo4j)
+
+```bash
+docker compose up -d
+```
+
+This starts:
+- **Redis** on `localhost:6379`
+- **Neo4j** on `localhost:7687` (Browser UI at `http://localhost:7474`, login: `neo4j` / `devpassword`)
+
+The Neo4j schema (indexes and constraints) is bootstrapped automatically on first backend startup.
+
+### 3. Configure `.env`
 
 Relevant LLM settings:
 
@@ -89,18 +104,31 @@ Relevant LLM settings:
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for OpenRouter-hosted models
 - `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for local Ollama usage
 
-Optional Redis caching:
+Embedding settings (must match the Neo4j vector index dimensions):
 
-- Uncomment the `REDIS_*` block in `.env` to enable auth, search, and session caching
-- If Redis is not configured or is temporarily unreachable, Cortex continues to run normally
+- Local dev default: `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_MODEL=nomic-embed-text`, `EMBEDDING_DIMENSIONS=768`
+- To share the production Neo4j: switch to `EMBEDDING_PROVIDER=openai`, `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1536`
 
-2) Start backend API:
+Neo4j (local Docker):
+```
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=devpassword
+NEO4J_DATABASE=neo4j
+```
+
+Redis:
+```
+REDIS_URL=redis://localhost:6379/0
+```
+
+### 4. Start backend API
 
 ```bash
 uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-3) Start frontend UI:
+### 5. Start frontend UI
 
 ```bash
 cd ui
@@ -108,60 +136,74 @@ npm install
 npm run dev
 ```
 
-4) Start event + ingestion workers:
+### 6. Start event and ingestion workers
 
 ```bash
-# Terminal A: Inngest dev server
 npx --ignore-scripts=false inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery
-
-# Terminal B: Outbox dispatcher loop
-while true; do uv run python scripts/dispatch_outbox.py --limit 100; sleep 2; done
 ```
 
-## API surface
+The Inngest dev server fires the `outbox-dispatcher` cron automatically every 2 minutes. No separate dispatcher process is needed locally.
 
-Key endpoints:
-
-- `GET /health` - liveness check.
-- `POST /sessions` - create authenticated session.
-- `GET /sessions` - list authenticated user sessions.
-- `POST /sessions/{id}/research` - run research in-session with SSE streaming.
-- `POST /sessions/{id}/runs/{run_id}/feedback` - submit thumbs feedback (optional comment) for a completed run.
-- `POST /sessions/{id}/followup` - grounded follow-up chat over run sources.
-- `POST /api/rag/agents/{id}/chat` and `/chat/stream` - agent Q&A grounded to linked resources.
-
-Billing + subscriptions:
-
-- `GET /api/billing/usage` - current plan + daily usage counters + reset time.
-- `POST /api/billing/checkout-session` - Stripe Checkout URL for Pro upgrade.
-- `POST /api/billing/portal-session` - Stripe Billing Portal URL for self-serve management.
-- `POST /api/billing/webhook` - signed Stripe webhook receiver for subscription state sync.
-
-Example research request:
+To flush the outbox manually on demand:
 
 ```bash
-curl -N -X POST http://localhost:8000/sessions/<session_id>/research \
-  -H "Authorization: Bearer <supabase_access_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is LangGraph?"}'
+uv run python scripts/dispatch_outbox.py --limit 100
 ```
 
-### Billing flow (production)
+## Production deployment
 
-```mermaid
-flowchart LR
-    ui["UI Upgrade button"] --> checkout["POST /api/billing/checkout-session"]
-    checkout --> stripeCheckout["Stripe Hosted Checkout"]
-    stripeCheckout --> webhook["POST /api/billing/webhook"]
-    webhook --> verify["Verify Stripe signature"]
-    verify --> sync["Upsert user_subscriptions"]
-    sync --> usage["GET /api/billing/usage"]
-    usage --> enforce["Quota guard on research/chat endpoints"]
+### Backend — Google Cloud Run
+
+The backend runs on Cloud Run with secrets stored in Google Secret Manager.
+
+```bash
+./scripts/deploy.sh
 ```
 
-## Stripe production configuration
+This script:
+1. Builds a Docker image via Cloud Build and tags it with the current git SHA
+2. Tags the image as `:latest`
+3. Injects the SHA-tagged image into `cloudrun/service.yaml` and runs `gcloud run services replace`
 
-Set these in `.env`:
+The service manifest at `cloudrun/service.yaml` defines all environment variables. Sensitive values reference Secret Manager secrets via `valueFrom.secretKeyRef`.
+
+Key production settings in `service.yaml`:
+- `EMBEDDING_PROVIDER=openai`, `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1536`
+- `NEO4J_DATABASE` must be set to your Aura instance database name (not `neo4j`)
+- `CORS_ORIGINS` must be a JSON array string: `'["https://your-app.vercel.app"]'`
+- `LANGSMITH_TRACING=true` with `LANGSMITH_API_KEY` secret
+
+### Frontend — Vercel
+
+```bash
+# Sync VITE_* env vars to Vercel
+./scripts/vercel-ui-env.sh
+
+# Deploy to production
+./scripts/deploy-ui.sh --prod
+```
+
+### Background jobs — Inngest
+
+After deploying the backend, sync the Inngest serve URL in the Inngest Dashboard:
+
+- **Apps → Sync → Serve URL:** `https://<your-cloud-run-url>/api/inngest`
+
+Registered functions:
+- `rag-ingestion` — triggered by `rag/ingestion.requested`
+- `research-run` — triggered by `research/run.requested`
+- `outbox-dispatcher` — cron every 2 minutes
+
+### Supabase migrations
+
+```bash
+npx supabase link --project-ref <project-ref>
+npx supabase db push
+```
+
+## Stripe configuration
+
+### Environment variables
 
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -170,25 +212,65 @@ Set these in `.env`:
 - `STRIPE_CANCEL_URL`
 - `STRIPE_PORTAL_RETURN_URL`
 
-Notes:
+### Webhook setup
 
-- Webhook signature verification uses Stripe’s official SDK (`stripe.Webhook.construct_event`).
-- Subscription sync supports metadata-based user mapping and fallback resolution via Stripe customer/subscription IDs.
+Register the webhook endpoint in the Stripe Dashboard → Developers → Webhooks:
 
-## Best practices implemented
+- **URL:** `https://<your-cloud-run-url>/api/billing/webhook`
+- **Events:** `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`
 
-- Transactional outbox for exactly-once intent before external dispatch.
-- Idempotent job claiming to prevent duplicate ingestion under retries.
-- Concurrent-safe state transitions for outbox dispatch and ingestion jobs.
-- Auth-scoped session boundaries for data isolation across users.
-- Stream-first API design for long-running AI workflows.
-- Structured observability across orchestration nodes and dependency calls.
+The signing secret from the Stripe Dashboard must match `STRIPE_WEBHOOK_SECRET` in Secret Manager.
 
-## LangFuse integration
+### Billing flow
 
-Cortex keeps `LangSmith` for graph/workflow-level tracing and adds `LangFuse` for generation-level observability, user scoring, and evaluation datasets.
+```mermaid
+flowchart LR
+    ui["UI Upgrade button"] --> checkout["Checkout session endpoint"]
+    checkout --> stripeCheckout["Stripe Hosted Checkout"]
+    stripeCheckout --> webhook["Webhook endpoint"]
+    webhook --> verify["Verify Stripe signature"]
+    verify --> sync["Upsert user_subscriptions"]
+    sync --> usage["Usage endpoint"]
+    usage --> enforce["Quota guard on research/chat endpoints"]
+```
 
-Check more on [LANGFUSE.md](LANGFUSE.md).
+## Neo4j / GraphRAG
+
+Cortex uses Neo4j as a graph-aware vector store for RAG retrieval.
+
+### Local vs production
+
+| | Local dev | Production |
+|---|---|---|
+| Instance | Docker (`bolt://localhost:7687`) | Neo4j Aura (`neo4j+s://...`) |
+| Database | `neo4j` | Your Aura database name |
+| Embedding model | `nomic-embed-text` (Ollama) | `text-embedding-3-small` (OpenAI) |
+| Vector dimensions | 768 | 1536 |
+
+The two environments use separate databases and indexes — local ingestion does not affect production data.
+
+> **Note:** The local and production Neo4j instances are incompatible for queries because they use different embedding dimensions. Do not point local dev at the production Aura instance unless you also switch to OpenAI embeddings locally.
+
+### Schema bootstrap
+
+On first connection, the backend automatically creates:
+- Vector index `chunk_embedding_index` on `Chunk.embedding`
+- B-tree indexes on `Chunk.run_id`, `Document.resource_id`, `Entity.normalized_name`
+
+## Observability
+
+### LangSmith
+
+Enabled in production via `LANGSMITH_TRACING=true`. Traces appear in the configured project at [smith.langchain.com](https://smith.langchain.com).
+
+Configuration:
+- `LANGSMITH_PROJECT=cortex`
+- `LANGSMITH_REDACTION_MODE=redacted_default`
+- `LANGSMITH_SAMPLING_RATE=1.0`
+
+### LangFuse
+
+Used for generation-level observability, user scoring, and evaluation datasets. See [LANGFUSE.md](LANGFUSE.md) for details.
 
 ## Development checks
 
@@ -200,22 +282,24 @@ uv run mypy src
 
 ## Model evaluation
 
-The repo includes a standalone summarize-only comparison script at
-`src/evals/model_comparison.py`.
+The repo includes a standalone summarize-only comparison script at `src/evals/model_comparison.py`.
 
-- It loads sample cases from `src/evals/golden_set.json`
-- It runs `summarize_node` directly for each configured `{provider, model}` entry
-- It scores outputs with DeepEval faithfulness and answer relevancy metrics
-- It writes results to `src/evals/results.csv`
+- Loads sample cases from `src/evals/golden_set.json`
+- Runs `summarize_node` directly for each configured `{provider, model}` entry
+- Scores outputs with DeepEval faithfulness and answer relevancy metrics
+- Writes results to `src/evals/results.csv`
 
-Edit the `MODEL_CONFIGS` list in `src/evals/model_comparison.py` to choose which
-OpenAI and Ollama models to compare.
-
-Run it with:
+Edit `MODEL_CONFIGS` in `src/evals/model_comparison.py` to choose which models to compare, then run:
 
 ```bash
 uv run python3 src/evals/model_comparison.py
 ```
 
-This script requires the credentials and local runtime for whichever providers
-you list in `MODEL_CONFIGS`.
+## Best practices implemented
+
+- Transactional outbox for exactly-once intent before external dispatch.
+- Idempotent job claiming to prevent duplicate ingestion under retries.
+- Concurrent-safe state transitions for outbox dispatch and ingestion jobs.
+- Auth-scoped session boundaries for data isolation across users.
+- Stream-first API design for long-running AI workflows.
+- Structured observability across orchestration nodes and dependency calls.
