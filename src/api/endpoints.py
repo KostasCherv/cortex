@@ -2206,12 +2206,6 @@ async def rag_chat_workspace(
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
-    if not resource_ids:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "processing_failed", "message": "Workspace has no ready resources."},
-        )
-
     rag_context = await retrieve_context_for_query(
         agent_id="workspace",
         user_id=current_user.user_id,
@@ -2310,11 +2304,6 @@ async def rag_chat_workspace_stream(
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
     resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
-    if not resource_ids:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "processing_failed", "message": "Workspace has no ready resources."},
-        )
     rag_context = await retrieve_context_for_query(
         agent_id="workspace",
         user_id=current_user.user_id,

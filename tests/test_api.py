@@ -1257,6 +1257,39 @@ def test_workspace_rag_chat_stream_empty_context_searches_web_without_toggle():
     ]
 
 
+def test_workspace_rag_chat_allows_no_ready_resources():
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "General answer"
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "tavily"
+    mock_tool.search.return_value = [{"url": "https://web.example", "title": "Web", "content": "Fact"}]
+
+    with (
+        patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)) as retrieve,
+        patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._should_use_web_search", new=AsyncMock(return_value=(False, ""))),
+        patch("src.api.endpoints.get_web_search_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/chat",
+            json={"message": "What is Archon?"},
+        )
+
+    assert response.status_code == 200
+    retrieve.assert_awaited_once()
+    assert retrieve.await_args.kwargs["resource_ids"] == []
+
+
 def test_workspace_rag_chat_uses_prior_topic_when_current_message_is_generic():
     mock_context = MagicMock()
     mock_context.context = ""

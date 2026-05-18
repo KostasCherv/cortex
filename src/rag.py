@@ -897,6 +897,8 @@ async def retrieve_context_for_query(
     resource_ids: list[str],
     question: str,
 ) -> RagQueryResult:
+    if not resource_ids:
+        return RagQueryResult(context="", chunks=[], entities=None)
     return await query_resource_context(
         store=_get_store(),
         resource_ids=resource_ids,

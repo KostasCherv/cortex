@@ -15,11 +15,26 @@ from src.rag import (
     get_chat_session,
     list_chat_sessions,
     process_queued_ingestion_jobs,
+    retrieve_context_for_query,
     run_ingestion_job_now,
     suggest_chat_session_title,
     update_chat_session_title,
 )
 from src.rag_engine import query_resource_context
+
+
+async def test_retrieve_context_for_query_returns_empty_without_resource_ids():
+    with patch("src.rag.query_resource_context", new=AsyncMock()) as query_mock:
+        result = await retrieve_context_for_query(
+            agent_id="workspace",
+            user_id="user-1",
+            resource_ids=[],
+            question="Hello?",
+        )
+
+    query_mock.assert_not_awaited()
+    assert result.context == ""
+    assert result.chunks == []
 
 
 async def test_create_resource_rejects_unsupported_extension():

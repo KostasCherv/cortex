@@ -17,6 +17,7 @@ reports
 node_modules
 ui/node_modules
 ui/dist
+ui/.vercel
 .DS_Store
 supabase/.temp
 ui/.impeccable-live.json
