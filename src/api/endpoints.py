@@ -89,6 +89,25 @@ from src.billing.interfaces.http import build_billing_service, usage_summary_to_
 logger = logging.getLogger(__name__)
 _LIVE_REPORT_FLUSH_SECONDS = 0.3
 
+
+def _configure_application_logging() -> None:
+    level_name = (settings.app_log_level or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        )
+    root_logger.setLevel(level)
+
+    package_logger = logging.getLogger("src")
+    package_logger.setLevel(level)
+    package_logger.propagate = True
+
+    logger.info("[startup] Application logging configured at level=%s", level_name)
+
 app = FastAPI(
     title="Cortex API",
     description="Multi-step LangGraph research orchestration with SSE streaming.",
@@ -109,6 +128,7 @@ _inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_resea
 @app.on_event("startup")
 async def validate_session_store_configuration() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
+    _configure_application_logging()
     validate_web_search_provider_health()
     if not settings.cohere_api_key:
         logger.warning("[startup] Cohere reranking is disabled (COHERE_API_KEY not set).")
@@ -1594,9 +1614,19 @@ async def rag_chat_with_agent(
 
     agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
     if agent_bundle is None:
+        logger.warning(
+            "[rag_api] agent chat request failed because agent was not found agent_id=%s user_id=%s",
+            agent_id,
+            current_user.user_id,
+        )
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
     agent, resource_ids = agent_bundle
     if not resource_ids:
+        logger.warning(
+            "[rag_api] agent chat request has no linked ready resources agent_id=%s user_id=%s",
+            agent_id,
+            current_user.user_id,
+        )
         raise HTTPException(
             status_code=409,
             detail={"code": "processing_failed", "message": "Agent has no linked ready resources."},
@@ -1730,9 +1760,19 @@ async def rag_chat_with_agent_stream(
 
     agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
     if agent_bundle is None:
+        logger.warning(
+            "[rag_api] streaming agent chat request failed because agent was not found agent_id=%s user_id=%s",
+            agent_id,
+            current_user.user_id,
+        )
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
     agent, resource_ids = agent_bundle
     if not resource_ids:
+        logger.warning(
+            "[rag_api] streaming agent chat request has no linked ready resources agent_id=%s user_id=%s",
+            agent_id,
+            current_user.user_id,
+        )
         raise HTTPException(
             status_code=409,
             detail={"code": "processing_failed", "message": "Agent has no linked ready resources."},

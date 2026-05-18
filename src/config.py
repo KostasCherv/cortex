@@ -85,7 +85,7 @@ class Settings(BaseSettings):
         description="Maximum RAG chunks to keep after cross-encoder reranking.",
     )
     rerank_relevance_threshold: float = Field(
-        default=0.4,
+        default=0.1,
         description="Minimum reranker relevance score required for a citation.",
     )
     rerank_timeout_seconds: float = Field(
@@ -96,6 +96,10 @@ class Settings(BaseSettings):
     # API
     api_host: str = Field(default="0.0.0.0")
     api_port: int = Field(default=8000)
+    app_log_level: str = Field(
+        default="INFO",
+        description="Application logger level for Cortex loggers.",
+    )
     cors_origins: list[str] = Field(
         default=["*"],
         description="Allowed CORS origins. Comma-separated in env: CORS_ORIGINS=https://app.example.com,https://staging.example.com",
@@ -210,8 +214,12 @@ class Settings(BaseSettings):
 
     # Billing / Stripe
     stripe_secret_key: str = Field(default="", description="Stripe secret key.")
-    stripe_webhook_secret: str = Field(default="", description="Stripe webhook signing secret.")
-    stripe_pro_price_id: str = Field(default="", description="Stripe price id for the pro plan.")
+    stripe_webhook_secret: str = Field(
+        default="", description="Stripe webhook signing secret."
+    )
+    stripe_pro_price_id: str = Field(
+        default="", description="Stripe price id for the pro plan."
+    )
     stripe_success_url: str = Field(
         default="http://localhost:5173/billing/success",
         description="Redirect URL after successful checkout.",

@@ -121,7 +121,12 @@ def _rerank_with_cohere(
 
     if ranked:
         return ranked[:top_k]
-    if best_overall is not None and best_overall["rerank_score"] >= threshold:
+    if best_overall is not None:
+        logger.warning(
+            "[reranker] All Cohere rerank scores fell below threshold=%s; keeping best chunk with score=%s",
+            threshold,
+            best_overall["rerank_score"],
+        )
         return [best_overall]
     return []
 

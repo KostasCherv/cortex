@@ -638,6 +638,20 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
         mock_storage_ready.assert_not_awaited()
 
 
+def test_startup_validation_configures_application_logging():
+    with (
+        patch("src.api.endpoints.validate_web_search_provider_health"),
+        patch("src.api.endpoints._configure_application_logging") as mock_configure_logging,
+        patch("src.api.endpoints.settings.supabase_url", ""),
+        patch("src.api.endpoints.settings.supabase_secret_key", ""),
+        patch("src.api.endpoints.ensure_store_initialized"),
+        patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
+    ):
+        asyncio.run(app.router.on_startup[0]())
+
+    mock_configure_logging.assert_called_once()
+
+
 def test_startup_validation_checks_rag_storage_when_supabase_configured():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
@@ -649,6 +663,30 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
         asyncio.run(app.router.on_startup[0]())
         mock_init.assert_called_once()
         mock_storage_ready.assert_awaited_once()
+
+
+def test_configure_application_logging_sets_src_logger_level():
+    root_logger = endpoints.logging.getLogger()
+    src_logger = endpoints.logging.getLogger("src")
+    old_root_level = root_logger.level
+    old_src_level = src_logger.level
+    old_src_propagate = src_logger.propagate
+
+    try:
+        root_logger.setLevel(endpoints.logging.WARNING)
+        src_logger.setLevel(endpoints.logging.NOTSET)
+        src_logger.propagate = False
+
+        with patch("src.api.endpoints.settings.app_log_level", "INFO"):
+            endpoints._configure_application_logging()
+
+        assert root_logger.level == endpoints.logging.INFO
+        assert src_logger.level == endpoints.logging.INFO
+        assert src_logger.propagate is True
+    finally:
+        root_logger.setLevel(old_root_level)
+        src_logger.setLevel(old_src_level)
+        src_logger.propagate = old_src_propagate
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -14,12 +15,16 @@ from src.db.supabase_store import SupabaseSessionStore
 from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.reranker import rerank_chunks
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RagQueryResult:
     context: str
     chunks: list[dict]
     entities: list[str] | None = None
+
+
 async def read_locator_bytes(file_locator: str) -> tuple[bytes, str]:
     parsed = urlparse(file_locator)
     if parsed.scheme in {"http", "https"}:
@@ -105,6 +110,13 @@ async def query_resource_context(
         workspace_id=workspace_id,
         resource_ids=resource_ids,
     )
+    if not result.chunks:
+        logger.warning(
+            "[rag_engine] graph query returned no chunks owner_id=%s workspace_id=%s resource_ids=%s",
+            owner_id,
+            workspace_id,
+            resource_ids,
+        )
     top = []
     for row in result.chunks:
         top.append(

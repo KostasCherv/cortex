@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -242,6 +243,29 @@ async def test_query_resource_context_returns_reranked_chunks_and_context():
     assert result.chunks[0]["rerank_score"] == 0.92
     assert "[source:Doc chunk:raw-2]" in result.context
     assert "Less relevant" not in result.context
+
+
+async def test_query_resource_context_logs_when_graph_returns_no_chunks(caplog):
+    raw_result = MagicMock()
+    raw_result.chunks = []
+    raw_result.entities = []
+
+    caplog.set_level(logging.INFO, logger="src.rag_engine")
+
+    with patch("src.rag_engine.Neo4jGraphStore") as graph_cls:
+        graph_cls.return_value.query_context.return_value = raw_result
+
+        result = await query_resource_context(
+            store=AsyncMock(),
+            resource_ids=["res-1"],
+            owner_id="user-1",
+            workspace_id="user-1",
+            query="What is relevant?",
+        )
+
+    assert result.context == ""
+    assert result.chunks == []
+    assert "graph query returned no chunks" in caplog.text
 
 
 def test_rag_chat_message_to_dict_includes_chat_scope():
