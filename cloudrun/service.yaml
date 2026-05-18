@@ -126,7 +126,23 @@ spec:
                 secretKeyRef:
                   name: internal-dispatch-secret
                   key: latest
-            # --- Observability ---
+            # --- Observability (LangSmith) ---
+            - name: LANGSMITH_TRACING
+              value: "true"
+            - name: LANGSMITH_PROJECT
+              value: "cortex"
+            - name: LANGSMITH_ENDPOINT
+              value: "https://api.smith.langchain.com"
+            - name: LANGSMITH_REDACTION_MODE
+              value: "redacted_default"
+            - name: LANGSMITH_SAMPLING_RATE
+              value: "1.0"
+            - name: LANGSMITH_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langsmith-api-key
+                  key: latest
+            # --- Observability (LangFuse) ---
             - name: LANGFUSE_PUBLIC_KEY
               valueFrom:
                 secretKeyRef:
