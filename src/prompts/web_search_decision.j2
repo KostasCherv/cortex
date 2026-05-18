@@ -1,0 +1,13 @@
+You decide if a web search tool is required for the next user request.
+Return strict JSON only with keys: use_web_search (boolean), reason (string), query (string).
+Use web search when freshness/current events/live facts/external facts are needed, or when RAG context is insufficient.
+If RAG context is enough, set use_web_search to false.
+
+Conversation history:
+{{ history_block or 'None' }}
+
+Retrieved RAG context:
+{{ rag_context or 'None' }}
+
+User message:
+{{ message }}

@@ -50,6 +50,8 @@ from src.tools.reranker import rerank_chunks
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
+from src.prompts.registry import prompt_registry
+from src.guards import claims_no_web_access
 from src import outbox
 from src.rag import (
     CHAT_SCOPE_AGENT,
@@ -373,139 +375,38 @@ class _ResolvedWebContext:
     reason: str = "disabled"
 
 
-_QUERY_SIGNAL_STOPWORDS = {
-    "about",
-    "answer",
-    "best",
-    "check",
-    "compare",
-    "configuration",
-    "context",
-    "could",
-    "describe",
-    "did",
-    "docs",
-    "document",
-    "example",
-    "examples",
-    "explain",
-    "file",
-    "find",
-    "found",
-    "for",
-    "give",
-    "hello",
-    "guide",
-    "help",
-    "info",
-    "information",
-    "install",
-    "latest",
-    "make",
-    "project",
-    "question",
-    "retrieve",
-    "retrive",
-    "search",
-    "online",
-    "infos",
-    "info",
-    "compare",
-    "setup",
-    "show",
-    "summarize",
-    "summary",
-    "the",
-    "their",
-    "this",
-    "tool",
-    "using",
-    "what",
-    "whats",
-    "with",
-    "would",
-    "yaml",
-    "you",
-}
-
-
-def _query_signal_tokens(message: str) -> set[str]:
-    return {
-        token.lower()
-        for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", message or "")
-        if token.lower() not in _QUERY_SIGNAL_STOPWORDS
-    }
-
-
-def _rag_search_text(rag_context: str, rag_chunks: list[dict] | None) -> str:
-    parts = [rag_context or ""]
-    for chunk in rag_chunks or []:
-        parts.extend(
-            str(chunk.get(key) or "")
-            for key in ("source_title", "source_url", "text")
-        )
-    return "\n".join(parts).lower()
-
-
-def _is_weak_topic_query(message: str) -> bool:
-    return len(_query_signal_tokens(message)) <= 1
-
-
-def _normalize_web_lookup_query(message: str, prior_user_messages: list[str]) -> str:
-    if not _is_weak_topic_query(message):
-        return message
-
-    for prior in reversed(prior_user_messages):
-        candidate = (prior or "").strip()
-        if not candidate:
-            continue
-        if _is_weak_topic_query(candidate):
-            continue
-        return candidate
-
-    return message
-
-
 def _is_rag_context_insufficient(
     rag_context: str,
     rag_chunks: list[dict] | None,
     message: str,
 ) -> bool:
+    del message
     has_local_text = bool(rag_context.strip()) or any(
         str(chunk.get("text") or "").strip() for chunk in (rag_chunks or [])
     )
     if not has_local_text:
         return True
 
-    signal_tokens = _query_signal_tokens(message)
-    if not signal_tokens:
-        return False
+    relevance_scores: list[float] = []
+    for chunk in rag_chunks or []:
+        raw_score = chunk.get("rerank_score")
+        if raw_score is None:
+            continue
+        try:
+            relevance_scores.append(float(raw_score))
+        except (TypeError, ValueError):
+            continue
 
-    rag_tokens = _query_signal_tokens(_rag_search_text(rag_context, rag_chunks))
-    return not bool(signal_tokens & rag_tokens)
+    if relevance_scores:
+        return max(relevance_scores) < settings.rerank_relevance_threshold
+
+    return False
 
 
 async def _search_web(query: str) -> tuple[str, list[dict]]:
     tool = get_web_search_tool()
     results = await asyncio.to_thread(tool.search, query, settings.max_search_results)
     return tool.provider_name, results
-
-
-def _claims_no_web_access(answer: str) -> bool:
-    lower = answer.lower()
-    return any(
-        phrase in lower
-        for phrase in (
-            "don't have the capability",
-            "do not have the capability",
-            "can't access external urls",
-            "cannot access external urls",
-            "can't retrieve content from external urls",
-            "cannot retrieve content from external urls",
-            "cannot browse",
-            "can't browse",
-        )
-    )
 
 
 async def _repair_url_access_refusal_if_needed(
@@ -516,25 +417,25 @@ async def _repair_url_access_refusal_if_needed(
     web_results: list[dict],
     llm,
 ) -> str:
-    if not _claims_no_web_access(answer):
+    if not claims_no_web_access(answer):
         return answer
 
     if not web_results:
         return answer
 
-    repair_prompt = (
-        "You already have retrieved web content below.\n"
-        "Write a direct helpful answer for the user request.\n"
-        "Do NOT say you cannot access URLs or browse.\n\n"
-        f"User request:\n{normalized_message}\n\n"
-        f"Retrieved web content:\n{json.dumps(web_results)}\n\n"
-        f"Retrieved RAG context:\n{rag_context or 'None'}"
+    repair_prompt, _ = prompt_registry.render(
+        "web_search_repair",
+        {
+            "normalized_message": normalized_message,
+            "web_results_json": json.dumps(web_results),
+            "rag_context": rag_context,
+        },
     )
     repair = await llm.ainvoke(repair_prompt)
     repaired_text = _extract_llm_text(
         repair.content if hasattr(repair, "content") else repair
     ).strip()
-    if repaired_text and not _claims_no_web_access(repaired_text):
+    if repaired_text and not claims_no_web_access(repaired_text):
         return repaired_text
 
     first = web_results[0]
@@ -568,14 +469,13 @@ async def _should_use_web_search(
             return True, history_urls[-1]
 
     llm = get_llm(temperature=0.0)
-    decision_prompt = (
-        "You decide if a web search tool is required for the next user request.\n"
-        "Return strict JSON only with keys: use_web_search (boolean), reason (string), query (string).\n"
-        "Use web search when freshness/current events/live facts/external facts are needed, or when RAG context is insufficient.\n"
-        "If RAG context is enough, set use_web_search to false.\n\n"
-        f"Conversation history:\n{history_block or 'None'}\n\n"
-        f"Retrieved RAG context:\n{rag_context or 'None'}\n\n"
-        f"User message:\n{message}"
+    decision_prompt, _ = prompt_registry.render(
+        "web_search_decision",
+        {
+            "history_block": history_block,
+            "rag_context": rag_context,
+            "message": message,
+        },
     )
     try:
         result = await llm.ainvoke(decision_prompt)
@@ -611,7 +511,12 @@ async def _resolve_web_context(
             )
 
     if _is_rag_context_insufficient(rag_context, rag_chunks, normalized_message):
-        provider, results = await _search_web(normalized_message)
+        _, decision_query = await _should_use_web_search(
+            message=normalized_message,
+            rag_context=rag_context,
+            history_block=history_block,
+        )
+        provider, results = await _search_web(decision_query or normalized_message)
         return _ResolvedWebContext(
             used=True,
             provider=provider,
@@ -648,7 +553,7 @@ def _prefer_web_citations(resolved_web: _ResolvedWebContext) -> bool:
 
 
 def _rag_context_for_answer(rag_context: str, resolved_web: _ResolvedWebContext) -> str:
-    if _prefer_web_citations(resolved_web):
+    if resolved_web.reason == "direct_fetch":
         return ""
     return rag_context
 
@@ -661,14 +566,13 @@ def _build_chat_messages(
     web_results: list[dict],
     normalized_message: str,
 ) -> list[BaseMessage]:
-    system_content = (
-        "You are a custom RAG assistant.\n\n"
-        "Important: You can use provided web search context when available. "
-        "Do not claim you cannot access URLs or browse the web.\n\n"
-        f"System instructions:\n{system_instructions or 'None'}\n\n"
-        f"Retrieved context:\n{rag_context or 'No context returned.'}\n\n"
-        f"Web search context:\n{json.dumps(web_results) if web_results else 'None'}\n\n"
-        "Answer clearly and stay grounded in the retrieved context."
+    system_content, _ = prompt_registry.render(
+        "rag_chat_system",
+        {
+            "system_instructions": system_instructions,
+            "rag_context": rag_context,
+            "web_results_json": json.dumps(web_results) if web_results else "None",
+        },
     )
     messages: list[BaseMessage] = [SystemMessage(content=system_content)]
     for turn in history:
@@ -1193,12 +1097,9 @@ async def _stream_followup(
     history_block = "\n".join(
         f"{t.role.upper()}: {t.content}" for t in session.conversation[-6:]
     )
-    prior_user_messages = [t.content for t in session.conversation if t.role == "user"]
-    web_query = _normalize_web_lookup_query(question, prior_user_messages)
-
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=web_query,
+            normalized_message=question,
             rag_context=context_block,
             rag_chunks=chunks,
             history_block=history_block,
@@ -1208,14 +1109,14 @@ async def _stream_followup(
         return
 
     answer_context_block = _rag_context_for_answer(context_block, resolved_web)
-    prompt = (
-        f"You are a research assistant answering a follow-up question.\n\n"
-        f"Conversation so far:\n{history_block}\n\n"
-        f"Retrieved source passages:\n{answer_context_block or 'No local source passages returned.'}\n\n"
-        f"Web search context:\n{json.dumps(resolved_web.results) if resolved_web.results else 'None'}\n\n"
-        f"Question: {question}\n\n"
-        f"Answer concisely based on the retrieved passages and web search context. "
-        f"Do NOT append a citations list at the end — citations are handled separately."
+    prompt, _ = prompt_registry.render(
+        "followup_answer",
+        {
+            "history_block": history_block,
+            "answer_context_block": answer_context_block,
+            "web_results_json": json.dumps(resolved_web.results) if resolved_web.results else "None",
+            "question": question,
+        },
     )
 
     llm = get_llm(temperature=0.2)
@@ -1832,11 +1733,9 @@ async def rag_chat_with_agent(
         f"{m.role.upper()}: {m.content}"
         for m in history[-10:]
     )
-    prior_user_messages = [m.content for m in history if m.role == "user"]
-    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=web_query,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -1967,11 +1866,9 @@ async def rag_chat_with_agent_stream(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    prior_user_messages = [m.content for m in history if m.role == "user"]
-    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=web_query,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -2221,11 +2118,9 @@ async def rag_chat_workspace(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    prior_user_messages = [m.content for m in history if m.role == "user"]
-    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=web_query,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
@@ -2319,11 +2214,9 @@ async def rag_chat_workspace_stream(
     effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    prior_user_messages = [m.content for m in history if m.role == "user"]
-    web_query = _normalize_web_lookup_query(normalized_message, prior_user_messages)
     try:
         resolved_web = await _resolve_web_context(
-            normalized_message=web_query,
+            normalized_message=normalized_message,
             rag_context=rag_context.context or "",
             rag_chunks=rag_context.chunks,
             history_block=history_block,
