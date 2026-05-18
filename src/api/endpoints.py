@@ -1340,7 +1340,7 @@ def _generate_session_title(query: str | None) -> str:
         return fallback
 
     prompt = (
-        "Create a concise title (max 6 words) for this research session.\n"
+        "Create a concise title (max 4 words) for this research session.\n"
         "Return plain text only, no quotes, no punctuation at the end.\n"
         f"Query: {query.strip()}"
     )
