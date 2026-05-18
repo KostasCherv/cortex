@@ -115,25 +115,43 @@ def test_search_and_memory_node_continues_when_memory_fails():
 # rerank_node
 # ---------------------------------------------------------------------------
 
-def test_rerank_node_returns_top_k_ranked_sources():
+def test_rerank_node_uses_shared_reranker_results():
     from src.graph.nodes import rerank_node
 
-    state = asyncio.run(
-        rerank_node(
+    with patch("src.graph.nodes.rerank_chunks") as mock_rerank:
+        mock_rerank.return_value = [
             {
-                "query": "beta",
-                "retrieved_contents": [
-                    {"url": "https://a.com", "title": "A", "raw_text": "Alpha"},
-                    {"url": "https://b.com", "title": "B", "raw_text": "Beta"},
-                ],
-            }
+                "url": "https://b.com",
+                "title": "B",
+                "raw_text": "Beta",
+                "text": "Beta",
+                "rerank_score": 0.91,
+            },
+            {
+                "url": "https://a.com",
+                "title": "A",
+                "raw_text": "Alpha",
+                "text": "Alpha",
+                "rerank_score": 0.12,
+            },
+        ]
+        state = asyncio.run(
+            rerank_node(
+                {
+                    "query": "beta",
+                    "retrieved_contents": [
+                        {"url": "https://a.com", "title": "A", "raw_text": "Alpha"},
+                        {"url": "https://b.com", "title": "B", "raw_text": "Beta"},
+                    ],
+                }
+            )
         )
-    )
 
     assert [row["url"] for row in state["reranked_contents"]] == [
         "https://b.com",
         "https://a.com",
     ]
+    mock_rerank.assert_called_once()
     assert state["rerank_metadata"]["fallback"] is False
 
 

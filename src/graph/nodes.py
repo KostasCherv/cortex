@@ -14,11 +14,12 @@ from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
 from src.prompts.registry import prompt_registry
 from src.tools.neo4j_graph_store import Neo4jGraphStore
+from src.tools.reranker import rerank_chunks
 from src.tools.search import perform_search_cached
 
 logger = logging.getLogger(__name__)
 
-_RERANK_MODEL = "graph_heuristic_v1"
+_RERANK_MODEL = "shared_reranker"
 _RERANK_TOP_K = 5
 _RERANK_CANDIDATE_LIMIT = 10
 _RERANK_MAX_DOC_CHARS = 1200
@@ -190,7 +191,7 @@ async def search_node(state: ResearchState) -> ResearchState:
 
 
 async def rerank_node(state: ResearchState) -> ResearchState:
-    """Rerank retrieved sources with a lightweight lexical relevance heuristic."""
+    """Rerank retrieved sources using the shared reranker pipeline."""
     query = state.get("query", "")
     contents = state.get("retrieved_contents", [])
     with start_step_span(
@@ -213,28 +214,21 @@ async def rerank_node(state: ResearchState) -> ResearchState:
             }
 
         limited = contents[:_RERANK_CANDIDATE_LIMIT]
-        prepared = []
-        for row in limited:
-            prepared.append(
-                {
-                    "url": row.get("url", ""),
-                    "title": row.get("title", ""),
-                    "raw_text": str(row.get("raw_text", ""))[:_RERANK_MAX_DOC_CHARS],
-                }
-            )
-
-        query_tokens = {token for token in re.split(r"\W+", query.lower()) if token}
-
-        scored = []
-        for row in prepared:
-            title_tokens = {t for t in re.split(r"\W+", row.get("title", "").lower()) if t}
-            text_tokens = {t for t in re.split(r"\W+", row.get("raw_text", "").lower()) if t}
-            overlap = len(query_tokens & (title_tokens | text_tokens))
-            score = overlap + (2 if query.lower() in row.get("title", "").lower() else 0)
-            scored.append({**row, "score": float(score)})
-
-        scored.sort(key=lambda item: item["score"], reverse=True)
-        ranked = scored[: min(_RERANK_TOP_K, len(scored))]
+        prepared = [
+            {
+                "url": row.get("url", ""),
+                "title": row.get("title", ""),
+                "raw_text": str(row.get("raw_text", ""))[:_RERANK_MAX_DOC_CHARS],
+                "text": str(row.get("raw_text", ""))[:_RERANK_MAX_DOC_CHARS],
+            }
+            for row in limited
+        ]
+        ranked = await asyncio.to_thread(
+            rerank_chunks,
+            query=query,
+            chunks=prepared,
+            top_k=min(_RERANK_TOP_K, len(prepared)),
+        )
 
         return {
             **state,
