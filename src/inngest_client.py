@@ -45,7 +45,7 @@ async def handle_research_run(ctx: inngest.Context) -> dict:
 
 @inngest_client.create_function(
     fn_id="outbox-dispatcher",
-    trigger=inngest.TriggerCron(cron="* * * * *"),
+    trigger=inngest.TriggerCron(cron="*/2 * * * *"),
 )
 async def dispatch_outbox_cron(ctx: inngest.Context) -> dict:
     from src.outbox import dispatch_outbox_events
