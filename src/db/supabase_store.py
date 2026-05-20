@@ -1196,7 +1196,6 @@ class SupabaseSessionStore:
             "agent_id": payload["agent_id"],
             "chat_scope": payload.get("chat_scope") or "agent",
             "title": payload.get("title") or "New chat",
-            "web_search_enabled": bool(payload.get("web_search_enabled", False)),
             "created_at": datetime.now(UTC).isoformat(),
         }
         await self._request("POST", "rag_chat_sessions", json_body=body)
@@ -1220,7 +1219,7 @@ class SupabaseSessionStore:
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,web_search_enabled,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,created_at",
                 "id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
                 "chat_scope": f"eq.{chat_scope}",
@@ -1239,7 +1238,6 @@ class SupabaseSessionStore:
             "agent_id": row["agent_id"],
             "chat_scope": row.get("chat_scope") or "agent",
             "title": row.get("title") or "New chat",
-            "web_search_enabled": bool(row.get("web_search_enabled", False)),
             "created_at": row.get("created_at"),
         }
 
@@ -1265,7 +1263,7 @@ class SupabaseSessionStore:
             "GET",
             "rag_chat_sessions",
             params={
-                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,web_search_enabled,created_at",
+                "select": "id,owner_id,workspace_id,agent_id,chat_scope,title,created_at",
                 "owner_id": f"eq.{owner_id}",
                 "chat_scope": f"eq.{chat_scope}",
                 "agent_id": f"{agent_filter_key}.{agent_filter_value}",
@@ -1304,7 +1302,6 @@ class SupabaseSessionStore:
                     "agent_id": row["agent_id"],
                     "chat_scope": row.get("chat_scope") or "agent",
                     "title": row.get("title") or "New chat",
-                    "web_search_enabled": bool(row.get("web_search_enabled", False)),
                     "created_at": row.get("created_at"),
                     "last_message_at": latest.get("created_at") or row.get("created_at"),
                     "last_message_preview": preview,

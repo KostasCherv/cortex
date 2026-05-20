@@ -725,7 +725,6 @@ async def create_or_get_chat_session(
     agent_id: str,
     session_id: str | None,
     initial_message: str | None = None,
-    web_search_enabled: bool = False,
 ) -> str:
     if session_id:
         valid = await _get_store().get_rag_chat_session(
@@ -744,7 +743,6 @@ async def create_or_get_chat_session(
             "agent_id": agent_id,
             "workspace_id": _workspace_id_for_user(user_id),
             "title": await suggest_chat_session_title(initial_message),
-            "web_search_enabled": web_search_enabled,
         }
     )
     return new_session
@@ -755,7 +753,6 @@ async def create_or_get_workspace_chat_session(
     user_id: str,
     session_id: str | None,
     initial_message: str | None = None,
-    web_search_enabled: bool = True,
 ) -> str:
     if session_id:
         valid = await _get_store().get_rag_chat_session(
@@ -775,7 +772,6 @@ async def create_or_get_workspace_chat_session(
             "agent_id": None,
             "workspace_id": _workspace_id_for_user(user_id),
             "title": await suggest_chat_session_title(initial_message),
-            "web_search_enabled": web_search_enabled,
             "chat_scope": CHAT_SCOPE_WORKSPACE,
         }
     )

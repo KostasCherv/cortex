@@ -785,7 +785,7 @@ export async function getRagAgentChatSessionMessages(
   agentId: string,
   sessionId: string,
   accessToken: string | null,
-): Promise<{ session_id: string; agent_id: string; web_search_enabled?: boolean; messages: RagChatMessage[] }> {
+): Promise<{ session_id: string; agent_id: string; messages: RagChatMessage[] }> {
   const response = await fetch(
     `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/messages`,
     {
@@ -798,13 +798,11 @@ export async function getRagAgentChatSessionMessages(
   const parsed = (await response.json()) as {
     session_id: string
     agent_id: string
-    web_search_enabled?: boolean
     messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
   }
   return {
     session_id: parsed.session_id,
     agent_id: parsed.agent_id,
-    web_search_enabled: parsed.web_search_enabled,
     messages: parsed.messages.map((message) => ({
       ...message,
       citations: normalizeRagCitations(message.citations),
@@ -816,7 +814,7 @@ export async function getRagAgentChatSessionMessages(
 export async function getRagWorkspaceChatSessionMessages(
   sessionId: string,
   accessToken: string | null,
-): Promise<{ session_id: string; agent_id: string | null; web_search_enabled?: boolean; messages: RagChatMessage[] }> {
+): Promise<{ session_id: string; agent_id: string | null; messages: RagChatMessage[] }> {
   const response = await fetch(`${API_BASE}/api/rag/chat/sessions/${sessionId}/messages`, {
     headers: authHeaders(accessToken),
   })
@@ -826,13 +824,11 @@ export async function getRagWorkspaceChatSessionMessages(
   const parsed = (await response.json()) as {
     session_id: string
     agent_id: string | null
-    web_search_enabled?: boolean
     messages: Array<Omit<RagChatMessage, 'citations'> & { citations?: unknown }>
   }
   return {
     session_id: parsed.session_id,
     agent_id: parsed.agent_id,
-    web_search_enabled: parsed.web_search_enabled,
     messages: parsed.messages.map((message) => ({
       ...message,
       citations: normalizeRagCitations(message.citations),

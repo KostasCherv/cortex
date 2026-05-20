@@ -1672,9 +1672,7 @@ async def rag_chat_with_agent(
         agent_id=agent_id,
         session_id=body.session_id,
         initial_message=normalized_message,
-        web_search_enabled=True,
     )
-    effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
 
     history_block = "\n".join(
@@ -1772,7 +1770,6 @@ async def rag_chat_with_agent(
     return {
         "session_id": chat_session_id,
         "agent_id": agent_id,
-        "web_search_enabled": effective_web_search_enabled,
         "web_used": resolved_web.used,
         "web_provider": resolved_web.provider if resolved_web.used else None,
         "reply": assistant_msg.to_dict(),
@@ -1826,9 +1823,7 @@ async def rag_chat_with_agent_stream(
         agent_id=agent_id,
         session_id=body.session_id,
         initial_message=normalized_message,
-        web_search_enabled=True,
     )
-    effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
     try:
@@ -1879,7 +1874,7 @@ async def rag_chat_with_agent_stream(
         llm = get_llm(temperature=0.2)
         answer_parts: list[str] = []
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
             if resolved_web.used and _should_repair_fetched_url_answer(decision):
                 result = await llm.ainvoke(messages)
                 answer = _extract_llm_text(
@@ -1986,7 +1981,6 @@ async def list_rag_agent_chat_session_messages(
     return {
         "session_id": session_id,
         "agent_id": agent_id,
-        "web_search_enabled": bool(session.get("web_search_enabled", False)),
         "messages": [m.to_dict() for m in messages],
     }
 
@@ -2084,9 +2078,7 @@ async def rag_chat_workspace(
         user_id=current_user.user_id,
         session_id=body.session_id,
         initial_message=normalized_message,
-        web_search_enabled=True,
     )
-    effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
     try:
@@ -2160,7 +2152,6 @@ async def rag_chat_workspace(
     return {
         "session_id": chat_session_id,
         "agent_id": None,
-        "web_search_enabled": effective_web_search_enabled,
         "web_used": resolved_web.used,
         "web_provider": resolved_web.provider if resolved_web.used else None,
         "reply": assistant_msg.to_dict(),
@@ -2187,9 +2178,7 @@ async def rag_chat_workspace_stream(
         user_id=current_user.user_id,
         session_id=body.session_id,
         initial_message=normalized_message,
-        web_search_enabled=True,
     )
-    effective_web_search_enabled = True
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
     try:
@@ -2229,7 +2218,7 @@ async def rag_chat_workspace_stream(
         llm = get_llm(temperature=0.2)
         answer_parts: list[str] = []
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_search_enabled': effective_web_search_enabled, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
             if resolved_web.used and _should_repair_fetched_url_answer(decision):
                 result = await llm.ainvoke(messages)
                 answer = _extract_llm_text(
@@ -2320,7 +2309,6 @@ async def list_rag_workspace_chat_session_messages(
     return {
         "session_id": session_id,
         "agent_id": None,
-        "web_search_enabled": bool(session.get("web_search_enabled", True)),
         "messages": [m.to_dict() for m in messages],
     }
 

@@ -1304,7 +1304,7 @@ def test_rag_chat_returns_agent_reply():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1364,7 +1364,7 @@ def test_rag_chat_stream_returns_rich_citations():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1422,7 +1422,7 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1472,7 +1472,7 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
         patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1525,7 +1525,7 @@ def test_workspace_rag_chat_stream_searches_web_when_router_requests_it():
         patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1629,7 +1629,7 @@ def test_workspace_rag_chat_uses_web_decision_query_when_current_message_is_gene
         patch("src.api.endpoints.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(side_effect=[[prior_user], []])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1678,7 +1678,7 @@ def test_rag_chat_persists_suggestions_on_assistant_message():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=append_chat),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1728,7 +1728,7 @@ def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1747,7 +1747,7 @@ def test_rag_chat_web_toggle_true_calls_web_tool_when_model_decides_needed():
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat",
-            json={"message": "Need latest info", "web_search_enabled": True},
+            json={"message": "Need latest info"},
         )
 
     assert response.status_code == 200
@@ -1773,7 +1773,7 @@ def test_rag_chat_empty_context_does_not_auto_search_without_router_web_action()
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1880,7 +1880,7 @@ def test_rag_chat_semantically_wrong_context_searches_web_and_omits_stale_citati
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1944,7 +1944,7 @@ def test_rag_chat_uses_web_decision_query_when_current_message_is_generic():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(side_effect=[[prior_user], []])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -1992,7 +1992,7 @@ def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed()
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2011,7 +2011,7 @@ def test_rag_chat_web_toggle_true_skips_web_tool_when_model_decides_not_needed()
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat",
-            json={"message": "Summarize my docs", "web_search_enabled": True},
+            json={"message": "Summarize my docs"},
         )
 
     assert response.status_code == 200
@@ -2108,7 +2108,7 @@ def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2129,7 +2129,6 @@ def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
             "/api/rag/agents/agent-1/chat",
             json={
                 "message": "Please fetch this URL: https://aws.amazon.com/certification/",
-                "web_search_enabled": True,
             },
         )
 
@@ -2163,7 +2162,7 @@ def test_rag_chat_explicit_url_fetch_forces_direct_fetch_when_session_web_disabl
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2219,7 +2218,7 @@ def test_rag_chat_uses_prior_url_reference_for_direct_fetch():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[prior_msg])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2241,7 +2240,6 @@ def test_rag_chat_uses_prior_url_reference_for_direct_fetch():
             "/api/rag/agents/agent-1/chat",
             json={
                 "message": "Fetch the content from the url i provided",
-                "web_search_enabled": True,
             },
         )
 
@@ -2320,7 +2318,7 @@ def test_rag_chat_repairs_url_access_refusal_when_web_content_exists():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2341,7 +2339,6 @@ def test_rag_chat_repairs_url_access_refusal_when_web_content_exists():
             "/api/rag/agents/agent-1/chat",
             json={
                 "message": "fetch this url https://aws.amazon.com/certification/",
-                "web_search_enabled": True,
             },
         )
 
@@ -2371,7 +2368,7 @@ def test_rag_chat_stream_repairs_url_access_refusal_when_web_content_exists():
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2392,7 +2389,6 @@ def test_rag_chat_stream_repairs_url_access_refusal_when_web_content_exists():
             "/api/rag/agents/agent-1/chat/stream",
             json={
                 "message": "fetch this url https://aws.amazon.com/certification/",
-                "web_search_enabled": True,
             },
         )
 
@@ -2472,7 +2468,7 @@ def test_rag_chat_stream_direct_fetch_omits_stale_rag_citations_when_web_disable
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": False})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),
@@ -2531,7 +2527,7 @@ def test_rag_chat_stream_direct_fetches_bare_url_questions_and_omits_stale_rag_p
         patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
         patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
         patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
-        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={"web_search_enabled": True})),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.get_llm", return_value=mock_llm),

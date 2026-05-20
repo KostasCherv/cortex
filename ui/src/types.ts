@@ -134,7 +134,6 @@ export type RagChatSessionSummary = {
   agent_id: string | null
   owner_id: string
   title: string
-  web_search_enabled?: boolean
   created_at: string
   last_message_at: string | null
   last_message_preview: string
@@ -144,7 +143,6 @@ export type RagChatStreamEvent =
   | {
       type: 'session'
       session_id: string
-      web_search_enabled?: boolean
       web_used?: boolean
       web_provider?: string | null
     }

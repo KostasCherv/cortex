@@ -26,7 +26,7 @@ export type ChatTransport = {
   loadSessionMessages: (
     sessionId: string,
     accessToken: string,
-  ) => Promise<{ session_id: string; web_search_enabled?: boolean; messages: RagChatMessage[] }>
+  ) => Promise<{ session_id: string; messages: RagChatMessage[] }>
   streamMessage: (
     message: string,
     sessionId: string | null,
@@ -47,7 +47,6 @@ export function createAgentChatTransport(agentId: string): ChatTransport {
       const res = await getRagAgentChatSessionMessages(agentId, sessionId, accessToken)
       return {
         session_id: res.session_id,
-        web_search_enabled: res.web_search_enabled,
         messages: res.messages,
       }
     },
@@ -70,7 +69,6 @@ export const workspaceChatTransport: ChatTransport = {
     const res = await getRagWorkspaceChatSessionMessages(sessionId, accessToken)
     return {
       session_id: res.session_id,
-      web_search_enabled: res.web_search_enabled,
       messages: res.messages,
     }
   },
