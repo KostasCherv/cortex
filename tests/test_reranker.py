@@ -112,7 +112,7 @@ def test_rerank_chunks_propagates_unexpected_errors(monkeypatch):
         reranker.rerank_chunks("query", _chunks())
 
 
-def test_rerank_chunks_returns_best_chunk_when_all_scores_below_threshold(monkeypatch):
+def test_rerank_chunks_returns_empty_when_all_scores_below_threshold(monkeypatch):
     _reset_client(monkeypatch)
     class FakeClient:
         def __init__(self, api_key, timeout=None):
@@ -132,8 +132,7 @@ def test_rerank_chunks_returns_best_chunk_when_all_scores_below_threshold(monkey
 
     result = reranker.rerank_chunks("query", _chunks(), top_k=2)
 
-    assert [chunk["chunk_id"] for chunk in result] == ["c"]
-    assert result[0]["rerank_score"] == 0.22
+    assert result == []
 
 
 def test_rerank_chunks_skips_malformed_and_out_of_bounds_results(monkeypatch):

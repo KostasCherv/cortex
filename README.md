@@ -6,13 +6,14 @@ Production-grade AI research and RAG orchestration platform built with LangGraph
 
 ## What it does
 
-Cortex runs multi-step web research workflows, streams progress in real time, generates structured reports, and supports grounded follow-up chat over retrieved sources. It also includes a reliable asynchronous ingestion pipeline for user-uploaded RAG resources.
+Cortex runs multi-step web research workflows, streams progress in real time, generates structured reports, and supports grounded follow-up chat over retrieved sources. Chat now uses a ReAct-lite router so the model decides whether to answer directly, use local RAG context, search the web, fetch a URL, or ask a clarifying question. It also includes a reliable asynchronous ingestion pipeline for user-uploaded RAG resources.
 
 ## Signature capabilities
 
 - Stateful LangGraph orchestration with explicit routing for success, empty, and failure paths.
 - Streaming research execution over SSE for responsive UX during long-running workflows.
 - Session-scoped research history and follow-up chat grounded to per-run source chunks.
+- ReAct-lite chat routing with a no-tool small-talk guard and schema-validated model decisions.
 - Durable ingestion pipeline with transactional outbox, dispatcher, and idempotent workers.
 - End-to-end observability with trace spans across graph nodes and external dependencies.
 
@@ -73,6 +74,35 @@ flowchart LR
     claim -->|"send error"| retry["Backoff and retry"]
     jobClaim -->|"already claimed or terminal"| noop["No-op (idempotent)"]
 ```
+
+### Chat routing flow
+
+```mermaid
+flowchart LR
+    userMessage["User message"] --> smallTalk{"Small talk?"}
+    smallTalk -->|"yes"| direct["Answer directly"]
+    smallTalk -->|"no"| retrieve["Retrieve local RAG context"]
+    retrieve --> router["ReAct-lite router\n(Pydantic-validated JSON)"]
+    router -->|"answer_direct"| direct
+    router -->|"answer_from_rag"| ragAnswer["Answer from local RAG context"]
+    router -->|"web_search"| web["Search web provider"]
+    router -->|"fetch_url"| fetch["Fetch explicit or prior URL"]
+    router -->|"ask_clarifying"| clarify["Ask one clarifying question"]
+    web --> final["Final answer"]
+    fetch --> final
+    direct --> final
+    ragAnswer --> final
+    clarify --> final
+```
+
+### Chat routing policy
+
+- Greetings, acknowledgements, thanks, and other social turns bypass tools and answer directly.
+- Weak or empty RAG context is only an input to the router. It no longer auto-triggers web search.
+- Web search is used only when the model decides the request needs external, fresh, current, or otherwise web-dependent information.
+- URLs in the message or history are treated as available context, not as an automatic fetch.
+- Direct URL fetching happens only when the router decides inspecting that resource is necessary.
+- The same routing behavior is used across agent chat, workspace chat, and both streaming and non-streaming endpoints.
 
 ## Run locally
 

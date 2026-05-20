@@ -100,7 +100,6 @@ def _rerank_with_cohere(
     )
     results = _value(response, "results", [])
     ranked: list[dict] = []
-    best_overall: dict | None = None
     for item in results:
         raw_index = _value(item, "index")
         if raw_index is None:
@@ -112,22 +111,11 @@ def _rerank_with_cohere(
 
         chunk = dict(chunks[index])
         chunk["rerank_score"] = score
-        # Keep the strongest result as a last-resort citation if thresholding
-        # removes every candidate returned by Cohere.
-        if best_overall is None or score > best_overall["rerank_score"]:
-            best_overall = chunk
         if score >= threshold:
             ranked.append(chunk)
 
     if ranked:
         return ranked[:top_k]
-    if best_overall is not None:
-        logger.warning(
-            "[reranker] All Cohere rerank scores fell below threshold=%s; keeping best chunk with score=%s",
-            threshold,
-            best_overall["rerank_score"],
-        )
-        return [best_overall]
     return []
 
 

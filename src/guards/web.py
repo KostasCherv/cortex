@@ -6,6 +6,10 @@ from __future__ import annotations
 _NO_WEB_ACCESS_PHRASES = (
     "don't have the capability",
     "do not have the capability",
+    "can't access that link",
+    "cannot access that link",
+    "can't access this link",
+    "cannot access this link",
     "can't access external urls",
     "cannot access external urls",
     "can't retrieve content from external urls",

@@ -603,6 +603,21 @@ function WorkspaceChatSessionList({
       })
   }, [accessToken, refreshToken])
 
+  useEffect(() => {
+    if (!contextMenu) return
+
+    const closeMenu = () => setContextMenu(null)
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', closeMenu)
+
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', closeMenu)
+    }
+  }, [contextMenu])
+
   if (pending) {
     return (
       <div className="flex items-center gap-1.5 px-2 py-1.5">
@@ -640,7 +655,11 @@ function WorkspaceChatSessionList({
         </button>
       ))}
       {contextMenu && (
-        <div className="fixed z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md" style={{ left: contextMenu.x, top: contextMenu.y }}>
+        <div
+          className="fixed z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
             type="button"
             className="w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
