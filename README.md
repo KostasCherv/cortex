@@ -13,7 +13,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Stateful LangGraph orchestration with explicit routing for success, empty, and failure paths.
 - Streaming research execution over SSE for responsive UX during long-running workflows.
 - Session-scoped research history and follow-up chat grounded to per-run source chunks.
-- ReAct-lite chat routing with a no-tool small-talk guard and schema-validated model decisions.
+- ReAct-lite chat routing with schema-validated model decisions across direct answers, RAG, web search, URL fetch, and clarifying turns.
 - Durable ingestion pipeline with transactional outbox, dispatcher, and idempotent workers.
 - End-to-end observability with trace spans across graph nodes and external dependencies.
 
@@ -79,9 +79,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    userMessage["User message"] --> smallTalk{"Small talk?"}
-    smallTalk -->|"yes"| direct["Answer directly"]
-    smallTalk -->|"no"| retrieve["Retrieve local RAG context"]
+    userMessage["User message"] --> retrieve["Retrieve local RAG context"]
     retrieve --> router["ReAct-lite router\n(Pydantic-validated JSON)"]
     router -->|"answer_direct"| direct
     router -->|"answer_from_rag"| ragAnswer["Answer from local RAG context"]
@@ -97,7 +95,7 @@ flowchart LR
 
 ### Chat routing policy
 
-- Greetings, acknowledgements, thanks, and other social turns bypass tools and answer directly.
+- Greetings, acknowledgements, thanks, and other social turns are routed by the model and should normally resolve to `answer_direct`.
 - Weak or empty RAG context is only an input to the router. It no longer auto-triggers web search.
 - Web search is used only when the model decides the request needs external, fresh, current, or otherwise web-dependent information.
 - URLs in the message or history are treated as available context, not as an automatic fetch.
