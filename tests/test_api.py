@@ -860,6 +860,91 @@ def test_followup_stream_citations_match_reranked_chunks():
     ]
 
 
+def test_followup_prompt_includes_originating_report_context_fields():
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    mock_session = Session(
+        session_id="session-1",
+        runs=[
+            SessionRun(
+                run_id="run-1",
+                query="How is MCP used in agent workflows?",
+                source_urls=["https://mcp.example/docs", "https://agents.example/guide"],
+                report="MCP helps standardize tool interfaces across agents.",
+                created_at="2026",
+            )
+        ],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.endpoints.rerank_chunks", return_value=[]),
+        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
+        response = client.post(
+            "/sessions/session-1/followup",
+            json={"question": "Can you expand on that?", "run_id": "run-1"},
+        )
+
+    assert response.status_code == 200
+    prompt_sent_to_llm = mock_llm.astream.call_args.args[0]
+    assert "MCP helps standardize tool interfaces across agents." in prompt_sent_to_llm
+    assert "How is MCP used in agent workflows?" in prompt_sent_to_llm
+    assert "https://mcp.example/docs" in prompt_sent_to_llm
+    assert "https://agents.example/guide" in prompt_sent_to_llm
+
+
+def test_followup_report_context_fallback_is_safe_for_missing_run():
+    llm_chunk = MagicMock()
+    llm_chunk.content = "Answer"
+    mock_llm = MagicMock()
+    mock_llm.astream = MagicMock(return_value=_async_iter([llm_chunk]))
+
+    mock_session = Session(
+        session_id="session-1",
+        runs=[],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.endpoints.rerank_chunks", return_value=[]),
+        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
+        chunks = asyncio.run(
+            _collect_stream(
+                endpoints._stream_followup(
+                    session=mock_session,
+                    user_id="user-1",
+                    question="Can you elaborate?",
+                    run_id="missing-run",
+                )
+            )
+        )
+
+    prompt_sent_to_llm = mock_llm.astream.call_args.args[0]
+    assert "No stored report context found for run 'missing-run'" in prompt_sent_to_llm
+    events = [json.loads(line[6:]) for line in chunks if line.startswith("data: ")]
+    assert any(event.get("type") == "done" for event in events)
+
+
 def test_followup_stream_empty_context_searches_web_and_emits_web_citations():
     llm_chunk = MagicMock()
     llm_chunk.content = "Online follow-up answer"
@@ -982,6 +1067,13 @@ def test_followup_stream_uses_prior_topic_when_followup_query_is_generic():
 async def _async_iter_impl(items):
     for item in items:
         yield item
+
+
+async def _collect_stream(stream):
+    events: list[str] = []
+    async for item in stream:
+        events.append(item)
+    return events
 
 
 def test_small_talk_messages_are_decided_by_router_model():

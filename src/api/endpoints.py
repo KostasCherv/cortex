@@ -591,6 +591,37 @@ def _rag_context_for_answer(rag_context: str, resolved_web: _ResolvedWebContext)
     return rag_context
 
 
+def _build_followup_report_context(run: SessionRun | None, run_id: str) -> str:
+    if run is None:
+        return (
+            f"No stored report context found for run '{run_id}'. "
+            "Use conversation history and retrieved sources."
+        )
+
+    sections: list[str] = []
+
+    report_text = (run.report or "").strip()
+    if report_text:
+        sections.append(f"Report findings:\n{report_text}")
+
+    query_text = (run.query or "").strip()
+    if query_text:
+        sections.append(f"Original research question:\n{query_text}")
+
+    source_urls = [url.strip() for url in (run.source_urls or []) if str(url).strip()]
+    if source_urls:
+        bullet_urls = "\n".join(f"- {url}" for url in source_urls)
+        sections.append(f"Report source URLs:\n{bullet_urls}")
+
+    if sections:
+        return "\n\n".join(sections)
+
+    return (
+        f"Run '{run_id}' has no stored report content, question, or source URLs. "
+        "Use conversation history and retrieved sources."
+    )
+
+
 def _build_chat_messages(
     *,
     system_instructions: str,
@@ -1033,6 +1064,9 @@ async def _stream_followup(
         for c in chunks
     )
 
+    report = session.get_run(run_id)
+    report_block = _build_followup_report_context(report, run_id)
+
     history_block = "\n".join(
         f"{t.role.upper()}: {t.content}" for t in session.conversation[-6:]
     )
@@ -1055,6 +1089,7 @@ async def _stream_followup(
             "answer_context_block": answer_context_block,
             "web_results_json": json.dumps(resolved_web.results) if resolved_web.results else "None",
             "question": question,
+            "report_block": report_block,
         },
     )
 
