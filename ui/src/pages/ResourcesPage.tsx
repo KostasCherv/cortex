@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Upload } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
-import { deleteRagResource, listRagResources, uploadRagResource } from '@/api/client'
+import { deleteRagResource, uploadRagResource } from '@/api/client'
 import { ResourceTable } from '@/components/resources/ResourceTable'
 import { UploadFileDialog } from '@/components/resources/UploadFileDialog'
 import { Button } from '@/components/ui/button'
 import type { RagResource } from '@/types'
 
-export function ResourcesPage({ authSession }: { authSession: Session | null }) {
-  const [resources, setResources] = useState<RagResource[]>([])
+type Props = {
+  authSession: Session | null
+  resources: RagResource[]
+  onResourcesChange: () => Promise<RagResource[]>
+}
+
+export function ResourcesPage({ authSession, resources, onResourcesChange }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
@@ -17,15 +22,14 @@ export function ResourcesPage({ authSession }: { authSession: Session | null }) 
     if (!authSession?.access_token) return
     setLoading(true)
     try {
-      const { resources: data } = await listRagResources(authSession.access_token)
-      setResources(data)
+      await onResourcesChange()
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load resources.')
     } finally {
       setLoading(false)
     }
-  }, [authSession?.access_token])
+  }, [authSession?.access_token, onResourcesChange])
 
   useEffect(() => {
     void load()
@@ -47,7 +51,7 @@ export function ResourcesPage({ authSession }: { authSession: Session | null }) 
     if (!authSession?.access_token) return
     try {
       await deleteRagResource(id, authSession.access_token)
-      setResources((prev) => prev.filter((r) => r.resource_id !== id))
+      await onResourcesChange()
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete resource.')

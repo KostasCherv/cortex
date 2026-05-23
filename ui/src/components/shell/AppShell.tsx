@@ -31,6 +31,20 @@ export function AppShell() {
 
   const accessToken = authSession?.access_token ?? null
   const readyResources = useMemo(() => resources.filter((r) => r.state === 'ready'), [resources])
+  const hasPendingResources = useMemo(
+    () => resources.some((r) => r.state === 'uploaded' || r.state === 'processing'),
+    [resources],
+  )
+
+  const loadResources = useCallback(async () => {
+    if (!accessToken) {
+      setResources([])
+      return []
+    }
+    const { resources: data } = await listRagResources(accessToken)
+    setResources(data)
+    return data
+  }, [accessToken])
 
   useEffect(() => {
     void checkHealth()
@@ -65,6 +79,16 @@ export function AppShell() {
       .then(({ resources: data }) => setResources(data))
       .catch(() => setResources([]))
   }, [accessToken])
+
+  useEffect(() => {
+    if (!accessToken || !hasPendingResources) return
+    const intervalId = window.setInterval(() => {
+      void listRagResources(accessToken)
+        .then(({ resources: data }) => setResources(data))
+        .catch(() => {})
+    }, 2000)
+    return () => window.clearInterval(intervalId)
+  }, [accessToken, hasPendingResources])
 
   const signInWithGoogle = useCallback(async () => {
     await supabase.auth.signInWithOAuth({
@@ -207,7 +231,11 @@ export function AppShell() {
           />
         )}
         {activeView.type === 'resources' && (
-          <ResourcesPage authSession={authSession} />
+          <ResourcesPage
+            authSession={authSession}
+            resources={resources}
+            onResourcesChange={loadResources}
+          />
         )}
       </div>
       <NewAgentSheet
