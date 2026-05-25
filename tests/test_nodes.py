@@ -302,6 +302,34 @@ def test_summarize_node_repairs_non_json_output_once():
     assert len(state["summaries"]) == 1
 
 
+def test_summarize_node_repairs_schema_invalid_output_once():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content='[{"url":"https://a.com","title":"A"}]'),
+            MagicMock(content='[{"url":"https://a.com","title":"A","summary":"Summary A"}]'),
+        ]
+    )
+
+    with patch("src.graph.nodes.get_llm", return_value=mock_llm):
+        from src.graph.nodes import summarize_node
+
+        state = asyncio.run(
+            summarize_node(
+                {
+                    "query": "LangGraph",
+                    "retrieved_contents": [
+                        {"url": "https://a.com", "title": "A", "raw_text": "Alpha text"}
+                    ],
+                }
+            )
+        )
+
+    assert mock_llm.ainvoke.await_count == 2
+    assert len(state["summaries"]) == 1
+    assert state["summaries"][0]["summary"] == "Summary A"
+
+
 # ---------------------------------------------------------------------------
 # report_node
 # ---------------------------------------------------------------------------

@@ -1,14 +1,13 @@
 """All LangGraph nodes for the research pipeline."""
 
 import asyncio
-import json
 import logging
-import re
 from datetime import datetime, UTC
 
 from src.errors import SearchError, LLMError
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
+from src.llm.output_parsers import parse_research_summaries_json
 from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
@@ -54,23 +53,6 @@ def _extract_llm_text(response: object) -> str:
                     parts.append(text)
         return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
     return str(content).strip()
-
-
-def _extract_json_candidate(text: str) -> str:
-    """Normalize common LLM wrappers and return best-effort JSON substring."""
-    candidate = text.strip()
-    if not candidate:
-        return ""
-
-    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", candidate, flags=re.DOTALL)
-    if fenced:
-        candidate = fenced.group(1).strip()
-
-    start = candidate.find("[")
-    end = candidate.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        return candidate[start : end + 1].strip()
-    return candidate
 
 
 async def _invoke_llm(
@@ -325,14 +307,8 @@ async def summarize_node(state: ResearchState) -> ResearchState:
             parse_error: Exception | None = None
 
             for attempt in range(2):
-                candidate_text = _extract_json_candidate(response_text)
                 try:
-                    maybe_parsed = json.loads(candidate_text)
-                    if isinstance(maybe_parsed, dict) and isinstance(
-                        maybe_parsed.get("summaries"), list
-                    ):
-                        maybe_parsed = maybe_parsed["summaries"]
-                    parsed = maybe_parsed
+                    parsed = parse_research_summaries_json(response_text)
                     break
                 except Exception as exc:
                     parse_error = exc
@@ -362,16 +338,12 @@ async def summarize_node(state: ResearchState) -> ResearchState:
 
             if parsed is None:
                 raise ValueError(f"Could not parse summarize JSON: {parse_error}")
-            if not isinstance(parsed, list):
-                raise ValueError("LLM summarize output must be a JSON list")
 
             parsed_by_url: dict[str, dict[str, str]] = {}
             for entry in parsed:
-                if not isinstance(entry, dict):
-                    continue
-                url = str(entry.get("url", "")).strip()
-                title = str(entry.get("title", "")).strip()
-                summary = str(entry.get("summary", "")).strip()
+                url = entry.url.strip()
+                title = entry.title.strip()
+                summary = entry.summary.strip()
                 if url and summary:
                     parsed_by_url[url] = {"url": url, "title": title, "summary": summary}
 

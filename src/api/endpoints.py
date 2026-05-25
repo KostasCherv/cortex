@@ -50,6 +50,7 @@ from src.tools.reranker import rerank_chunks
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
+from src.llm.output_parsers import parse_chat_action_json
 from src.prompts.registry import prompt_registry
 from src.guards import claims_no_web_access
 from src import outbox
@@ -402,19 +403,6 @@ class _ChatActionDecision:
     url: str = ""
 
 
-class _ChatActionDecisionPayload(BaseModel):
-    action: Literal[
-        "answer_direct",
-        "answer_from_rag",
-        "web_search",
-        "fetch_url",
-        "ask_clarifying",
-    ]
-    reason: str
-    query: str = ""
-    url: str = ""
-
-
 def _is_rag_context_insufficient(
     rag_context: str,
     rag_chunks: list[dict] | None,
@@ -513,7 +501,7 @@ async def _decide_chat_action(
     try:
         result = await llm.ainvoke(decision_prompt)
         raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-        parsed = _ChatActionDecisionPayload.model_validate(json.loads(raw))
+        parsed = parse_chat_action_json(raw)
     except Exception:
         return _ChatActionDecision(action="answer_direct", reason="router_parse_failed")
 

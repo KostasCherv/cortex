@@ -1106,6 +1106,30 @@ def test_small_talk_messages_are_decided_by_router_model():
     mock_llm.ainvoke.assert_awaited_once()
 
 
+def test_chat_action_router_parses_markdown_fenced_json():
+    llm_result = MagicMock()
+    llm_result.content = (
+        "```json\n"
+        '{"action":"answer_direct","reason":"small_talk","query":"","url":""}\n'
+        "```"
+    )
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+
+    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        decision = asyncio.run(
+            endpoints._decide_chat_action(
+                message="hi",
+                rag_context="",
+                rag_chunks=[],
+                history_block="",
+            )
+        )
+
+    assert decision.action == "answer_direct"
+    assert decision.reason == "small_talk"
+
+
 def test_resolve_web_context_does_not_search_when_router_chooses_direct_answer():
     decision = endpoints._ChatActionDecision(
         action="answer_direct",

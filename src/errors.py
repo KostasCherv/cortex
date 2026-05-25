@@ -17,6 +17,18 @@ class LLMError(CortexError):
     """Raised when an LLM call fails."""
 
 
+class StructuredOutputError(CortexError):
+    """Raised when structured LLM output parsing or validation fails."""
+
+
+class StructuredOutputParseError(StructuredOutputError):
+    """Raised when structured LLM output cannot be decoded as JSON."""
+
+
+class StructuredOutputValidationError(StructuredOutputError):
+    """Raised when structured LLM output does not match the expected schema."""
+
+
 class VectorStoreError(CortexError):
     """Raised when a vector store operation fails."""
 
