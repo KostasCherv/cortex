@@ -20,6 +20,10 @@ class LLMError(CortexError):
 class StructuredOutputError(CortexError):
     """Raised when structured LLM output parsing or validation fails."""
 
+    def __init__(self, message: str, *, details: list[dict] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or []
+
 
 class StructuredOutputParseError(StructuredOutputError):
     """Raised when structured LLM output cannot be decoded as JSON."""

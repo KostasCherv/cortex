@@ -50,7 +50,7 @@ from src.tools.reranker import rerank_chunks
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
-from src.llm.output_parsers import parse_chat_action_json
+from src.llm.output_parsers import build_validation_retry_prompt, parse_chat_action_json
 from src.prompts.registry import prompt_registry
 from src.guards import claims_no_web_access
 from src import outbox
@@ -502,8 +502,24 @@ async def _decide_chat_action(
         result = await llm.ainvoke(decision_prompt)
         raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
         parsed = parse_chat_action_json(raw)
-    except Exception:
-        return _ChatActionDecision(action="answer_direct", reason="router_parse_failed")
+    except Exception as exc:
+        repair_prompt = build_validation_retry_prompt(
+            schema_text=(
+                '{"action":"answer_direct|answer_from_rag|web_search|fetch_url|ask_clarifying",'
+                '"reason":"<why this action was chosen>","query":"<search query or empty>",'
+                '"url":"<url or empty>"}'
+            ),
+            invalid_response=raw if "raw" in locals() else "",
+            validation_error=exc,
+        )
+        try:
+            repair_result = await llm.ainvoke(repair_prompt)
+            repair_raw = _extract_llm_text(
+                repair_result.content if hasattr(repair_result, "content") else repair_result
+            ).strip()
+            parsed = parse_chat_action_json(repair_raw)
+        except Exception:
+            return _ChatActionDecision(action="answer_direct", reason="router_parse_failed")
 
     return _ChatActionDecision(
         action=parsed.action,

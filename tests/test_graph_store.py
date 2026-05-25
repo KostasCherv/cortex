@@ -1,6 +1,6 @@
 """Unit tests for Neo4j graph store operations."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -263,3 +263,82 @@ def test_delete_resource_documents_scopes_delete_by_owner_and_workspace():
     delete_calls = [params for query, params in call_params if "MATCH (d:Document)" in query]
     assert delete_calls
     assert delete_calls[0]["resource_id"] == "res-123"
+
+
+def test_extract_entities_relations_parses_validated_envelope():
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MagicMock(
+        content=(
+            '{"entities":[{"name":"OpenAI","entity_type":" Org ","confidence":0.9},'
+            '{"name":"GPT-4","entity_type":"Model","confidence":0.8}],'
+            '"relations":[{"source":"OpenAI","target":"GPT-4","type":" BUILDS ","confidence":0.7}]}'
+        )
+    )
+
+    store = Neo4jGraphStore(driver=MagicMock(), embedding_client=MagicMock())
+
+    with patch("src.tools.neo4j_graph_store.get_llm", return_value=mock_llm):
+        entities, relations = store._extract_entities_relations("OpenAI builds GPT-4")
+
+    assert [entity["name"] for entity in entities] == ["OpenAI", "GPT-4"]
+    assert relations[0]["type"] == "BUILDS"
+
+
+def test_extract_entities_relations_repairs_invalid_output_once():
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = [
+        MagicMock(
+            content='{"entities":[{"name":"OpenAI","entity_type":"Org","confidence":2.0}],"relations":[]}'
+        ),
+        MagicMock(
+            content='{"entities":[{"name":"OpenAI","entity_type":"Org","confidence":0.9}],"relations":[]}'
+        ),
+    ]
+
+    store = Neo4jGraphStore(driver=MagicMock(), embedding_client=MagicMock())
+
+    with patch("src.tools.neo4j_graph_store.get_llm", return_value=mock_llm):
+        entities, relations = store._extract_entities_relations("OpenAI")
+
+    assert mock_llm.invoke.call_count == 2
+    repair_prompt = mock_llm.invoke.call_args_list[1].args[0]
+    assert "Validation failed" in repair_prompt
+    assert "confidence" in repair_prompt
+    assert [entity["name"] for entity in entities] == ["OpenAI"]
+    assert relations == []
+
+
+def test_extract_entities_relations_falls_back_to_heuristics_after_repair_failure():
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = [
+        MagicMock(content='{"entities":[{"name":"","entity_type":"Org","confidence":0.8}],"relations":[]}'),
+        MagicMock(content='{"entities":[{"name":"","entity_type":"Org","confidence":0.8}],"relations":[]}'),
+    ]
+
+    store = Neo4jGraphStore(driver=MagicMock(), embedding_client=MagicMock())
+    store._heuristic_entities_relations = MagicMock(return_value=(["heuristic"], ["rels"]))
+
+    with patch("src.tools.neo4j_graph_store.get_llm", return_value=mock_llm):
+        entities, relations = store._extract_entities_relations("OpenAI")
+
+    assert mock_llm.invoke.call_count == 2
+    assert entities == ["heuristic"]
+    assert relations == ["rels"]
+
+
+def test_extract_entities_relations_drops_relations_with_unknown_endpoints():
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MagicMock(
+        content=(
+            '{"entities":[{"name":"OpenAI","entity_type":"Org","confidence":0.9}],'
+            '"relations":[{"source":"OpenAI","target":"GPT-4","type":"BUILDS","confidence":0.7}]}'
+        )
+    )
+
+    store = Neo4jGraphStore(driver=MagicMock(), embedding_client=MagicMock())
+
+    with patch("src.tools.neo4j_graph_store.get_llm", return_value=mock_llm):
+        entities, relations = store._extract_entities_relations("OpenAI builds GPT-4")
+
+    assert [entity["name"] for entity in entities] == ["OpenAI"]
+    assert relations == []

@@ -7,7 +7,7 @@ from datetime import datetime, UTC
 from src.errors import SearchError, LLMError
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
-from src.llm.output_parsers import parse_research_summaries_json
+from src.llm.output_parsers import build_validation_retry_prompt, parse_research_summaries_json
 from src.observability.context import build_trace_metadata, build_trace_tags
 from src.observability.langfuse import observe_llm_generation
 from src.observability.langsmith import start_step_span
@@ -314,11 +314,10 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                     parse_error = exc
                     if attempt == 1:
                         break
-                    repair_prompt = (
-                        "Convert the text below into valid JSON only, with this exact schema:\n"
-                        '[{"url":"<source-url>","title":"<source-title>","summary":"<3-5 sentences>"}]\n\n'
-                        "Do not add markdown fences or explanations.\n\n"
-                        f"TEXT:\n{response_text}"
+                    repair_prompt = build_validation_retry_prompt(
+                        schema_text='[{"url":"<source-url>","title":"<source-title>","summary":"<3-5 sentences>"}]',
+                        invalid_response=response_text,
+                        validation_error=exc,
                     )
                     repair_response = await _invoke_llm(
                         repair_prompt,

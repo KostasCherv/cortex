@@ -330,6 +330,35 @@ def test_summarize_node_repairs_schema_invalid_output_once():
     assert state["summaries"][0]["summary"] == "Summary A"
 
 
+def test_summarize_node_repair_prompt_includes_validation_details():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content='[{"url":"https://a.com","title":"A","summary":"   "}]'),
+            MagicMock(content='[{"url":"https://a.com","title":"A","summary":"Summary A"}]'),
+        ]
+    )
+
+    with patch("src.graph.nodes.get_llm", return_value=mock_llm):
+        from src.graph.nodes import summarize_node
+
+        state = asyncio.run(
+            summarize_node(
+                {
+                    "query": "LangGraph",
+                    "retrieved_contents": [
+                        {"url": "https://a.com", "title": "A", "raw_text": "Alpha text"}
+                    ],
+                }
+            )
+        )
+
+    repair_prompt = mock_llm.ainvoke.await_args_list[1].args[0]
+    assert "Validation failed" in repair_prompt
+    assert "summary" in repair_prompt
+    assert len(state["summaries"]) == 1
+
+
 # ---------------------------------------------------------------------------
 # report_node
 # ---------------------------------------------------------------------------

@@ -1130,6 +1130,57 @@ def test_chat_action_router_parses_markdown_fenced_json():
     assert decision.reason == "small_talk"
 
 
+def test_chat_action_router_repairs_schema_invalid_output_once():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content='{"action":"fetch_url","reason":"need content","query":"","url":""}'),
+            MagicMock(content='{"action":"fetch_url","reason":"need content","query":"","url":"https://example.com"}'),
+        ]
+    )
+
+    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        decision = asyncio.run(
+            endpoints._decide_chat_action(
+                message="check https://example.com",
+                rag_context="",
+                rag_chunks=[],
+                history_block="",
+            )
+        )
+
+    assert mock_llm.ainvoke.await_count == 2
+    repair_prompt = mock_llm.ainvoke.await_args_list[1].args[0]
+    assert "Validation failed" in repair_prompt
+    assert "url" in repair_prompt
+    assert decision.action == "fetch_url"
+    assert decision.url == "https://example.com"
+
+
+def test_chat_action_router_falls_back_after_repair_failure():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content='{"action":"web_search","reason":"need fresh info","query":"","url":""}'),
+            MagicMock(content='{"action":"web_search","reason":"need fresh info","query":"","url":""}'),
+        ]
+    )
+
+    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        decision = asyncio.run(
+            endpoints._decide_chat_action(
+                message="latest news",
+                rag_context="",
+                rag_chunks=[],
+                history_block="",
+            )
+        )
+
+    assert mock_llm.ainvoke.await_count == 2
+    assert decision.action == "answer_direct"
+    assert decision.reason == "router_parse_failed"
+
+
 def test_resolve_web_context_does_not_search_when_router_chooses_direct_answer():
     decision = endpoints._ChatActionDecision(
         action="answer_direct",

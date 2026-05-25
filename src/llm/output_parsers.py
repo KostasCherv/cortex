@@ -3,11 +3,23 @@
 import re
 from typing import List, Literal, TypeVar
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
 from src.errors import StructuredOutputParseError, StructuredOutputValidationError
 
 T = TypeVar("T")
+MODEL_T = TypeVar("MODEL_T", bound=BaseModel)
+
+
+def _trim_required_text(value: str, *, field_name: str) -> str:
+    trimmed = value.strip()
+    if not trimmed:
+        raise ValueError(f"{field_name} must not be blank")
+    return trimmed
+
+
+def _trim_optional_text(value: str) -> str:
+    return value.strip()
 
 
 class ResearchSource(BaseModel):
@@ -51,6 +63,21 @@ class ResearchSummary(BaseModel):
     title: str = Field(default="", description="The source title")
     summary: str = Field(description="A concise summary grounded in the source")
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="url")
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        return _trim_optional_text(value)[:200]
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="summary")
+
 
 class ResearchSummaryEnvelope(BaseModel):
     """Wrapper for summarize outputs that return an object with a summaries field."""
@@ -72,10 +99,73 @@ class ChatActionDecisionPayload(BaseModel):
     query: str = ""
     url: str = ""
 
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="reason")
+
+    @field_validator("query", "url")
+    @classmethod
+    def normalize_optional_text(cls, value: str) -> str:
+        return _trim_optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_action_requirements(self) -> "ChatActionDecisionPayload":
+        if self.action == "web_search" and not self.query:
+            raise ValueError("query is required when action is web_search")
+        if self.action == "fetch_url" and not self.url:
+            raise ValueError("url is required when action is fetch_url")
+        return self
+
+
+class ExtractedEntity(BaseModel):
+    """Validated entity extracted from graph-ingestion text."""
+
+    name: str = Field(description="Entity display name")
+    entity_type: str = Field(default="Unknown", description="Entity type label")
+    confidence: float = Field(default=0.7, ge=0.0, le=1.0)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="name")
+
+    @field_validator("entity_type")
+    @classmethod
+    def normalize_entity_type(cls, value: str) -> str:
+        trimmed = _trim_optional_text(value or "Unknown")
+        return (trimmed or "Unknown")[:80]
+
+
+class ExtractedRelation(BaseModel):
+    """Validated relation extracted from graph-ingestion text."""
+
+    source: str = Field(description="Source entity name")
+    target: str = Field(description="Target entity name")
+    type: str = Field(default="RELATED", description="Relationship type")
+    confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+
+    @field_validator("source", "target")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="relation endpoint")
+
+    @field_validator("type")
+    @classmethod
+    def normalize_relation_type(cls, value: str) -> str:
+        trimmed = _trim_optional_text(value or "RELATED")
+        return (trimmed or "RELATED")[:80]
+
+
+class EntityRelationExtractionEnvelope(BaseModel):
+    """Validated entity and relation extraction payload."""
+
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    relations: list[ExtractedRelation] = Field(default_factory=list)
+
 
 CHAT_ACTION_DECISION_ADAPTER = TypeAdapter(ChatActionDecisionPayload)
 RESEARCH_SUMMARY_LIST_ADAPTER = TypeAdapter(list[ResearchSummary])
-MODEL_T = TypeVar("MODEL_T", bound=BaseModel)
 
 
 def extract_json_candidate(text: str) -> str:
@@ -103,8 +193,51 @@ def extract_json_candidate(text: str) -> str:
 
 def _raise_structured_output_error(exc: ValidationError) -> None:
     if any(error.get("type") == "json_invalid" for error in exc.errors()):
-        raise StructuredOutputParseError(f"Could not parse structured output JSON: {exc}") from exc
-    raise StructuredOutputValidationError(f"Structured output did not match schema: {exc}") from exc
+        raise StructuredOutputParseError(
+            f"Could not parse structured output JSON: {exc}",
+            details=exc.errors(),
+        ) from exc
+    raise StructuredOutputValidationError(
+        f"Structured output did not match schema: {exc}",
+        details=exc.errors(),
+    ) from exc
+
+
+def format_validation_error_details(exc: Exception, *, max_items: int = 5) -> str:
+    """Convert structured output failures into compact retry-friendly feedback."""
+    details = getattr(exc, "details", None) or []
+    if not details:
+        return f"- root (error): {str(exc).strip()}"
+
+    lines: list[str] = []
+    for item in details[:max_items]:
+        loc = item.get("loc") or ()
+        path = ".".join(str(part) for part in loc) if loc else "root"
+        error_type = str(item.get("type") or "error")
+        message = str(item.get("msg") or "Validation failed")
+        lines.append(f"- {path} ({error_type}): {message}")
+
+    if len(details) > max_items:
+        lines.append(f"- root (truncated): {len(details) - max_items} additional validation issues omitted")
+    return "\n".join(lines)
+
+
+def build_validation_retry_prompt(
+    *,
+    schema_text: str,
+    invalid_response: str,
+    validation_error: Exception,
+) -> str:
+    """Build a consistent repair prompt after parse or validation failure."""
+    return (
+        "Validation failed. Return valid JSON only that matches this schema exactly.\n\n"
+        f"Schema:\n{schema_text}\n\n"
+        "Validation errors:\n"
+        f"{format_validation_error_details(validation_error)}\n\n"
+        "Do not add markdown fences or explanations.\n\n"
+        "Previous response:\n"
+        f"{invalid_response}"
+    )
 
 
 def parse_model_json(
@@ -145,3 +278,8 @@ def parse_research_summaries_json(text: str) -> list[ResearchSummary]:
     if candidate.lstrip().startswith("{"):
         return parse_model_json(candidate, model=ResearchSummaryEnvelope).summaries
     return parse_type_json(candidate, adapter=RESEARCH_SUMMARY_LIST_ADAPTER)
+
+
+def parse_entity_relation_extraction_json(text: str) -> EntityRelationExtractionEnvelope:
+    """Parse graph extraction output into validated nested entity and relation models."""
+    return parse_model_json(text, model=EntityRelationExtractionEnvelope)

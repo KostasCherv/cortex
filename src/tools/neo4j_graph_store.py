@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from src.config import settings
 from src.errors import ConfigurationError, VectorStoreError
 from src.llm.embeddings import EmbeddingClient
 from src.llm.factory import get_llm
+from src.llm.output_parsers import build_validation_retry_prompt, parse_entity_relation_extraction_json
 
 logger = logging.getLogger(__name__)
 
@@ -144,19 +144,6 @@ class Neo4jGraphStore:
             start = max(0, end - _CHUNK_OVERLAP)
         return chunks
 
-    def _extract_json_candidate(self, text: str) -> str:
-        candidate = text.strip()
-        if not candidate:
-            return ""
-        fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", candidate, flags=re.DOTALL)
-        if fenced:
-            candidate = fenced.group(1).strip()
-        start = candidate.find("{")
-        end = candidate.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return candidate[start : end + 1]
-        return candidate
-
     def _heuristic_entities_relations(
         self, text: str
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -226,19 +213,34 @@ class Neo4jGraphStore:
             else:
                 text_out = str(content)
 
-            payload = json.loads(self._extract_json_candidate(text_out))
-            raw_entities = payload.get("entities") if isinstance(payload, dict) else []
-            raw_relations = (
-                payload.get("relations") if isinstance(payload, dict) else []
-            )
+            try:
+                payload = parse_entity_relation_extraction_json(text_out)
+            except Exception as exc:
+                repair_prompt = build_validation_retry_prompt(
+                    schema_text=(
+                        '{"entities":[{"name":"<entity name>","entity_type":"<type>","confidence":0.0-1.0}],'
+                        '"relations":[{"source":"<entity name>","target":"<entity name>",'
+                        '"type":"<relationship type>","confidence":0.0-1.0}]}'
+                    ),
+                    invalid_response=text_out,
+                    validation_error=exc,
+                )
+                repair_response = llm.invoke(repair_prompt)
+                repair_content = (
+                    repair_response.content if hasattr(repair_response, "content") else repair_response
+                )
+                if isinstance(repair_content, list):
+                    text_out = "\n".join(
+                        part if isinstance(part, str) else str(part.get("text", ""))
+                        for part in repair_content
+                    )
+                else:
+                    text_out = str(repair_content)
+                payload = parse_entity_relation_extraction_json(text_out)
 
             entities_by_name: dict[str, dict[str, Any]] = {}
-            for row in raw_entities or []:
-                if not isinstance(row, dict):
-                    continue
-                name = str(row.get("name", "")).strip()
-                if not name:
-                    continue
+            for row in payload.entities:
+                name = row.name.strip()
                 normalized = name.lower()
                 if normalized in entities_by_name:
                     continue
@@ -246,20 +248,14 @@ class Neo4jGraphStore:
                     "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),
                     "name": name,
                     "normalized_name": normalized,
-                    "entity_type": str(row.get("entity_type") or "Unknown")[:80],
-                    "confidence": float(
-                        row.get("confidence") or _DEFAULT_MENTION_CONFIDENCE
-                    ),
+                    "entity_type": row.entity_type,
+                    "confidence": row.confidence or _DEFAULT_MENTION_CONFIDENCE,
                 }
 
             relations: list[dict[str, Any]] = []
-            for row in raw_relations or []:
-                if not isinstance(row, dict):
-                    continue
-                source_name = str(row.get("source", "")).strip()
-                target_name = str(row.get("target", "")).strip()
-                if not source_name or not target_name:
-                    continue
+            for row in payload.relations:
+                source_name = row.source.strip()
+                target_name = row.target.strip()
                 source_key = source_name.lower()
                 target_key = target_name.lower()
                 if (
@@ -273,10 +269,8 @@ class Neo4jGraphStore:
                         "target_id": entities_by_name[target_key]["id"],
                         "source_name": entities_by_name[source_key]["name"],
                         "target_name": entities_by_name[target_key]["name"],
-                        "type": str(row.get("type") or "RELATED")[:80],
-                        "confidence": float(
-                            row.get("confidence") or _DEFAULT_RELATION_CONFIDENCE
-                        ),
+                        "type": row.type,
+                        "confidence": row.confidence or _DEFAULT_RELATION_CONFIDENCE,
                     }
                 )
 
