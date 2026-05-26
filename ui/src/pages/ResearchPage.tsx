@@ -11,6 +11,7 @@ import {
   submitRunFeedback,
 } from '@/api/client'
 import { FollowupChat } from '@/components/research/FollowupChat'
+import { CompletedRunLoader } from '@/components/research/CompletedRunLoader'
 import { InlineProgress } from '@/components/research/InlineProgress'
 import { QueryComposer } from '@/components/research/QueryComposer'
 import { ResearchProgress } from '@/components/research/ResearchProgress'
@@ -336,6 +337,9 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   const feedbackUnavailableReason = report && runStatus === 'completed' && !feedbackAvailable
     ? 'Feedback is not available for this run.'
     : null
+  const showResearchProgress = runStatus === 'running' || runStatus === 'failed' || Boolean(error)
+  const showCompletedRunLoader = awaitingFinalReport
+  const showReportViewer = Boolean(report || runStatus === 'running' || runStatus === 'failed' || error)
 
   return (
     <div className="flex h-dvh flex-col max-md:h-full">
@@ -407,28 +411,33 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
               <InlineProgress status={runStatus} error={error} />
             </div>
             <div className="mx-auto max-w-2xl px-6 max-md:px-4">
-              <ResearchProgress
-                latestNode={latestNode}
-                status={runStatus}
-                isStreaming={runStatus === 'running' || awaitingFinalReport}
-              />
+              {showResearchProgress && (
+                <ResearchProgress
+                  latestNode={latestNode}
+                  status={runStatus}
+                  isStreaming={runStatus === 'running'}
+                />
+              )}
+              {showCompletedRunLoader && <CompletedRunLoader />}
             </div>
-            <div className="mx-auto max-w-2xl px-6 max-md:px-4">
-              <ReportViewer
-                report={report}
-                streamingReport={streamingReport}
-                query={lastQuery}
-                isStreaming={runStatus === 'running' || awaitingFinalReport}
-                error={error}
-                feedbackEnabled={Boolean(report && sessionId && runId && runStatus === 'completed' && feedbackAvailable)}
-                feedbackUnavailableReason={feedbackUnavailableReason}
-                feedbackSubmittedAt={feedbackSubmittedAt}
-                feedbackHelpful={feedbackHelpful}
-                feedbackPending={feedbackPending}
-                feedbackError={feedbackError}
-                onFeedbackSubmit={handleFeedbackSubmit}
-              />
-            </div>
+            {showReportViewer && (
+              <div className="mx-auto max-w-2xl px-6 max-md:px-4">
+                <ReportViewer
+                  report={report}
+                  streamingReport={streamingReport}
+                  query={lastQuery}
+                  isStreaming={runStatus === 'running'}
+                  error={error}
+                  feedbackEnabled={Boolean(report && sessionId && runId && runStatus === 'completed' && feedbackAvailable)}
+                  feedbackUnavailableReason={feedbackUnavailableReason}
+                  feedbackSubmittedAt={feedbackSubmittedAt}
+                  feedbackHelpful={feedbackHelpful}
+                  feedbackPending={feedbackPending}
+                  feedbackError={feedbackError}
+                  onFeedbackSubmit={handleFeedbackSubmit}
+                />
+              </div>
+            )}
             {report && sessionId && (
               <div className="w-full px-6 max-md:px-4">
                 <FollowupChat
