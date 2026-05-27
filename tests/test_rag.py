@@ -6,6 +6,7 @@ from starlette.datastructures import UploadFile
 
 from src.rag import (
     CHAT_SCOPE_WORKSPACE,
+    AgentDefinitionDraft,
     RagChatMessage,
     RagValidationError,
     _run_ingestion_job,
@@ -16,6 +17,7 @@ from src.rag import (
     get_chat_session,
     list_chat_sessions,
     retrieve_context_for_query,
+    suggest_agent_definition,
     suggest_chat_session_title,
     update_chat_session_title,
 )
@@ -191,6 +193,46 @@ async def test_suggest_chat_session_title_fallback_when_llm_fails():
             await suggest_chat_session_title("How to reset access token quickly")
             == "How to reset access token quickly"
         )
+
+
+async def test_suggest_agent_definition_uses_llm_json_result():
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = type(
+        "R",
+        (),
+        {
+            "content": """
+            {
+              "name": "Policy Analyst",
+              "description": "Helps compare internal policy documents.",
+              "system_instructions": "Answer using the linked policy resources first."
+            }
+            """
+        },
+    )()
+
+    with patch("src.llm.factory.get_llm", return_value=mock_llm):
+        draft = await suggest_agent_definition(
+            "Create an agent that compares policy documents and highlights differences."
+        )
+
+    assert draft == AgentDefinitionDraft(
+        name="Policy Analyst",
+        description="Helps compare internal policy documents.",
+        system_instructions="Answer using the linked policy resources first.",
+    )
+
+
+async def test_suggest_agent_definition_raises_validation_error_when_llm_output_invalid():
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = type("R", (), {"content": '{"name": "", "description": "", "system_instructions": ""}'})()
+
+    with patch("src.llm.factory.get_llm", return_value=mock_llm):
+        try:
+            await suggest_agent_definition("Make me an agent")
+            assert False, "Expected RagValidationError"
+        except RagValidationError as exc:
+            assert exc.code == "agent_draft_generation_failed"
 
 
 async def test_query_resource_context_returns_reranked_chunks_and_context():

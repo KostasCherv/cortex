@@ -1,7 +1,7 @@
 """Pydantic models and helpers for structured LLM output."""
 
 import re
-from typing import List, Literal, TypeVar
+from typing import Any, List, Literal, NoReturn, TypeVar, cast
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator, model_validator
 
@@ -191,15 +191,16 @@ def extract_json_candidate(text: str) -> str:
     return candidate[start:].strip()
 
 
-def _raise_structured_output_error(exc: ValidationError) -> None:
+def _raise_structured_output_error(exc: ValidationError) -> NoReturn:
+    details = cast(list[dict[str, Any]], exc.errors())
     if any(error.get("type") == "json_invalid" for error in exc.errors()):
         raise StructuredOutputParseError(
             f"Could not parse structured output JSON: {exc}",
-            details=exc.errors(),
+            details=details,
         ) from exc
     raise StructuredOutputValidationError(
         f"Structured output did not match schema: {exc}",
-        details=exc.errors(),
+        details=details,
     ) from exc
 
 
@@ -257,8 +258,8 @@ def parse_model_json(
 def parse_type_json(
     text: str,
     *,
-    adapter: TypeAdapter[T],
-) -> T:
+    adapter: TypeAdapter[Any],
+) -> Any:
     """Parse JSON-like LLM output directly into an arbitrary typed value."""
     candidate = extract_json_candidate(text)
     try:

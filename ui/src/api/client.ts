@@ -6,6 +6,7 @@ import type {
   BillingUsageSummary,
   RagCitation,
   RagChatStreamEvent,
+  RagAgentDraft,
   RagChatMessage,
   RagChatSessionSummary,
   RagResource,
@@ -426,6 +427,24 @@ type RagAgentPayload = {
   description: string
   system_instructions: string
   linked_resource_ids: string[]
+}
+
+export async function generateRagAgentDraft(
+  prompt: string,
+  accessToken: string | null,
+): Promise<{ draft: RagAgentDraft }> {
+  const response = await fetch(`${API_BASE}/api/rag/agents/draft`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to generate agent draft: ${response.status}`))
+  }
+  return (await response.json()) as { draft: RagAgentDraft }
 }
 
 export async function createRagAgent(

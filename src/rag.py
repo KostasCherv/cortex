@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -117,6 +118,20 @@ class RagAgent:
             "linked_resource_ids": self.linked_resource_ids,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class AgentDefinitionDraft:
+    name: str
+    description: str
+    system_instructions: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "system_instructions": self.system_instructions,
         }
 
 
@@ -241,9 +256,106 @@ def _suggest_chat_session_title_sync(message: str | None) -> str:
         return fallback
 
 
+def _llm_result_to_text(result: object) -> str:
+    content = result.content if hasattr(result, "content") else result
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return str(content)
+
+
+def _require_non_empty_text(value: object, *, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise RagValidationError(
+            "agent_draft_generation_failed",
+            f"Generated agent draft field '{field_name}' must be text.",
+        )
+    normalized = " ".join(value.strip().split())
+    if not normalized:
+        raise RagValidationError(
+            "agent_draft_generation_failed",
+            f"Generated agent draft field '{field_name}' must not be blank.",
+        )
+    return normalized
+
+
+def _parse_agent_definition_draft(raw_text: str) -> AgentDefinitionDraft:
+    try:
+        payload = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise RagValidationError(
+            "agent_draft_generation_failed",
+            "Agent draft generation returned invalid JSON.",
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise RagValidationError(
+            "agent_draft_generation_failed",
+            "Agent draft generation returned an invalid payload shape.",
+        )
+
+    return AgentDefinitionDraft(
+        name=_require_non_empty_text(payload.get("name"), field_name="name"),
+        description=_require_non_empty_text(
+            payload.get("description"),
+            field_name="description",
+        ),
+        system_instructions=_require_non_empty_text(
+            payload.get("system_instructions"),
+            field_name="system_instructions",
+        ),
+    )
+
+
+def _suggest_agent_definition_sync(prompt: str) -> AgentDefinitionDraft:
+    normalized_prompt = prompt.strip()
+    if not normalized_prompt:
+        raise RagValidationError(
+            "agent_prompt_required",
+            "Agent planning prompt is required.",
+        )
+
+    llm_prompt = (
+        "You generate structured definitions for retrieval-augmented agents.\n"
+        "Return JSON only with keys: name, description, system_instructions.\n"
+        "The name should be concise and specific.\n"
+        "The description should be one sentence describing the agent's job.\n"
+        "The system_instructions should be a practical operating prompt for the agent.\n"
+        "Do not include markdown fences or extra keys.\n\n"
+        f"User brief:\n{normalized_prompt}"
+    )
+
+    try:
+        from src.llm.factory import get_llm
+
+        llm = get_llm(temperature=0.2)
+        result = llm.invoke(llm_prompt)
+        return _parse_agent_definition_draft(_llm_result_to_text(result))
+    except RagValidationError:
+        raise
+    except Exception as exc:
+        raise RagValidationError(
+            "agent_draft_generation_failed",
+            "Failed to generate an agent draft from the planning prompt.",
+        ) from exc
+
+
 async def suggest_chat_session_title(message: str | None) -> str:
     # LLM calls can block; keep title generation off the event loop.
     return await asyncio.to_thread(_suggest_chat_session_title_sync, message)
+
+
+async def suggest_agent_definition(prompt: str) -> AgentDefinitionDraft:
+    return await asyncio.to_thread(_suggest_agent_definition_sync, prompt)
 
 
 async def list_resources(user_id: str) -> list[RagResource]:

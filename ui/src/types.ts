@@ -117,6 +117,12 @@ export type RagAgent = {
   updated_at: string
 }
 
+export type RagAgentDraft = {
+  name: string
+  description: string
+  system_instructions: string
+}
+
 export type RagChatMessage = {
   message_id: string
   session_id: string

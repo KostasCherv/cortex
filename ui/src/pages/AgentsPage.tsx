@@ -6,6 +6,7 @@ import {
   createPortalSession,
   createRagAgent,
   deleteRagAgent,
+  generateRagAgentDraft,
   getBillingUsage,
   listRagAgents,
   listRagResources,
@@ -68,6 +69,12 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agent.')
     }
+  }
+
+  const handleGenerateDraft = async (prompt: string) => {
+    if (!authSession?.access_token) throw new Error('You must be signed in to create an agent.')
+    const { draft } = await generateRagAgentDraft(prompt, authSession.access_token)
+    return draft
   }
 
   const handleDelete = async (agentId: string) => {
@@ -154,6 +161,7 @@ export function AgentsPage({ authSession }: { authSession: Session | null }) {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         readyResources={readyResources}
+        onGenerateDraft={handleGenerateDraft}
         onCreate={handleCreate}
       />
     </main>
