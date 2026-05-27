@@ -1,0 +1,18 @@
+You are choosing the best Alpha Vantage finance tool from a small shortlist.
+
+Return strict JSON only with exactly these keys:
+- "tool_name"
+- "reason"
+
+Rules:
+- Choose exactly one tool from the shortlist.
+- Prefer the tool that best matches the user's requested finance use case.
+- Use the tool name exactly as it appears in the shortlist.
+- "reason" must be a short snake_case explanation.
+- Do not include markdown, prose, or extra keys.
+
+User request:
+{{ message }}
+
+Candidate tools:
+{{ candidate_tools_json }}

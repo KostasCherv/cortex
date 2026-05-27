@@ -6,9 +6,12 @@ from pydantic import TypeAdapter
 from src.errors import StructuredOutputParseError, StructuredOutputValidationError
 from src.llm.output_parsers import (
     ChatActionDecisionPayload,
+    FinanceToolSelectionPayload,
     format_validation_error_details,
     parse_entity_relation_extraction_json,
     parse_chat_action_json,
+    parse_finance_tool_call_plan_json,
+    parse_finance_tool_selection_json,
     parse_model_json,
     parse_research_summaries_json,
     parse_type_json,
@@ -17,7 +20,7 @@ from src.llm.output_parsers import (
 
 def test_parse_chat_action_json_accepts_markdown_fenced_payload():
     parsed = parse_chat_action_json(
-        '```json\n{"action":"answer_direct","reason":"small_talk","query":"","url":""}\n```'
+        '```json\n{"action":"answer_direct","reason":"small_talk","query":"","url":"","symbols":[],"currency":""}\n```'
     )
 
     assert parsed.action == "answer_direct"
@@ -40,7 +43,7 @@ def test_parse_research_summaries_json_unwraps_summaries_key():
 def test_parse_model_json_raises_validation_error_for_missing_field():
     with pytest.raises(StructuredOutputValidationError):
         parse_model_json(
-            '{"action":"answer_direct","query":"","url":""}',
+            '{"action":"answer_direct","query":"","url":"","symbols":[],"currency":""}',
             model=ChatActionDecisionPayload,
         )
 
@@ -56,14 +59,44 @@ def test_parse_type_json_raises_parse_error_for_non_json():
 def test_parse_chat_action_json_requires_query_for_web_search():
     with pytest.raises(StructuredOutputValidationError):
         parse_chat_action_json(
-            '{"action":"web_search","reason":"need fresh info","query":"","url":""}'
+            '{"action":"web_search","reason":"need fresh info","query":"","url":"","symbols":[],"currency":""}'
         )
 
 
 def test_parse_chat_action_json_requires_url_for_fetch_url():
     with pytest.raises(StructuredOutputValidationError):
         parse_chat_action_json(
-            '{"action":"fetch_url","reason":"need page content","query":"","url":""}'
+            '{"action":"fetch_url","reason":"need page content","query":"","url":"","symbols":[],"currency":""}'
+        )
+
+
+def test_parse_chat_action_json_requires_symbols_for_asset_price():
+    with pytest.raises(StructuredOutputValidationError):
+        parse_chat_action_json(
+            '{"action":"asset_price","reason":"needs_quote","query":"","url":"","symbols":[],"currency":""}'
+        )
+
+
+def test_parse_chat_action_json_requires_query_for_search_finance_tools():
+    with pytest.raises(StructuredOutputValidationError):
+        parse_chat_action_json(
+            '{"action":"search_finance_tools","reason":"needs_finance_tool","query":"","url":"","symbols":[],"currency":""}'
+        )
+
+
+def test_parse_finance_tool_selection_json_parses_choice():
+    parsed = parse_finance_tool_selection_json(
+        '{"tool_name":"CRYPTO_INTRADAY","reason":"best_match_for_24h_change"}'
+    )
+
+    assert isinstance(parsed, FinanceToolSelectionPayload)
+    assert parsed.tool_name == "CRYPTO_INTRADAY"
+
+
+def test_parse_finance_tool_call_plan_json_requires_clarifying_question_when_not_callable():
+    with pytest.raises(StructuredOutputValidationError):
+        parse_finance_tool_call_plan_json(
+            '{"should_call":false,"reason":"missing_symbol","arguments":{},"clarifying_question":""}'
         )
 
 
@@ -104,7 +137,7 @@ def test_parse_entity_relation_extraction_json_rejects_confidence_above_one():
 def test_format_validation_error_details_returns_compact_sanitized_lines():
     try:
         parse_chat_action_json(
-            '{"action":"fetch_url","reason":"need page content","query":"","url":""}'
+            '{"action":"fetch_url","reason":"need page content","query":"","url":"","symbols":[],"currency":""}'
         )
     except StructuredOutputValidationError as exc:
         details = format_validation_error_details(exc)

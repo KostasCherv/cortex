@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, cast
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -47,13 +47,30 @@ from src.sessions import (
 )
 from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.reranker import rerank_chunks
+from src.tools.asset_price_provider import (
+    get_asset_price_tool,
+    validate_asset_price_provider_health,
+)
+from src.tools.alpha_vantage_mcp_client import (
+    call_alpha_vantage_mcp_tool,
+    get_alpha_vantage_mcp_tool_definition,
+    initialize_alpha_vantage_mcp_client,
+    search_alpha_vantage_mcp_tools,
+    shutdown_alpha_vantage_mcp_client,
+)
 from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
 from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
-from src.llm.output_parsers import build_validation_retry_prompt, parse_chat_action_json
+from src.llm.output_parsers import (
+    build_validation_retry_prompt,
+    parse_chat_action_json,
+    parse_finance_tool_call_plan_json,
+    parse_finance_tool_selection_json,
+)
 from src.prompts.registry import prompt_registry
 from src.guards import claims_no_web_access
 from src import outbox
+from src.planner import PlannerValidationError, SoftwareDevPlanResponse, generate_software_dev_plan
 from src.rag import (
     CHAT_SCOPE_AGENT,
     CHAT_SCOPE_WORKSPACE,
@@ -132,6 +149,20 @@ async def validate_session_store_configuration() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     _configure_application_logging()
     validate_web_search_provider_health()
+    validate_asset_price_provider_health()
+    if (settings.asset_price_provider or "").strip().lower() == "alphavantage_mcp":
+        try:
+            client = await initialize_alpha_vantage_mcp_client()
+            logger.info(
+                "[startup] Alpha Vantage MCP catalog loaded with %s tools.",
+                len(client.list_available_tools()),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[startup] Alpha Vantage MCP catalog initialization failed; "
+                "requests may fall back to yfinance: %s",
+                exc,
+            )
     if not settings.cohere_api_key:
         logger.warning("[startup] Cohere reranking is disabled (COHERE_API_KEY not set).")
 
@@ -166,6 +197,12 @@ async def validate_session_store_configuration() -> None:
             logger.warning(
                 "[startup] Redis is configured but unreachable — caching disabled for this run."
             )
+
+
+@app.on_event("shutdown")
+async def shutdown_background_clients() -> None:
+    """Stop long-lived background clients gracefully."""
+    await shutdown_alpha_vantage_mcp_client()
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +247,10 @@ class RagAgentDraftRequest(BaseModel):
     prompt: str
 
 
+class SoftwareDevPlanRequest(BaseModel):
+    prompt: str
+
+
 class RagAgentUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -249,6 +290,17 @@ def _raise_rag_validation_error(exc: RagValidationError) -> None:
         "agent_draft_generation_failed": 502,
         "processing_failed": 409,
         "unauthorized_linkage": 403,
+    }
+    raise HTTPException(
+        status_code=status_by_code.get(exc.code, 400),
+        detail={"code": exc.code, "message": str(exc)},
+    )
+
+
+def _raise_planner_validation_error(exc: PlannerValidationError) -> None:
+    status_by_code = {
+        "planner_prompt_required": 400,
+        "planner_generation_failed": 502,
     }
     raise HTTPException(
         status_code=status_by_code.get(exc.code, 400),
@@ -311,12 +363,24 @@ def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict
         return []
     citations: list[dict] = []
     for index, row in enumerate(results):
+        source_title = (
+            row.get("title")
+            or row.get("name")
+            or row.get("symbol")
+            or f"{provider} result {index + 1}"
+        )
+        citation_text = row.get("raw_content") or row.get("content") or ""
+        if not citation_text and row.get("symbol") and row.get("price") is not None:
+            citation_text = (
+                f"{row.get('symbol')} price {row.get('price')} "
+                f"{row.get('currency') or ''} as of {row.get('as_of') or ''}"
+            ).strip()
         citations.append(
             {
-                "source_title": row.get("title") or f"{provider} result {index + 1}",
+                "source_title": source_title,
                 "source_url": row.get("url") or "",
                 "chunk_id": f"{provider}-web-{index + 1}",
-                "text": row.get("raw_content") or row.get("content") or "",
+                "text": citation_text,
             }
         )
     return citations
@@ -384,6 +448,8 @@ class _ChatActionDecision:
     reason: str
     query: str = ""
     url: str = ""
+    symbols: list[str] | None = None
+    currency: str = ""
 
 
 def _is_rag_context_insufficient(
@@ -418,6 +484,194 @@ async def _search_web(query: str) -> tuple[str, list[dict]]:
     tool = get_web_search_tool()
     results = await asyncio.to_thread(tool.search, query, settings.max_search_results)
     return tool.provider_name, results
+
+
+async def _quote_asset_prices(symbols: list[str], currency: str = "") -> tuple[str, list[dict]]:
+    tool = get_asset_price_tool()
+    results = await asyncio.to_thread(tool.quote, symbols, currency or None)
+    return tool.provider_name, results
+
+
+def _tool_match_to_context_row(match: object) -> dict[str, object]:
+    name = getattr(match, "name", "") if not isinstance(match, dict) else str(match.get("name") or "")
+    description = (
+        getattr(match, "description", "")
+        if not isinstance(match, dict)
+        else str(match.get("description") or "")
+    )
+    score = getattr(match, "score", None) if not isinstance(match, dict) else match.get("score")
+    why = getattr(match, "why", "") if not isinstance(match, dict) else str(match.get("why") or "")
+    return {
+        "tool_name": name,
+        "title": f"Alpha Vantage MCP Tool · {name}",
+        "url": "https://www.alphavantage.co/documentation/",
+        "content": (
+            f"Candidate tool: {name}\n"
+            f"Description: {description}\n"
+            f"Why matched: {why}\n"
+            f"Score: {score}"
+        ).strip(),
+        "source": "alphavantage_mcp_catalog",
+        "raw": {
+            "tool_name": name,
+            "description": description,
+            "score": score,
+            "why": why,
+        },
+    }
+
+
+def _tool_definition_to_context_row(
+    *,
+    tool_definition,
+    clarifying_question: str = "",
+    reason: str = "",
+) -> dict[str, object]:
+    parameters = tool_definition.parameters if hasattr(tool_definition, "parameters") else {}
+    return {
+        "tool_name": tool_definition.name,
+        "title": f"Alpha Vantage MCP Tool · {tool_definition.name}",
+        "url": "https://www.alphavantage.co/documentation/",
+        "content": (
+            f"Selected tool: {tool_definition.name}\n"
+            f"Description: {tool_definition.description}\n"
+            f"Schema: {json.dumps(parameters, ensure_ascii=True)}\n"
+            f"Reason: {reason}\n"
+            f"Clarifying question: {clarifying_question}"
+        ).strip(),
+        "source": "alphavantage_mcp_catalog",
+        "clarifying_question": clarifying_question,
+        "raw": {
+            "tool_name": tool_definition.name,
+            "description": tool_definition.description,
+            "parameters": parameters,
+        },
+    }
+
+
+def _tool_call_payload_to_context_row(
+    *,
+    tool_name: str,
+    arguments: dict[str, object],
+    payload: object,
+) -> dict[str, object]:
+    serialized_payload = json.dumps(payload, ensure_ascii=True, default=str)
+    compact_payload = serialized_payload[:6000]
+    return {
+        "tool_name": tool_name,
+        "title": f"Alpha Vantage MCP · {tool_name}",
+        "url": "https://www.alphavantage.co/documentation/",
+        "content": (
+            f"Source: Alpha Vantage MCP ({tool_name})\n"
+            f"Arguments: {json.dumps(arguments, ensure_ascii=True, default=str)}\n"
+            f"Payload: {compact_payload}"
+        ).strip(),
+        "raw_content": compact_payload,
+        "source": "alphavantage_mcp",
+        "raw": {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "payload": payload,
+        },
+    }
+
+
+async def _select_finance_tool_candidate(
+    *,
+    message: str,
+    matches: list[object],
+) -> str:
+    llm = get_llm(temperature=0.0)
+    shortlist = [
+        {
+            "name": getattr(match, "name", "") if not isinstance(match, dict) else str(match.get("name") or ""),
+            "description": (
+                getattr(match, "description", "")
+                if not isinstance(match, dict)
+                else str(match.get("description") or "")
+            ),
+            "why": getattr(match, "why", "") if not isinstance(match, dict) else str(match.get("why") or ""),
+            "score": getattr(match, "score", None) if not isinstance(match, dict) else match.get("score"),
+        }
+        for match in matches
+    ]
+    prompt, _ = prompt_registry.render(
+        "finance_tool_selection",
+        {
+            "message": message,
+            "candidate_tools_json": json.dumps(shortlist),
+        },
+    )
+    raw = ""
+    try:
+        result = await llm.ainvoke(prompt)
+        raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
+        parsed = parse_finance_tool_selection_json(raw)
+    except Exception as exc:
+        repair_prompt = build_validation_retry_prompt(
+            schema_text='{"tool_name":"<tool name from shortlist>","reason":"<snake_case_reason>"}',
+            invalid_response=raw,
+            validation_error=exc,
+        )
+        repair_result = await llm.ainvoke(repair_prompt)
+        repair_raw = _extract_llm_text(
+            repair_result.content if hasattr(repair_result, "content") else repair_result
+        ).strip()
+        parsed = parse_finance_tool_selection_json(repair_raw)
+
+    valid_names = {item["name"] for item in shortlist if item["name"]}
+    if parsed.tool_name not in valid_names:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "finance_tool_selection_invalid",
+                "error": f"Selected finance tool '{parsed.tool_name}' was not in the shortlist.",
+            },
+        )
+    return parsed.tool_name
+
+
+async def _plan_finance_tool_call(
+    *,
+    message: str,
+    tool_definition,
+) -> dict[str, object]:
+    llm = get_llm(temperature=0.0)
+    prompt, _ = prompt_registry.render(
+        "finance_tool_call_plan",
+        {
+            "message": message,
+            "tool_name": tool_definition.name,
+            "tool_description": tool_definition.description,
+            "tool_parameters_json": json.dumps(tool_definition.parameters, ensure_ascii=True),
+        },
+    )
+    raw = ""
+    try:
+        result = await llm.ainvoke(prompt)
+        raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
+        parsed = parse_finance_tool_call_plan_json(raw)
+    except Exception as exc:
+        repair_prompt = build_validation_retry_prompt(
+            schema_text=(
+                '{"should_call":true,"reason":"<snake_case_reason>",'
+                '"arguments":{"<arg>":"<value>"},"clarifying_question":"<empty when callable>"}'
+            ),
+            invalid_response=raw,
+            validation_error=exc,
+        )
+        repair_result = await llm.ainvoke(repair_prompt)
+        repair_raw = _extract_llm_text(
+            repair_result.content if hasattr(repair_result, "content") else repair_result
+        ).strip()
+        parsed = parse_finance_tool_call_plan_json(repair_raw)
+
+    return {
+        "should_call": parsed.should_call,
+        "reason": parsed.reason,
+        "arguments": parsed.arguments,
+        "clarifying_question": parsed.clarifying_question,
+    }
 
 
 async def _repair_url_access_refusal_if_needed(
@@ -488,9 +742,10 @@ async def _decide_chat_action(
     except Exception as exc:
         repair_prompt = build_validation_retry_prompt(
             schema_text=(
-                '{"action":"answer_direct|answer_from_rag|web_search|fetch_url|ask_clarifying",'
+                '{"action":"answer_direct|answer_from_rag|web_search|asset_price|search_finance_tools|fetch_url|ask_clarifying",'
                 '"reason":"<why this action was chosen>","query":"<search query or empty>",'
-                '"url":"<url or empty>"}'
+                '"url":"<url or empty>","symbols":["<asset symbols for asset_price>"],'
+                '"currency":"<quote currency or empty>"}'
             ),
             invalid_response=raw if "raw" in locals() else "",
             validation_error=exc,
@@ -509,6 +764,8 @@ async def _decide_chat_action(
         reason=parsed.reason.strip(),
         query=parsed.query.strip(),
         url=parsed.url.strip(),
+        symbols=parsed.symbols,
+        currency=parsed.currency.strip(),
     )
 
 
@@ -549,6 +806,62 @@ async def _resolve_web_context(
             )
         return _ResolvedWebContext(False, web_provider, [], "not_needed")
 
+    if decision.action == "asset_price":
+        provider, results = await _quote_asset_prices(
+            decision.symbols or [],
+            decision.currency,
+        )
+        return _ResolvedWebContext(True, provider, results, "asset_price")
+
+    if decision.action == "search_finance_tools":
+        matches = await search_alpha_vantage_mcp_tools(decision.query or normalized_message, limit=5)
+        if not matches:
+            return _ResolvedWebContext(False, "alphavantage_mcp", [], "not_needed")
+
+        selected_tool_name = await _select_finance_tool_candidate(
+            message=normalized_message,
+            matches=matches,
+        )
+        tool_definition = await get_alpha_vantage_mcp_tool_definition(selected_tool_name)
+        call_plan = await _plan_finance_tool_call(
+            message=normalized_message,
+            tool_definition=tool_definition,
+        )
+
+        if call_plan["should_call"]:
+            payload = await call_alpha_vantage_mcp_tool(
+                selected_tool_name,
+                cast(dict[str, object], call_plan["arguments"]),
+            )
+            return _ResolvedWebContext(
+                True,
+                "alphavantage_mcp",
+                [
+                    _tool_call_payload_to_context_row(
+                        tool_name=selected_tool_name,
+                        arguments=cast(dict[str, object], call_plan["arguments"]),
+                        payload=payload,
+                    )
+                ],
+                "finance_tool_call",
+            )
+
+        shortlist_rows = [_tool_match_to_context_row(match) for match in matches[:3]]
+        shortlist_rows.insert(
+            0,
+            _tool_definition_to_context_row(
+                tool_definition=tool_definition,
+                clarifying_question=str(call_plan["clarifying_question"] or ""),
+                reason=str(call_plan["reason"] or ""),
+            ),
+        )
+        return _ResolvedWebContext(
+            True,
+            "alphavantage_mcp_catalog",
+            shortlist_rows,
+            "finance_tool_search",
+        )
+
     if decision.action != "web_search":
         return _ResolvedWebContext(False, web_provider, [], "not_needed")
 
@@ -569,7 +882,13 @@ async def _resolve_web_context(
 
 
 def _prefer_web_citations(resolved_web: _ResolvedWebContext) -> bool:
-    return resolved_web.reason in {"direct_fetch", "model_decision"}
+    return resolved_web.reason in {
+        "direct_fetch",
+        "model_decision",
+        "asset_price",
+        "finance_tool_call",
+        "finance_tool_search",
+    }
 
 
 def _rag_context_for_answer(rag_context: str, resolved_web: _ResolvedWebContext) -> str:
@@ -637,6 +956,23 @@ def _build_chat_messages(
                 )
             )
         )
+    elif router_action == "search_finance_tools":
+        clarifying_question = ""
+        for row in web_results:
+            if isinstance(row, dict) and str(row.get("clarifying_question") or "").strip():
+                clarifying_question = str(row.get("clarifying_question")).strip()
+                break
+        if clarifying_question:
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "The finance tool workflow found a likely tool but it cannot be "
+                        "called confidently yet. Ask this concise clarifying question and do "
+                        "not guess missing parameters: "
+                        f"{clarifying_question}"
+                    )
+                )
+            )
     for turn in history:
         role = turn.role if hasattr(turn, "role") else turn.get("role", "")
         content = turn.content if hasattr(turn, "content") else turn.get("content", "")
@@ -1584,6 +1920,19 @@ async def rag_create_agent(
     return {"agent": agent.to_dict()}
 
 
+@app.post("/api/planner/software-dev", tags=["Planner"])
+async def generate_implementation_plan(
+    body: SoftwareDevPlanRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> SoftwareDevPlanResponse:
+    del current_user
+    try:
+        return await generate_software_dev_plan(body.prompt)
+    except PlannerValidationError as exc:
+        _raise_planner_validation_error(exc)
+        raise AssertionError("unreachable")
+
+
 @app.post("/api/rag/agents/draft", tags=["RAG"])
 async def rag_generate_agent_draft(
     body: RagAgentDraftRequest,
@@ -1724,6 +2073,13 @@ async def rag_chat_with_agent(
             decision=decision,
         )
     except Exception as exc:
+        logger.exception(
+            "[rag_api] streaming agent chat external tool resolution failed "
+            "agent_id=%s user_id=%s action=%s",
+            agent_id,
+            current_user.user_id,
+            decision.action if "decision" in locals() and decision else "unknown",
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -1867,6 +2223,13 @@ async def rag_chat_with_agent_stream(
             decision=decision,
         )
     except Exception as exc:
+        logger.exception(
+            "[rag_api] agent chat external tool resolution failed "
+            "agent_id=%s user_id=%s action=%s",
+            agent_id,
+            current_user.user_id,
+            decision.action if "decision" in locals() and decision else "unknown",
+        )
         raise HTTPException(
             status_code=503,
             detail={
@@ -2122,6 +2485,12 @@ async def rag_chat_workspace(
             decision=decision,
         )
     except Exception as exc:
+        logger.exception(
+            "[rag_api] workspace chat external tool resolution failed "
+            "user_id=%s action=%s",
+            current_user.user_id,
+            decision.action if "decision" in locals() and decision else "unknown",
+        )
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
 
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
@@ -2222,6 +2591,12 @@ async def rag_chat_workspace_stream(
             decision=decision,
         )
     except Exception as exc:
+        logger.exception(
+            "[rag_api] streaming workspace chat external tool resolution failed "
+            "user_id=%s action=%s",
+            current_user.user_id,
+            decision.action if "decision" in locals() and decision else "unknown",
+        )
         raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
     answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
     messages = _build_chat_messages(

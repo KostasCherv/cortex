@@ -5,11 +5,15 @@ Return strict JSON only with exactly these keys:
 - "reason"
 - "query"
 - "url"
+- "symbols"
+- "currency"
 
 Valid actions:
 - "answer_direct"
 - "answer_from_rag"
 - "web_search"
+- "asset_price"
+- "search_finance_tools"
 - "fetch_url"
 - "ask_clarifying"
 
@@ -18,14 +22,20 @@ Routing rules:
 - Weak, empty, or insufficient RAG context alone is not enough to justify "web_search".
 - Prefer "answer_from_rag" when the local context is relevant and sufficient.
 - Use "web_search" only when the user needs external, fresh, current, or otherwise web-dependent information.
+- Use "asset_price" when the user is asking for the current/latest price or quote of a market asset and the asset pricing tool can answer it.
+- Use "search_finance_tools" when the user needs finance-specific data or analytics that go beyond a simple current quote and should be handled by a discovered Alpha Vantage finance tool.
 - If the message contains a URL or refers to a previously shared URL/link, treat that as available context, not an automatic action.
 - Use "fetch_url" only when inspecting the URL is actually necessary to answer the user's request.
 - Use "ask_clarifying" when a search would be speculative because the user has not given enough concrete direction.
 
 Output requirements:
 - "reason" must be a short snake_case style explanation.
-- Set "query" only for "web_search"; otherwise return an empty string.
+- Set "query" for "web_search" and "search_finance_tools"; otherwise return an empty string.
+- For "search_finance_tools", make "query" a short finance-tool search intent derived from the user request.
+- Set "symbols" only for "asset_price"; otherwise return an empty list.
+- Set "currency" only for "asset_price" when the user explicitly requests a quote currency; otherwise return an empty string.
 - Set "url" only for "fetch_url"; otherwise return an empty string.
+- For "asset_price", prefer standard market symbols when obvious from the user message, such as "AAPL", "BTC", "BTCUSD", "BTC-USD", "EURUSD", or "EURUSD=X".
 - Do not return markdown, prose, or any extra keys.
 
 Conversation history:

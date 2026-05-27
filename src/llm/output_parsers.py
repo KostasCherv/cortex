@@ -92,29 +92,84 @@ class ChatActionDecisionPayload(BaseModel):
         "answer_direct",
         "answer_from_rag",
         "web_search",
+        "asset_price",
+        "search_finance_tools",
         "fetch_url",
         "ask_clarifying",
     ]
     reason: str
     query: str = ""
     url: str = ""
+    symbols: list[str] = Field(default_factory=list)
+    currency: str = ""
 
     @field_validator("reason")
     @classmethod
     def validate_reason(cls, value: str) -> str:
         return _trim_required_text(value, field_name="reason")
 
-    @field_validator("query", "url")
+    @field_validator("query", "url", "currency")
     @classmethod
     def normalize_optional_text(cls, value: str) -> str:
         return _trim_optional_text(value)
+
+    @field_validator("symbols", mode="before")
+    @classmethod
+    def normalize_symbols(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(part).strip() for part in value if str(part).strip()]
+        return value
 
     @model_validator(mode="after")
     def validate_action_requirements(self) -> "ChatActionDecisionPayload":
         if self.action == "web_search" and not self.query:
             raise ValueError("query is required when action is web_search")
+        if self.action == "search_finance_tools" and not self.query:
+            raise ValueError("query is required when action is search_finance_tools")
+        if self.action == "asset_price" and not self.symbols:
+            raise ValueError("symbols are required when action is asset_price")
         if self.action == "fetch_url" and not self.url:
             raise ValueError("url is required when action is fetch_url")
+        return self
+
+
+class FinanceToolSelectionPayload(BaseModel):
+    """Validated tool-selection response for progressive finance tool discovery."""
+
+    tool_name: str
+    reason: str
+
+    @field_validator("tool_name", "reason")
+    @classmethod
+    def validate_required_text(cls, value: str, info) -> str:
+        return _trim_required_text(value, field_name=str(info.field_name))
+
+
+class FinanceToolCallPlanPayload(BaseModel):
+    """Validated plan for whether and how to call a discovered finance tool."""
+
+    should_call: bool
+    reason: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    clarifying_question: str = ""
+
+    @field_validator("reason", "clarifying_question")
+    @classmethod
+    def normalize_text(cls, value: str, info) -> str:
+        if info.field_name == "reason":
+            return _trim_required_text(value, field_name="reason")
+        return _trim_optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_callability(self) -> "FinanceToolCallPlanPayload":
+        if not self.should_call and not self.clarifying_question:
+            raise ValueError(
+                "clarifying_question is required when should_call is false"
+            )
         return self
 
 
@@ -166,6 +221,8 @@ class EntityRelationExtractionEnvelope(BaseModel):
 
 CHAT_ACTION_DECISION_ADAPTER = TypeAdapter(ChatActionDecisionPayload)
 RESEARCH_SUMMARY_LIST_ADAPTER = TypeAdapter(list[ResearchSummary])
+FINANCE_TOOL_SELECTION_ADAPTER = TypeAdapter(FinanceToolSelectionPayload)
+FINANCE_TOOL_CALL_PLAN_ADAPTER = TypeAdapter(FinanceToolCallPlanPayload)
 
 
 def extract_json_candidate(text: str) -> str:
@@ -271,6 +328,16 @@ def parse_type_json(
 def parse_chat_action_json(text: str) -> ChatActionDecisionPayload:
     """Parse a structured chat router response into the expected model."""
     return parse_model_json(text, model=ChatActionDecisionPayload)
+
+
+def parse_finance_tool_selection_json(text: str) -> FinanceToolSelectionPayload:
+    """Parse a finance tool-selection response."""
+    return parse_model_json(text, model=FinanceToolSelectionPayload)
+
+
+def parse_finance_tool_call_plan_json(text: str) -> FinanceToolCallPlanPayload:
+    """Parse a finance tool call-plan response."""
+    return parse_model_json(text, model=FinanceToolCallPlanPayload)
 
 
 def parse_research_summaries_json(text: str) -> list[ResearchSummary]:

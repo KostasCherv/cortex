@@ -9,6 +9,10 @@ class SearchError(CortexError):
     """Raised when the Tavily search fails after all retries."""
 
 
+class AssetPriceError(CortexError):
+    """Raised when asset price retrieval fails."""
+
+
 class FetchError(CortexError):
     """Raised when URL content fetching fails."""
 
@@ -43,3 +47,7 @@ class ConfigurationError(CortexError):
 
 class CacheError(CortexError):
     """Raised when a Redis cache operation fails."""
+
+
+class McpClientError(CortexError):
+    """Raised when an MCP client operation fails."""

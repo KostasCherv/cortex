@@ -1,0 +1,29 @@
+You are deciding whether a selected Alpha Vantage finance tool can be called from the user's request alone.
+
+Return strict JSON only with exactly these keys:
+- "should_call"
+- "reason"
+- "arguments"
+- "clarifying_question"
+
+Rules:
+- "should_call" must be true only when the user's request provides enough information to confidently call the tool.
+- If "should_call" is true:
+  - set "arguments" to a JSON object matching the tool schema as closely as possible
+  - set "clarifying_question" to an empty string
+- If "should_call" is false:
+  - set "arguments" to an empty object
+  - set "clarifying_question" to one concise question that would unblock the tool call
+- "reason" must be a short snake_case explanation.
+- Use only arguments you can infer confidently from the user request.
+- Do not include markdown, prose, or extra keys.
+
+User request:
+{{ message }}
+
+Selected tool:
+Name: {{ tool_name }}
+Description: {{ tool_description }}
+
+Tool parameter schema:
+{{ tool_parameters_json }}

@@ -23,6 +23,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
 - LLM and agent layer: `LangChain`, `OpenAI`, `OpenRouter`, `Ollama`
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
+- Market data tools: `Alpha Vantage MCP`, `yfinance`
 - Retrieval and reranking: `Neo4j` (GraphRAG), `Cohere`
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
 - Auth, sessions, and storage: `Supabase` (Postgres, Auth, Storage)
@@ -131,6 +132,13 @@ Relevant LLM settings:
 - `OPENAI_API_KEY` and `OPENAI_MODEL` for direct OpenAI usage
 - `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` for OpenRouter-hosted models
 - `OLLAMA_BASE_URL` and `OLLAMA_MODEL` for local Ollama usage
+
+Asset pricing settings:
+
+- `ASSET_PRICE_PROVIDER=alphavantage_mcp|yfinance`
+- `ALPHA_VANTAGE_API_KEY` for the default Alpha Vantage MCP-backed market data provider
+- `ALPHA_VANTAGE_MCP_TOOL_REFRESH_SECONDS` to control how often the in-memory MCP tool catalog is refreshed
+- Optional `ALPHA_VANTAGE_MCP_URL` to override the full remote MCP URL directly
 
 Embedding settings (must match the Neo4j vector index dimensions):
 

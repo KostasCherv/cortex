@@ -13,11 +13,20 @@ from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
 from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary, UserSubscription
+from src.planner import PlannerValidationError, PlanningApproach, PlanningBrief, PlanningOptions, RepoAnalysis, RepoRelevantFile, SoftwareDevPlan, SoftwareDevPlanFile, SoftwareDevPlanPhase, SoftwareDevPlanResponse
 from src.rag import AgentDefinitionDraft, RagValidationError
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
 
-with patch("src.api.endpoints.validate_web_search_provider_health"):
+with (
+    patch("src.api.endpoints.validate_web_search_provider_health"),
+    patch("src.api.endpoints.validate_asset_price_provider_health"),
+    patch(
+        "src.api.endpoints.initialize_alpha_vantage_mcp_client",
+        new=AsyncMock(return_value=MagicMock(list_available_tools=MagicMock(return_value=[]))),
+    ),
+    patch("src.api.endpoints.shutdown_alpha_vantage_mcp_client", new=AsyncMock()),
+):
     client = TestClient(app)
 
 
@@ -628,6 +637,11 @@ def test_session_endpoints_require_auth():
 def test_startup_validation_does_not_fail_without_supabase_configuration():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
+        patch("src.api.endpoints.validate_asset_price_provider_health"),
+        patch(
+            "src.api.endpoints.initialize_alpha_vantage_mcp_client",
+            new=AsyncMock(return_value=MagicMock(list_available_tools=MagicMock(return_value=[]))),
+        ),
         patch("src.api.endpoints.settings.supabase_url", ""),
         patch("src.api.endpoints.settings.supabase_secret_key", ""),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
@@ -641,6 +655,11 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
 def test_startup_validation_configures_application_logging():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
+        patch("src.api.endpoints.validate_asset_price_provider_health"),
+        patch(
+            "src.api.endpoints.initialize_alpha_vantage_mcp_client",
+            new=AsyncMock(return_value=MagicMock(list_available_tools=MagicMock(return_value=[]))),
+        ),
         patch("src.api.endpoints._configure_application_logging") as mock_configure_logging,
         patch("src.api.endpoints.settings.supabase_url", ""),
         patch("src.api.endpoints.settings.supabase_secret_key", ""),
@@ -655,6 +674,11 @@ def test_startup_validation_configures_application_logging():
 def test_startup_validation_checks_rag_storage_when_supabase_configured():
     with (
         patch("src.api.endpoints.validate_web_search_provider_health"),
+        patch("src.api.endpoints.validate_asset_price_provider_health"),
+        patch(
+            "src.api.endpoints.initialize_alpha_vantage_mcp_client",
+            new=AsyncMock(return_value=MagicMock(list_available_tools=MagicMock(return_value=[]))),
+        ),
         patch("src.api.endpoints.settings.supabase_url", "https://example.supabase.co"),
         patch("src.api.endpoints.settings.supabase_secret_key", "service-role"),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
@@ -663,6 +687,25 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
         asyncio.run(app.router.on_startup[0]())
         mock_init.assert_called_once()
         mock_storage_ready.assert_awaited_once()
+
+
+def test_startup_validation_bootstraps_alpha_vantage_mcp_catalog_when_enabled():
+    mock_client = MagicMock()
+    mock_client.list_available_tools.return_value = ["GLOBAL_QUOTE", "SYMBOL_SEARCH"]
+
+    with (
+        patch("src.api.endpoints.validate_web_search_provider_health"),
+        patch("src.api.endpoints.validate_asset_price_provider_health"),
+        patch("src.api.endpoints.initialize_alpha_vantage_mcp_client", new=AsyncMock(return_value=mock_client)) as mock_init_client,
+        patch("src.api.endpoints.settings.asset_price_provider", "alphavantage_mcp"),
+        patch("src.api.endpoints.settings.supabase_url", ""),
+        patch("src.api.endpoints.settings.supabase_secret_key", ""),
+        patch("src.api.endpoints.ensure_store_initialized"),
+        patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
+    ):
+        asyncio.run(app.router.on_startup[0]())
+
+    mock_init_client.assert_awaited_once()
 
 
 def test_configure_application_logging_sets_src_logger_level():
@@ -2257,6 +2300,156 @@ def test_rag_context_is_preserved_when_web_search_augments_local_resources():
     )
 
 
+def test_resolve_web_context_calls_asset_price_tool_for_asset_price_action():
+    decision = endpoints._ChatActionDecision(
+        action="asset_price",
+        reason="current_asset_quote",
+        symbols=["BTC-USD", "AAPL"],
+        currency="",
+    )
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "yfinance"
+    mock_tool.quote.return_value = [
+        {"symbol": "BTC-USD", "price": 68000.0, "currency": "USD"},
+        {"symbol": "AAPL", "price": 190.0, "currency": "USD"},
+    ]
+
+    with patch("src.api.endpoints.get_asset_price_tool", return_value=mock_tool):
+        resolved = asyncio.run(
+            endpoints._resolve_web_context(
+                normalized_message="price of BTC and AAPL",
+                rag_context="",
+                rag_chunks=[],
+                history_block="",
+                decision=decision,
+            )
+        )
+
+    assert resolved.used is True
+    assert resolved.provider == "yfinance"
+    assert resolved.reason == "asset_price"
+    mock_tool.quote.assert_called_once_with(["BTC-USD", "AAPL"], None)
+
+
+def test_rag_chat_uses_asset_price_tool_when_router_selects_asset_price():
+    mock_agent = MagicMock()
+    mock_agent.system_instructions = "Keep it concise."
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+    llm_result = MagicMock()
+    llm_result.content = "BTC-USD is at 68000 USD and AAPL is at 190 USD."
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=llm_result)
+    decision = endpoints._ChatActionDecision(
+        action="asset_price",
+        reason="current_asset_quote",
+        symbols=["BTC-USD", "AAPL"],
+        currency="",
+    )
+    mock_tool = MagicMock()
+    mock_tool.provider_name = "yfinance"
+    mock_tool.quote.return_value = [
+        {"symbol": "BTC-USD", "name": "Bitcoin USD", "price": 68000.0, "currency": "USD"},
+        {"symbol": "AAPL", "name": "Apple Inc.", "price": 190.0, "currency": "USD"},
+    ]
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.endpoints.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.get_llm", return_value=mock_llm),
+        patch("src.api.endpoints._decide_chat_action", new=AsyncMock(return_value=decision)),
+        patch("src.api.endpoints.get_asset_price_tool", return_value=mock_tool),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "What's the latest price of BTC-USD and AAPL?", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["web_used"] is True
+    mock_tool.quote.assert_called_once_with(["BTC-USD", "AAPL"], None)
+    messages = mock_llm.ainvoke.await_args.args[0]
+    all_content = " ".join(m.content for m in messages)
+    assert "Bitcoin USD" in all_content
+    assert "68000.0" in all_content
+
+
+def test_resolve_web_context_calls_selected_finance_tool_for_search_finance_tools_action():
+    decision = endpoints._ChatActionDecision(
+        action="search_finance_tools",
+        reason="needs_finance_tool",
+        query="What is the 24-hour price change for BTC?",
+    )
+    tool_match = {
+        "name": "CRYPTO_INTRADAY",
+        "description": "Intraday crypto time series",
+        "score": 9.5,
+        "why": "best_fit_for_intraday_change_request",
+    }
+    tool_definition = MagicMock()
+    tool_definition.name = "CRYPTO_INTRADAY"
+    tool_definition.description = "Intraday crypto time series"
+    tool_definition.parameters = {
+        "type": "object",
+        "properties": {
+            "symbol": {"type": "string", "description": "Crypto symbol such as BTC"},
+            "market": {"type": "string", "description": "Market such as USD"},
+        },
+        "required": ["symbol", "market"],
+    }
+    tool_payload = {"Time Series Crypto (1min)": {"2026-05-27 21:00:00": {"4. close": "74908.01"}}}
+
+    with (
+        patch(
+            "src.api.endpoints.search_alpha_vantage_mcp_tools",
+            new=AsyncMock(return_value=[tool_match]),
+        ),
+        patch(
+            "src.api.endpoints._select_finance_tool_candidate",
+            new=AsyncMock(return_value="CRYPTO_INTRADAY"),
+        ),
+        patch(
+            "src.api.endpoints.get_alpha_vantage_mcp_tool_definition",
+            new=AsyncMock(return_value=tool_definition),
+        ),
+        patch(
+            "src.api.endpoints._plan_finance_tool_call",
+            new=AsyncMock(
+                return_value={
+                    "should_call": True,
+                    "reason": "enough_information",
+                    "arguments": {"symbol": "BTC", "market": "USD"},
+                    "clarifying_question": "",
+                }
+            ),
+        ),
+        patch(
+            "src.api.endpoints.call_alpha_vantage_mcp_tool",
+            new=AsyncMock(return_value=tool_payload),
+        ) as call_tool,
+    ):
+        resolved = asyncio.run(
+            endpoints._resolve_web_context(
+                normalized_message="What is the 24-hour price change for BTC?",
+                rag_context="",
+                rag_chunks=[],
+                history_block="",
+                decision=decision,
+            )
+        )
+
+    assert resolved.used is True
+    assert resolved.provider == "alphavantage_mcp"
+    assert resolved.reason == "finance_tool_call"
+    assert resolved.results[0]["tool_name"] == "CRYPTO_INTRADAY"
+    call_tool.assert_awaited_once_with("CRYPTO_INTRADAY", {"symbol": "BTC", "market": "USD"})
+
+
 def test_rag_chat_explicit_url_fetch_forces_web_tool_when_enabled():
     mock_agent = MagicMock()
     mock_agent.system_instructions = ""
@@ -2896,6 +3089,106 @@ def test_rag_agent_draft_generation():
             "system_instructions": "Use the linked policies before answering.",
         }
     }
+
+
+def test_software_dev_plan_generation():
+    response_model = SoftwareDevPlanResponse(
+        plan=SoftwareDevPlan(
+            title="Software planner",
+            summary="Adds a first-class implementation planner flow.",
+            goal="Turn a feature request into a downloadable implementation plan.",
+            repo_fit="Fits the existing backend/frontend split and draft-generation patterns.",
+            architecture="Use a dedicated planner service and a synchronous API endpoint.",
+            recommended_approach="Implement a staged prompt pipeline with a dedicated planner page.",
+            file_map=[
+                SoftwareDevPlanFile(
+                    path="src/planner.py",
+                    reason="Houses the staged planning workflow.",
+                )
+            ],
+            data_api_ui_impacts=["Adds a new planner endpoint and UI surface."],
+            phases=[
+                SoftwareDevPlanPhase(
+                    id="phase-1",
+                    title="Backend contract",
+                    objective="Add planner models and endpoint.",
+                    files=["src/planner.py", "src/api/endpoints.py"],
+                    deliverables=["Planner service", "Authenticated API route"],
+                    verification=["pytest tests/test_planner.py tests/test_api.py"],
+                )
+            ],
+            validation=["pytest tests/test_planner.py tests/test_api.py"],
+            risks=["LLM output may require repair retries."],
+            assumptions=["v1 is synchronous."],
+            open_questions=["Should future versions persist plan history?"],
+            out_of_scope=["Automated code execution."],
+        ),
+        markdown="# Software planner\n",
+        suggested_filename="2026-05-27-software-planner-implementation-plan.md",
+        planning_brief=PlanningBrief(
+            problem_statement="Need a planner.",
+            desired_outcome="Return a reviewed plan.",
+            constraints=["Stay repo-grounded."],
+            assumptions=["Synchronous response is acceptable."],
+            open_questions=[],
+        ),
+        repo_analysis=RepoAnalysis(
+            summary="Existing draft-generation and shell navigation patterns are reusable.",
+            relevant_files=[
+                {"path": "src/api/endpoints.py", "reason": "Existing authenticated API routes live here."}
+            ],
+            existing_patterns=["Draft generation through prompt templates."],
+            constraints=["Must stay plan-only in v1."],
+            unknowns=[],
+        ),
+        planning_options=PlanningOptions(
+            approaches=[
+                {
+                    "name": "Dedicated planner module",
+                    "summary": "Add a new backend service and UI page.",
+                    "tradeoffs": ["Slightly more code, but clearer boundaries."],
+                    "file_impact": ["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
+                }
+            ],
+            recommended_approach="Dedicated planner module",
+            rationale="Keeps planner-specific orchestration separate from RAG logic.",
+            out_of_scope=["True distributed multi-agent runs."],
+        ),
+    )
+
+    with patch(
+        "src.api.endpoints.generate_software_dev_plan",
+        new=AsyncMock(return_value=response_model),
+    ):
+        response = client.post(
+            "/api/planner/software-dev",
+            json={"prompt": "Add a software implementation planner."},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plan"]["title"] == "Software planner"
+    assert payload["suggested_filename"].endswith("-implementation-plan.md")
+    assert payload["planning_brief"]["problem_statement"] == "Need a planner."
+
+
+def test_software_dev_plan_generation_maps_validation_errors():
+    with patch(
+        "src.api.endpoints.generate_software_dev_plan",
+        new=AsyncMock(
+            side_effect=PlannerValidationError(
+                "planner_generation_failed",
+                "Planner output could not be validated.",
+            )
+        ),
+    ):
+        response = client.post(
+            "/api/planner/software-dev",
+            json={"prompt": "Add a software implementation planner."},
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "planner_generation_failed"
 
 
 def _async_iter(items):

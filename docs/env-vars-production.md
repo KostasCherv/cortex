@@ -16,6 +16,10 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `EMBEDDING_MODEL` | no | `text-embedding-3-small` |
 | `EMBEDDING_DIMENSIONS` | no | `1536` |
 | `TAVILY_API_KEY` | yes | |
+| `ALPHA_VANTAGE_API_KEY` | yes | Required when `ASSET_PRICE_PROVIDER=alphavantage_mcp` |
+| `ASSET_PRICE_PROVIDER` | no | `alphavantage_mcp` or `yfinance` |
+| `ALPHA_VANTAGE_MCP_URL` | no | Optional full remote MCP URL override |
+| `ALPHA_VANTAGE_MCP_TOOL_REFRESH_SECONDS` | no | Tool-catalog refresh cadence in seconds (default `3600`) |
 | `NEO4J_URI` | yes | Use `neo4j+s://` for AuraDB (TLS) |
 | `NEO4J_USERNAME` | yes | |
 | `NEO4J_PASSWORD` | yes | |

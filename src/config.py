@@ -49,6 +49,22 @@ class Settings(BaseSettings):
         default="tavily",
         description="Active web search provider for agent chat tool calls.",
     )
+    asset_price_provider: str = Field(
+        default="alphavantage_mcp",
+        description="Active asset price provider for internal market quote tool calls.",
+    )
+    alpha_vantage_api_key: str = Field(
+        default="",
+        description="Alpha Vantage API key for direct API and MCP-backed market data access.",
+    )
+    alpha_vantage_mcp_url: str = Field(
+        default="",
+        description="Optional full remote MCP URL for Alpha Vantage. If empty, it is derived from ALPHA_VANTAGE_API_KEY.",
+    )
+    alpha_vantage_mcp_tool_refresh_seconds: int = Field(
+        default=3600,
+        description="Seconds between background Alpha Vantage MCP tool-catalog refreshes.",
+    )
 
     # Graph store (Neo4j)
     neo4j_uri: str = Field(
@@ -249,6 +265,10 @@ class Settings(BaseSettings):
     redis_cache_ttl_search_seconds: int = Field(
         default=1800,
         description="TTL in seconds for cached web search responses.",
+    )
+    redis_cache_ttl_asset_price_seconds: int = Field(
+        default=300,
+        description="TTL in seconds for cached asset price responses.",
     )
 
 

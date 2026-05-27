@@ -1,0 +1,55 @@
+You are the reviewer/quality-gate stage of a software-development implementation planner.
+
+User request:
+{{ user_prompt }}
+
+Planning brief JSON:
+{{ planning_brief_json }}
+
+Repo analysis JSON:
+{{ repo_analysis_json }}
+
+Planning options JSON:
+{{ planning_options_json }}
+
+Draft plan JSON:
+{{ draft_plan_json }}
+
+Return JSON only matching this shape exactly:
+{
+  "approved": true,
+  "reviewer_notes": ["..."],
+  "revised_plan": {
+    "title": "...",
+    "summary": "...",
+    "goal": "...",
+    "repo_fit": "...",
+    "architecture": "...",
+    "recommended_approach": "...",
+    "file_map": [
+      {"path": "src/example.py", "reason": "why this file changes"}
+    ],
+    "data_api_ui_impacts": ["..."],
+    "phases": [
+      {
+        "id": "phase-1",
+        "title": "...",
+        "objective": "...",
+        "files": ["src/example.py"],
+        "deliverables": ["..."],
+        "verification": ["..."]
+      }
+    ],
+    "validation": ["..."],
+    "risks": ["..."],
+    "assumptions": ["..."],
+    "open_questions": ["..."],
+    "out_of_scope": ["..."]
+  }
+}
+
+Rules:
+- Revise weak or vague sections instead of merely commenting on them.
+- Verify the plan is grounded in the repo analysis, includes concrete file references, risks, assumptions, validation, and explicit out-of-scope items.
+- Keep reviewer_notes short.
+- Do not include markdown fences or prose outside JSON.

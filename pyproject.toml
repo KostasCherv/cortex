@@ -35,6 +35,8 @@ dependencies = [
     "redis>=5.0.0",
     "neo4j>=5.26.0",
     "cohere>=5.0.0",
+    "mcp>=1.12.4",
+    "yfinance>=0.2.40",
 ]
 
 [project.optional-dependencies]
