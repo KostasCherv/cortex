@@ -1709,14 +1709,10 @@ async def rag_chat_with_agent(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
     agent, resource_ids = agent_bundle
     if not resource_ids:
-        logger.warning(
-            "[rag_api] agent chat request has no linked ready resources agent_id=%s user_id=%s",
+        logger.info(
+            "[rag_api] agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
             agent_id,
             current_user.user_id,
-        )
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "processing_failed", "message": "Agent has no linked ready resources."},
         )
 
     rag_context = await retrieve_context_for_query(
@@ -1860,14 +1856,10 @@ async def rag_chat_with_agent_stream(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
     agent, resource_ids = agent_bundle
     if not resource_ids:
-        logger.warning(
-            "[rag_api] streaming agent chat request has no linked ready resources agent_id=%s user_id=%s",
+        logger.info(
+            "[rag_api] streaming agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
             agent_id,
             current_user.user_id,
-        )
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "processing_failed", "message": "Agent has no linked ready resources."},
         )
 
     rag_context = await retrieve_context_for_query(
