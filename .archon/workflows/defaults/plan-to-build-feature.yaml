@@ -1,0 +1,38 @@
+name: plan-to-build-feature
+provider: codex
+model: gpt-5.4
+description: |
+  Use when: You have an existing implementation plan and want to execute it end-to-end.
+  Input: Path to a plan file ($ARTIFACTS_DIR/plan.md or .agents/plans/*.md)
+  Output: Feature built and validated
+
+  Full workflow:
+  1. Create plan
+  2. Setup plan
+  3. Implement tasks
+  4. Validate feature
+
+
+nodes:
+
+- id: create-plan
+    command: archon-create-plan
+    context: fresh
+
+
+  - id: plan-setup
+    command: archon-plan-setup
+    depends_on: [create-plan]
+    context: fresh
+
+
+  - id: implement-tasks
+    command: archon-implement-tasks
+    depends_on: [plan-setup]
+    context: fresh
+
+
+  - id: validate
+    command: archon-validate
+    depends_on: [implement-tasks]
+    context: fresh
