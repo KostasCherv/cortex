@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
-import { createRagAgent, checkHealth, listRagAgents, listRagResources, updateRagAgent } from '@/api/client'
+import { checkHealth, createRagAgent, generateRagAgentDraft, listRagAgents, listRagResources, updateRagAgent } from '@/api/client'
 import { AgentChat } from '@/components/agents/AgentChat'
 import { GenericChat } from '@/components/chat/GenericChat'
 import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
@@ -141,6 +141,15 @@ export function AppShell() {
     [accessToken],
   )
 
+  const handleGenerateAgentDraft = useCallback(
+    async (prompt: string) => {
+      if (!accessToken) throw new Error('You must be signed in to create an agent.')
+      const { draft } = await generateRagAgentDraft(prompt, accessToken)
+      return draft
+    },
+    [accessToken],
+  )
+
   const handleUpdateAgent = useCallback(
     async (
       agentId: string,
@@ -243,6 +252,7 @@ export function AppShell() {
         onOpenChange={handleAgentSheetOpenChange}
         agent={editingAgent}
         readyResources={readyResources}
+        onGenerateDraft={handleGenerateAgentDraft}
         onCreate={handleCreateAgent}
         onUpdate={handleUpdateAgent}
       />

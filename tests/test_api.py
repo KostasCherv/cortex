@@ -13,7 +13,7 @@ from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
 from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary, UserSubscription
-from src.rag import RagValidationError
+from src.rag import AgentDefinitionDraft, RagValidationError
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
 
@@ -2870,6 +2870,32 @@ def test_rag_agent_delete_not_found():
         response = client.delete("/api/rag/agents/agent-404")
 
     assert response.status_code == 404
+
+
+def test_rag_agent_draft_generation():
+    with patch(
+        "src.api.endpoints.suggest_rag_agent_definition",
+        new=AsyncMock(
+            return_value=AgentDefinitionDraft(
+                name="Policy Analyst",
+                description="Compares policy documents.",
+                system_instructions="Use the linked policies before answering.",
+            )
+        ),
+    ):
+        response = client.post(
+            "/api/rag/agents/draft",
+            json={"prompt": "Create a policy comparison agent."},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "draft": {
+            "name": "Policy Analyst",
+            "description": "Compares policy documents.",
+            "system_instructions": "Use the linked policies before answering.",
+        }
+    }
 
 
 def _async_iter(items):

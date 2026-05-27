@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import AsyncGenerator, Literal
+from typing import AsyncGenerator
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -78,6 +78,7 @@ from src.rag import (
     list_resources as list_rag_resources_records,
     list_workspace_ready_resource_ids,
     retrieve_context_for_query,
+    suggest_agent_definition as suggest_rag_agent_definition,
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
 )
@@ -205,6 +206,10 @@ class RagAgentCreateRequest(BaseModel):
     linked_resource_ids: list[str] = []
 
 
+class RagAgentDraftRequest(BaseModel):
+    prompt: str
+
+
 class RagAgentUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -240,6 +245,8 @@ def _raise_rag_validation_error(exc: RagValidationError) -> None:
         "size_exceeded": 400,
         "workspace_limit_exceeded": 400,
         "agent_resource_limit_exceeded": 400,
+        "agent_prompt_required": 400,
+        "agent_draft_generation_failed": 502,
         "processing_failed": 409,
         "unauthorized_linkage": 403,
     }
@@ -1599,6 +1606,18 @@ async def rag_create_agent(
     except RagValidationError as exc:
         _raise_rag_validation_error(exc)
     return {"agent": agent.to_dict()}
+
+
+@app.post("/api/rag/agents/draft", tags=["RAG"])
+async def rag_generate_agent_draft(
+    body: RagAgentDraftRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    try:
+        draft = await suggest_rag_agent_definition(body.prompt)
+    except RagValidationError as exc:
+        _raise_rag_validation_error(exc)
+    return {"draft": draft.to_dict()}
 
 
 @app.get("/api/rag/agents", tags=["RAG"])
