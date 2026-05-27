@@ -370,30 +370,6 @@ def _extract_urls(text: str) -> list[str]:
     return re.findall(r"https?://\S+", text or "")
 
 
-def _is_explicit_url_fetch_intent(message: str) -> bool:
-    lower = message.lower()
-    if _extract_urls(message):
-        return True
-    asks_to_fetch = any(
-        phrase in lower
-        for phrase in (
-            "fetch",
-            "retrieve",
-            "read",
-            "summarize",
-            "open",
-            "check",
-            "visit",
-            "look at",
-        )
-    )
-    mentions_urlish = any(
-        phrase in lower
-        for phrase in ("url", "link", "http://", "https://", "provided")
-    )
-    return asks_to_fetch and mentions_urlish
-
-
 @dataclass(frozen=True)
 class _ResolvedWebContext:
     used: bool
