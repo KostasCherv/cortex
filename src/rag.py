@@ -13,6 +13,7 @@ from fastapi import UploadFile
 
 from src.config import settings
 from src.db.supabase_store import SupabaseSessionStore
+from src.prompts.registry import prompt_registry
 from src.rag_engine import (
     RagQueryResult,
     delete_resource_artifacts,
@@ -324,14 +325,9 @@ def _suggest_agent_definition_sync(prompt: str) -> AgentDefinitionDraft:
             "Agent planning prompt is required.",
         )
 
-    llm_prompt = (
-        "You generate structured definitions for retrieval-augmented agents.\n"
-        "Return JSON only with keys: name, description, system_instructions.\n"
-        "The name should be concise and specific.\n"
-        "The description should be one sentence describing the agent's job.\n"
-        "The system_instructions should be a practical operating prompt for the agent.\n"
-        "Do not include markdown fences or extra keys.\n\n"
-        f"User brief:\n{normalized_prompt}"
+    llm_prompt, _ = prompt_registry.render(
+        "agent_definition_draft",
+        {"user_brief": normalized_prompt},
     )
 
     try:
