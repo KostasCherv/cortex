@@ -233,6 +233,27 @@ export type SoftwareDevPlanResponse = {
   planning_options: SoftwareDevPlanningOptions
 }
 
+export type SavedSoftwareDevPlanSummary = {
+  plan_id: string
+  title: string
+  summary: string
+  prompt_preview: string
+  created_at: string
+  updated_at: string
+}
+
+export type SavedSoftwareDevPlan = SoftwareDevPlanResponse & {
+  plan_id: string
+  prompt: string
+  prompt_preview: string
+  created_at: string
+  updated_at: string
+}
+
+export type SavedSoftwareDevPlanListResponse = {
+  plans: SavedSoftwareDevPlanSummary[]
+}
+
 export type BillingUsageSummary = {
   plan: 'free' | 'pro'
   date: string

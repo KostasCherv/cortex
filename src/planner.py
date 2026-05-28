@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Mapping, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from src.db.supabase_store import SupabaseSessionStore
 from src.errors import StructuredOutputError
 from src.llm.output_parsers import build_validation_retry_prompt, parse_model_json
 from src.prompts.registry import prompt_registry
@@ -51,6 +53,10 @@ _STOP_WORDS = {
 }
 
 MODEL_T = TypeVar("MODEL_T", bound=BaseModel)
+_PLANS_LIST_LIMIT = 20
+_PROMPT_PREVIEW_LIMIT = 160
+
+_store: SupabaseSessionStore | None = None
 
 
 class PlannerValidationError(Exception):
@@ -270,6 +276,27 @@ class SoftwareDevPlanResponse(BaseModel):
     planning_options: PlanningOptions
 
 
+class SavedSoftwareDevPlanSummary(BaseModel):
+    plan_id: str
+    title: str
+    summary: str
+    prompt_preview: str
+    created_at: str
+    updated_at: str
+
+
+class SavedSoftwareDevPlan(SoftwareDevPlanResponse):
+    plan_id: str
+    prompt: str
+    prompt_preview: str
+    created_at: str
+    updated_at: str
+
+
+class SavedSoftwareDevPlanListResponse(BaseModel):
+    plans: list[SavedSoftwareDevPlanSummary] = Field(default_factory=list)
+
+
 @dataclass
 class RepoContext:
     inventory: list[str]
@@ -289,6 +316,54 @@ def _require_text(value: str) -> str:
     if not cleaned:
         raise ValueError("field must not be blank")
     return cleaned
+
+
+def _workspace_id_for_user(user_id: str) -> str:
+    return user_id
+
+
+def _get_store() -> SupabaseSessionStore:
+    global _store
+    if _store is None:
+        _store = SupabaseSessionStore()
+    return _store
+
+
+def _prompt_preview(prompt: str) -> str:
+    cleaned = " ".join(prompt.strip().split())
+    if len(cleaned) <= _PROMPT_PREVIEW_LIMIT:
+        return cleaned
+    return cleaned[: _PROMPT_PREVIEW_LIMIT - 1].rstrip() + "…"
+
+
+def _saved_plan_summary_from_row(row: dict[str, object]) -> SavedSoftwareDevPlanSummary:
+    return SavedSoftwareDevPlanSummary(
+        plan_id=str(row["id"]),
+        title=str(row.get("title") or ""),
+        summary=str(row.get("summary") or ""),
+        prompt_preview=str(row.get("prompt_preview") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+    )
+
+
+def _saved_plan_response_from_row(row: dict[str, object]) -> SavedSoftwareDevPlan:
+    response = SoftwareDevPlanResponse(
+        plan=SoftwareDevPlan.model_validate(row.get("plan_json") or {}),
+        markdown=str(row.get("markdown") or ""),
+        suggested_filename=str(row.get("suggested_filename") or ""),
+        planning_brief=PlanningBrief.model_validate(row.get("planning_brief_json") or {}),
+        repo_analysis=RepoAnalysis.model_validate(row.get("repo_analysis_json") or {}),
+        planning_options=PlanningOptions.model_validate(row.get("planning_options_json") or {}),
+    )
+    return SavedSoftwareDevPlan(
+        plan_id=str(row["id"]),
+        prompt=str(row.get("prompt") or ""),
+        prompt_preview=str(row.get("prompt_preview") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+        **response.model_dump(),
+    )
 
 
 def _normalize_keywords(prompt: str) -> list[str]:
@@ -494,3 +569,52 @@ def _generate_software_dev_plan_sync(user_prompt: str) -> SoftwareDevPlanRespons
 
 async def generate_software_dev_plan(user_prompt: str) -> SoftwareDevPlanResponse:
     return await asyncio.to_thread(_generate_software_dev_plan_sync, user_prompt)
+
+
+async def save_software_dev_plan(
+    user_id: str,
+    prompt: str,
+    response: SoftwareDevPlanResponse,
+) -> SavedSoftwareDevPlan:
+    now = datetime.now(UTC).isoformat()
+    plan_id = str(uuid.uuid4())
+    normalized_prompt = prompt.strip()
+    saved_row = {
+        "id": plan_id,
+        "owner_id": user_id,
+        "workspace_id": _workspace_id_for_user(user_id),
+        "prompt": normalized_prompt,
+        "prompt_preview": _prompt_preview(normalized_prompt),
+        "title": response.plan.title,
+        "summary": response.plan.summary,
+        "suggested_filename": response.suggested_filename,
+        "markdown": response.markdown,
+        "plan_json": response.plan.model_dump(mode="json"),
+        "planning_brief_json": response.planning_brief.model_dump(mode="json"),
+        "repo_analysis_json": response.repo_analysis.model_dump(mode="json"),
+        "planning_options_json": response.planning_options.model_dump(mode="json"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await _get_store().create_software_dev_plan(saved_row)
+    return _saved_plan_response_from_row(saved_row)
+
+
+async def list_saved_software_dev_plans(user_id: str) -> list[SavedSoftwareDevPlanSummary]:
+    rows = await _get_store().list_software_dev_plans(
+        owner_id=user_id,
+        workspace_id=_workspace_id_for_user(user_id),
+        limit=_PLANS_LIST_LIMIT,
+    )
+    return [_saved_plan_summary_from_row(row) for row in rows]
+
+
+async def get_saved_software_dev_plan(user_id: str, plan_id: str) -> SavedSoftwareDevPlan | None:
+    row = await _get_store().get_software_dev_plan(
+        plan_id=plan_id,
+        owner_id=user_id,
+        workspace_id=_workspace_id_for_user(user_id),
+    )
+    if row is None:
+        return None
+    return _saved_plan_response_from_row(row)

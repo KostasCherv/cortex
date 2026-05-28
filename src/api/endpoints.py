@@ -70,7 +70,16 @@ from src.llm.output_parsers import (
 from src.prompts.registry import prompt_registry
 from src.guards import claims_no_web_access
 from src import outbox
-from src.planner import PlannerValidationError, SoftwareDevPlanResponse, generate_software_dev_plan
+from src.planner import (
+    PlannerValidationError,
+    SavedSoftwareDevPlan,
+    SavedSoftwareDevPlanListResponse,
+    SoftwareDevPlanResponse,
+    generate_software_dev_plan,
+    get_saved_software_dev_plan,
+    list_saved_software_dev_plans,
+    save_software_dev_plan,
+)
 from src.rag import (
     CHAT_SCOPE_AGENT,
     CHAT_SCOPE_WORKSPACE,
@@ -1924,13 +1933,32 @@ async def rag_create_agent(
 async def generate_implementation_plan(
     body: SoftwareDevPlanRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SoftwareDevPlanResponse:
-    del current_user
+) -> SavedSoftwareDevPlan:
     try:
-        return await generate_software_dev_plan(body.prompt)
+        response = await generate_software_dev_plan(body.prompt)
+        return await save_software_dev_plan(current_user.user_id, body.prompt, response)
     except PlannerValidationError as exc:
         _raise_planner_validation_error(exc)
         raise AssertionError("unreachable")
+
+
+@app.get("/api/planner/software-dev/plans", tags=["Planner"])
+async def list_software_dev_plan_history(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> SavedSoftwareDevPlanListResponse:
+    plans = await list_saved_software_dev_plans(current_user.user_id)
+    return SavedSoftwareDevPlanListResponse(plans=plans)
+
+
+@app.get("/api/planner/software-dev/plans/{plan_id}", tags=["Planner"])
+async def get_software_dev_plan_history_detail(
+    plan_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> SavedSoftwareDevPlan:
+    plan = await get_saved_software_dev_plan(current_user.user_id, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
+    return plan
 
 
 @app.post("/api/rag/agents/draft", tags=["RAG"])

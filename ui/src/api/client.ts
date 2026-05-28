@@ -12,10 +12,11 @@ import type {
   RagResource,
   ResearchRequest,
   RunFeedbackRequest,
+  SavedSoftwareDevPlan,
+  SavedSoftwareDevPlanListResponse,
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
-  SoftwareDevPlanResponse,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -451,7 +452,7 @@ export async function generateRagAgentDraft(
 export async function generateSoftwareDevPlan(
   prompt: string,
   accessToken: string | null,
-): Promise<SoftwareDevPlanResponse> {
+): Promise<SavedSoftwareDevPlan> {
   const response = await fetch(`${API_BASE}/api/planner/software-dev`, {
     method: 'POST',
     headers: {
@@ -463,7 +464,32 @@ export async function generateSoftwareDevPlan(
   if (!response.ok) {
     throw new Error(await parseApiError(response, `Failed to generate implementation plan: ${response.status}`))
   }
-  return (await response.json()) as SoftwareDevPlanResponse
+  return (await response.json()) as SavedSoftwareDevPlan
+}
+
+export async function listSoftwareDevPlans(
+  accessToken: string | null,
+): Promise<SavedSoftwareDevPlanListResponse> {
+  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to load saved plans: ${response.status}`))
+  }
+  return (await response.json()) as SavedSoftwareDevPlanListResponse
+}
+
+export async function getSoftwareDevPlan(
+  planId: string,
+  accessToken: string | null,
+): Promise<SavedSoftwareDevPlan> {
+  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans/${planId}`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to load saved plan: ${response.status}`))
+  }
+  return (await response.json()) as SavedSoftwareDevPlan
 }
 
 export async function createRagAgent(

@@ -13,7 +13,22 @@ from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing.application.service import UsageIncrement
 from src.billing.domain.errors import QuotaExceededError
 from src.billing.domain.models import DailyUsage, Plan, QuotaLimits, UsageSummary, UserSubscription
-from src.planner import PlannerValidationError, PlanningApproach, PlanningBrief, PlanningOptions, RepoAnalysis, RepoRelevantFile, SoftwareDevPlan, SoftwareDevPlanFile, SoftwareDevPlanPhase, SoftwareDevPlanResponse
+from src.planner import (
+    PlannerValidationError,
+    PlanningApproach,
+    PlanningBrief,
+    PlanningOptions,
+    RepoAnalysis,
+    RepoRelevantFile,
+    SavedSoftwareDevPlan,
+    SavedSoftwareDevPlanListResponse,
+    SavedSoftwareDevPlanSummary,
+    SoftwareDevPlan,
+    SoftwareDevPlanFile,
+    SoftwareDevPlanPhase,
+    SoftwareDevPlanResponse,
+)
+
 from src.rag import AgentDefinitionDraft, RagValidationError
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
@@ -3092,7 +3107,143 @@ def test_rag_agent_draft_generation():
 
 
 def test_software_dev_plan_generation():
-    response_model = SoftwareDevPlanResponse(
+    generated_plan = SoftwareDevPlanResponse(
+        plan=SoftwareDevPlan(
+            title="Software planner",
+            summary="Adds a first-class implementation planner flow.",
+            goal="Turn a feature request into a downloadable implementation plan.",
+            repo_fit="Fits the existing backend/frontend split and draft-generation patterns.",
+            architecture="Use a dedicated planner service and a synchronous API endpoint.",
+            recommended_approach="Implement a staged prompt pipeline with a dedicated planner page.",
+            file_map=[
+                SoftwareDevPlanFile(
+                    path="src/planner.py",
+                    reason="Houses the staged planning workflow.",
+                )
+            ],
+            data_api_ui_impacts=["Adds a new planner endpoint and UI surface."],
+            phases=[
+                SoftwareDevPlanPhase(
+                    id="phase-1",
+                    title="Backend contract",
+                    objective="Add planner models and endpoint.",
+                    files=["src/planner.py", "src/api/endpoints.py"],
+                    deliverables=["Planner service", "Authenticated API route"],
+                    verification=["pytest tests/test_planner.py tests/test_api.py"],
+                )
+            ],
+            validation=["pytest tests/test_planner.py tests/test_api.py"],
+            risks=["LLM output may require repair retries."],
+            assumptions=["v1 is synchronous."],
+            open_questions=["Should future versions persist plan history?"],
+            out_of_scope=["Automated code execution."],
+        ),
+        markdown="# Software planner\n",
+        suggested_filename="2026-05-27-software-planner-implementation-plan.md",
+        planning_brief=PlanningBrief(
+            problem_statement="Need a planner.",
+            desired_outcome="Return a reviewed plan.",
+            constraints=["Stay repo-grounded."],
+            assumptions=["Synchronous response is acceptable."],
+            open_questions=[],
+        ),
+        repo_analysis=RepoAnalysis(
+            summary="Existing draft-generation and shell navigation patterns are reusable.",
+            relevant_files=[
+                RepoRelevantFile(
+                    path="src/api/endpoints.py",
+                    reason="Existing authenticated API routes live here.",
+                )
+            ],
+            existing_patterns=["Draft generation through prompt templates."],
+            constraints=["Must stay plan-only in v1."],
+            unknowns=[],
+        ),
+        planning_options=PlanningOptions(
+            approaches=[
+                PlanningApproach(
+                    name="Dedicated planner module",
+                    summary="Add a new backend service and UI page.",
+                    tradeoffs=["Slightly more code, but clearer boundaries."],
+                    file_impact=["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
+                )
+            ],
+            recommended_approach="Dedicated planner module",
+            rationale="Keeps planner-specific orchestration separate from RAG logic.",
+            out_of_scope=["True distributed multi-agent runs."],
+        ),
+    )
+    saved_plan = SavedSoftwareDevPlan(
+        plan_id="plan-123",
+        prompt="Add a software implementation planner.",
+        prompt_preview="Add a software implementation planner.",
+        created_at="2026-05-28T10:00:00+00:00",
+        updated_at="2026-05-28T10:00:00+00:00",
+        plan=generated_plan.plan,
+        markdown=generated_plan.markdown,
+        suggested_filename=generated_plan.suggested_filename,
+        planning_brief=generated_plan.planning_brief,
+        repo_analysis=generated_plan.repo_analysis,
+        planning_options=generated_plan.planning_options,
+    )
+
+    with (
+        patch(
+            "src.api.endpoints.generate_software_dev_plan",
+            new=AsyncMock(return_value=generated_plan),
+        ) as generate_mock,
+        patch(
+            "src.api.endpoints.save_software_dev_plan",
+            new=AsyncMock(return_value=saved_plan),
+        ) as save_mock,
+    ):
+        response = client.post(
+            "/api/planner/software-dev",
+            json={"prompt": "Add a software implementation planner."},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plan_id"] == "plan-123"
+    assert payload["plan"]["title"] == "Software planner"
+    assert payload["suggested_filename"].endswith("-implementation-plan.md")
+    assert payload["planning_brief"]["problem_statement"] == "Need a planner."
+    generate_mock.assert_awaited_once_with("Add a software implementation planner.")
+    save_mock.assert_awaited_once_with(
+        "test-user",
+        "Add a software implementation planner.",
+        generated_plan,
+    )
+
+
+def test_list_saved_software_dev_plans():
+    saved_plan = SavedSoftwareDevPlanSummary(
+        plan_id="plan-123",
+        title="Software planner",
+        summary="Adds a first-class implementation planner flow.",
+        prompt_preview="Add a software implementation planner.",
+        created_at="2026-05-28T10:00:00+00:00",
+        updated_at="2026-05-28T10:00:00+00:00",
+    )
+
+    with patch(
+        "src.api.endpoints.list_saved_software_dev_plans",
+        new=AsyncMock(return_value=SavedSoftwareDevPlanListResponse(plans=[saved_plan])),
+    ) as list_mock:
+        response = client.get("/api/planner/software-dev/plans")
+
+    assert response.status_code == 200
+    assert response.json()["plans"][0]["plan_id"] == "plan-123"
+    list_mock.assert_awaited_once_with("test-user")
+
+
+def test_get_saved_software_dev_plan():
+    saved_plan = SavedSoftwareDevPlan(
+        plan_id="plan-123",
+        prompt="Add a software implementation planner.",
+        prompt_preview="Add a software implementation planner.",
+        created_at="2026-05-28T10:00:00+00:00",
+        updated_at="2026-05-28T10:00:00+00:00",
         plan=SoftwareDevPlan(
             title="Software planner",
             summary="Adds a first-class implementation planner flow.",
@@ -3160,19 +3311,27 @@ def test_software_dev_plan_generation():
     )
 
     with patch(
-        "src.api.endpoints.generate_software_dev_plan",
-        new=AsyncMock(return_value=response_model),
-    ):
-        response = client.post(
-            "/api/planner/software-dev",
-            json={"prompt": "Add a software implementation planner."},
-        )
+        "src.api.endpoints.get_saved_software_dev_plan",
+        new=AsyncMock(return_value=saved_plan),
+    ) as get_mock:
+        response = client.get("/api/planner/software-dev/plans/plan-123")
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["plan"]["title"] == "Software planner"
-    assert payload["suggested_filename"].endswith("-implementation-plan.md")
-    assert payload["planning_brief"]["problem_statement"] == "Need a planner."
+    assert response.json()["plan_id"] == "plan-123"
+    get_mock.assert_awaited_once_with("plan-123", "test-user")
+
+
+
+def test_get_saved_software_dev_plan_returns_404_when_missing():
+    with patch(
+        "src.api.endpoints.get_saved_software_dev_plan",
+        new=AsyncMock(return_value=None),
+    ):
+        response = client.get("/api/planner/software-dev/plans/missing-plan")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Saved plan 'missing-plan' not found."
+
 
 
 def test_software_dev_plan_generation_maps_validation_errors():

@@ -66,6 +66,7 @@ class SupabaseSessionStore:
     _CACHE_PREFIX_RAG_AGENTS_LIST = "rag:agents:list"
     _CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST = "rag:chat:sessions:list"
     _CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST = "rag:chat:messages:list"
+    _CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST = "planner:software-dev:list"
 
     async def _request(
         self,
@@ -185,6 +186,13 @@ class SupabaseSessionStore:
         key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
             f"{owner_id}:{session_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_software_dev_plans_list_cache(self, owner_id: str, workspace_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST,
+            f"{owner_id}:{workspace_id}",
         )
         await self._cache_delete(key)
 
@@ -1183,6 +1191,91 @@ class SupabaseSessionStore:
             },
         )
         return response.json()
+
+    # ------------------------------------------------------------------
+    # Software planner plans
+    # ------------------------------------------------------------------
+
+    async def create_software_dev_plan(self, payload: dict[str, Any]) -> None:
+        body = {
+            "id": payload["id"],
+            "owner_id": payload["owner_id"],
+            "workspace_id": payload["workspace_id"],
+            "prompt": payload["prompt"],
+            "prompt_preview": payload["prompt_preview"],
+            "title": payload["title"],
+            "summary": payload["summary"],
+            "suggested_filename": payload["suggested_filename"],
+            "markdown": payload["markdown"],
+            "plan_json": payload["plan_json"],
+            "planning_brief_json": payload["planning_brief_json"],
+            "repo_analysis_json": payload["repo_analysis_json"],
+            "planning_options_json": payload["planning_options_json"],
+            "created_at": payload["created_at"],
+            "updated_at": payload["updated_at"],
+        }
+        await self._request("POST", "software_dev_plans", json_body=body)
+        await self._invalidate_software_dev_plans_list_cache(
+            payload["owner_id"],
+            payload["workspace_id"],
+        )
+
+    async def list_software_dev_plans(
+        self,
+        *,
+        owner_id: str,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
+        response = await self._request(
+            "GET",
+            "software_dev_plans",
+            params={
+                "select": "id,title,summary,prompt_preview,created_at,updated_at",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+                "order": "created_at.desc",
+                "limit": str(limit),
+            },
+        )
+        rows = response.json()
+        await self._cache_set_list(cache_key, rows)
+        return rows
+
+    async def get_software_dev_plan(
+        self,
+        *,
+        plan_id: str,
+        owner_id: str,
+        workspace_id: str,
+    ) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "software_dev_plans",
+            params={
+                "select": (
+                    "id,owner_id,workspace_id,prompt,prompt_preview,title,summary,"
+                    "suggested_filename,markdown,plan_json,planning_brief_json,"
+                    "repo_analysis_json,planning_options_json,created_at,updated_at"
+                ),
+                "id": f"eq.{plan_id}",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
 
     # ------------------------------------------------------------------
     # RAG chat sessions + messages
