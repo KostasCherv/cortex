@@ -9,8 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import type { PlannerChatMessage, PlannerChatStreamEvent, SavedSoftwareDevPlan } from '@/types'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
+import { cn } from '@/lib/utils'
 
 function downloadMarkdown(markdown: string, filename: string) {
   const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
@@ -48,14 +48,6 @@ function planEventToSavedPlan(
 // ---------------------------------------------------------------------------
 
 type ChatMessage = PlannerChatMessage & { plan_saved?: SavedSoftwareDevPlan }
-
-function MarkdownMessage({ content }: { content: string }) {
-  return (
-    <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-table:my-2">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-    </div>
-  )
-}
 
 function PlannerInteractiveChat({
   accessToken,
@@ -199,22 +191,18 @@ function PlannerInteractiveChat({
                   </div>
                 ) : (
                   <div key={m.message_id} className="flex gap-2 items-start">
-                    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
-                      AI
-                    </div>
-                    <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm">
-                      <MarkdownMessage content={m.content} />
+                    <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                    <div className={cn('max-w-[75%]', assistantBubbleClassName)}>
+                      <ChatMarkdown content={m.content} />
                     </div>
                   </div>
                 ),
               )}
               {streaming && (
                 <div className="flex gap-2 items-start">
-                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
-                    AI
-                  </div>
-                  <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm">
-                    <MarkdownMessage content={streamingText || 'Thinking...'} />
+                  <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                  <div className={cn('max-w-[75%]', assistantBubbleClassName)}>
+                    <ChatMarkdown content={streamingText || 'Thinking...'} />
                   </div>
                 </div>
               )}

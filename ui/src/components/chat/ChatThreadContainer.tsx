@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SendHorizontal, Square } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import type { RagChatMessage } from '@/types'
 import type { ChatTransport } from './transports'
 import { getStopEditState, replaceLastEditableUserMessage } from './chatThreadState'
@@ -21,16 +21,6 @@ type Props = {
   subtitle?: string
   emptyState: string
   resourceLabel?: string
-}
-
-function MarkdownMessage({ content }: { content: string }) {
-  return (
-    <div className="overflow-x-auto">
-      <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-table:my-2 prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </div>
-    </div>
-  )
 }
 
 function CitationMarker({ citation, index }: { citation: RagChatMessage['citations'][number]; index: number }) {
@@ -406,9 +396,9 @@ export function ChatThreadContainer({
             ) : (
               <div key={m.message_id} className="flex flex-col gap-2">
                 <div className="flex gap-2 items-start">
-                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">AI</div>
-                  <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm max-md:max-w-[86%]">
-                    <MarkdownMessage content={m.content} />
+                  <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                  <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
+                    <ChatMarkdown content={m.content} />
                     <CitationMarkers citations={m.citations} />
                   </div>
                 </div>
@@ -426,9 +416,9 @@ export function ChatThreadContainer({
           )}
           {chatting && (
             <div className="flex gap-2 items-start">
-              <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">AI</div>
-              <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm max-md:max-w-[86%]">
-                <MarkdownMessage content={streamingText || 'Thinking...'} />
+              <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+              <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
+                <ChatMarkdown content={streamingText || 'Thinking...'} />
               </div>
             </div>
           )}

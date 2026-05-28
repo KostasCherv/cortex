@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SendHorizontal } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { streamFollowup } from '@/api/client'
+import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -29,16 +29,6 @@ function CitationBadges({ citations }: { citations: Citation[] }) {
           </Badge>
         </a>
       ))}
-    </div>
-  )
-}
-
-function MarkdownMessage({ content }: { content: string }) {
-  return (
-    <div className="overflow-x-auto">
-      <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-table:my-2 prose-th:border prose-th:border-border prose-th:px-2 prose-th:py-1 prose-th:text-left prose-td:border prose-td:border-border prose-td:px-2 prose-td:py-1">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </div>
     </div>
   )
 }
@@ -203,11 +193,9 @@ export function FollowupChat({
               </div>
             ) : (
               <div key={`${turn.role}-${index}`} className="flex gap-2 items-start">
-                <div className="size-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold shrink-0">
-                  AI
-                </div>
-                <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-3 py-2 text-sm bg-muted">
-                  <MarkdownMessage content={turn.content} />
+                <div className={cn(assistantAvatarClassName, 'size-7')}>AI</div>
+                <div className={cn('max-w-[80%]', assistantBubbleClassName)}>
+                  <ChatMarkdown content={turn.content} />
                   <CitationBadges citations={turn.citations} />
                 </div>
               </div>
@@ -216,11 +204,9 @@ export function FollowupChat({
 
           {streaming && (
             <div className="flex gap-2 items-start">
-              <div className="size-7 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold shrink-0">
-                AI
-              </div>
-              <div className="max-w-[80%] rounded-2xl rounded-bl-sm px-3 py-2 text-sm bg-muted">
-                <MarkdownMessage content={streamingText || 'Thinking...'} />
+              <div className={cn(assistantAvatarClassName, 'size-7')}>AI</div>
+              <div className={cn('max-w-[80%]', assistantBubbleClassName)}>
+                <ChatMarkdown content={streamingText || 'Thinking...'} />
               </div>
             </div>
           )}
