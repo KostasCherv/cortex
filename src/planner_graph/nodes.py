@@ -19,6 +19,7 @@ from src.planner import (
     _llm_result_to_text,
     _schema_text,
 )
+from src.observability.langsmith import start_step_span
 from src.planner_graph.state import MAX_CLARIFICATION_TURNS, PlannerState
 from src.prompts.registry import prompt_registry
 
@@ -70,7 +71,14 @@ def clarification_node(state: PlannerState) -> PlannerState:
     )
 
     llm = get_llm(temperature=0.2)
-    result = llm.invoke(prompt_text)
+    with start_step_span(
+        name="planner.clarification_node.llm_invoke",
+        run_type="llm",
+        node_name="clarification_node",
+        inputs={"prompt": prompt_text},
+        tags=["planner", "clarification"],
+    ):
+        result = llm.invoke(prompt_text)
     raw_text = _llm_result_to_text(result)
 
     try:
@@ -81,7 +89,14 @@ def clarification_node(state: PlannerState) -> PlannerState:
             invalid_response=raw_text,
             validation_error=exc,
         )
-        repair_result = llm.invoke(repair_prompt)
+        with start_step_span(
+            name="planner.clarification_node.llm_repair",
+            run_type="llm",
+            node_name="clarification_node",
+            inputs={"prompt": repair_prompt},
+            tags=["planner", "clarification", "repair"],
+        ):
+            repair_result = llm.invoke(repair_prompt)
         repair_text = _llm_result_to_text(repair_result)
         try:
             decision = parse_clarification_decision_json(repair_text)
@@ -119,7 +134,14 @@ def generation_node(state: PlannerState) -> PlannerState:
     consolidated_prompt = "\n\n".join(human_messages)
 
     try:
-        response = _generate_software_dev_plan_sync(consolidated_prompt)
+        with start_step_span(
+            name="planner.generation_node.generate_plan",
+            run_type="chain",
+            node_name="generation_node",
+            inputs={"prompt": consolidated_prompt},
+            tags=["planner", "generation"],
+        ):
+            response = _generate_software_dev_plan_sync(consolidated_prompt)
     except PlannerValidationError as exc:
         return {
             "error": exc.code,
