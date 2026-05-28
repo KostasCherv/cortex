@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
+import { Bot, ClipboardList, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
@@ -747,6 +747,7 @@ export function AgentRail({
 
   const isChat = activeView.type === 'chat'
   const isResearch = activeView.type === 'research'
+  const isSoftwarePlanner = activeView.type === 'software-planner'
   const isResources = activeView.type === 'resources'
 
   return (
@@ -841,6 +842,21 @@ export function AgentRail({
               </div>
             </ScrollArea>
           )}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onViewChange({ type: 'software-planner' })}
+              className={cn(
+                'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+                isSoftwarePlanner
+                  ? 'bg-background text-foreground font-medium shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+              )}
+            >
+              <ClipboardList size={15} className="shrink-0" />
+              Planner
+            </button>
+          </div>
         </div>
 
         {/* My Agents section */}

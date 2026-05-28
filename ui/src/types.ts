@@ -158,6 +158,81 @@ export type RagChatStreamEvent =
   | { type: 'done' }
   | { type: 'error'; error: string }
 
+export type SoftwareDevPlanningBrief = {
+  problem_statement: string
+  desired_outcome: string
+  constraints: string[]
+  assumptions: string[]
+  open_questions: string[]
+}
+
+export type SoftwareDevRepoRelevantFile = {
+  path: string
+  reason: string
+}
+
+export type SoftwareDevRepoAnalysis = {
+  summary: string
+  relevant_files: SoftwareDevRepoRelevantFile[]
+  existing_patterns: string[]
+  constraints: string[]
+  unknowns: string[]
+}
+
+export type SoftwareDevPlanningApproach = {
+  name: string
+  summary: string
+  tradeoffs: string[]
+  file_impact: string[]
+}
+
+export type SoftwareDevPlanningOptions = {
+  approaches: SoftwareDevPlanningApproach[]
+  recommended_approach: string
+  rationale: string
+  out_of_scope: string[]
+}
+
+export type SoftwareDevPlanFile = {
+  path: string
+  reason: string
+}
+
+export type SoftwareDevPlanPhase = {
+  id: string
+  title: string
+  objective: string
+  files: string[]
+  deliverables: string[]
+  verification: string[]
+}
+
+export type SoftwareDevPlan = {
+  title: string
+  summary: string
+  goal: string
+  repo_fit: string
+  architecture: string
+  recommended_approach: string
+  file_map: SoftwareDevPlanFile[]
+  data_api_ui_impacts: string[]
+  phases: SoftwareDevPlanPhase[]
+  validation: string[]
+  risks: string[]
+  assumptions: string[]
+  open_questions: string[]
+  out_of_scope: string[]
+}
+
+export type SoftwareDevPlanResponse = {
+  plan: SoftwareDevPlan
+  markdown: string
+  suggested_filename: string
+  planning_brief: SoftwareDevPlanningBrief
+  repo_analysis: SoftwareDevRepoAnalysis
+  planning_options: SoftwareDevPlanningOptions
+}
+
 export type BillingUsageSummary = {
   plan: 'free' | 'pro'
   date: string

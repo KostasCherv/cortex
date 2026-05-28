@@ -8,6 +8,7 @@ import { AgentRail } from '@/components/shell/AgentRail'
 import { supabase } from '@/lib/supabase'
 import { ResearchPage } from '@/pages/ResearchPage'
 import { ResourcesPage } from '@/pages/ResourcesPage'
+import { SoftwarePlannerPage } from '@/pages/SoftwarePlannerPage'
 import type { HealthResponse, RagAgent, RagResource } from '@/types'
 
 type HealthState = 'loading' | 'online' | 'offline'
@@ -15,6 +16,7 @@ type HealthState = 'loading' | 'online' | 'offline'
 export type ActiveView =
   | { type: 'chat' }
   | { type: 'research' }
+  | { type: 'software-planner' }
   | { type: 'rag-agent'; agent: RagAgent }
   | { type: 'resources' }
 
@@ -230,6 +232,7 @@ export function AppShell() {
             onSessionsChanged={handleSessionsChanged}
           />
         )}
+        {activeView.type === 'software-planner' && <SoftwarePlannerPage authSession={authSession} />}
         {activeView.type === 'rag-agent' && authSession && (
           <AgentChat
             agent={activeView.agent}

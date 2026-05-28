@@ -3135,7 +3135,10 @@ def test_software_dev_plan_generation():
         repo_analysis=RepoAnalysis(
             summary="Existing draft-generation and shell navigation patterns are reusable.",
             relevant_files=[
-                {"path": "src/api/endpoints.py", "reason": "Existing authenticated API routes live here."}
+                RepoRelevantFile(
+                    path="src/api/endpoints.py",
+                    reason="Existing authenticated API routes live here.",
+                )
             ],
             existing_patterns=["Draft generation through prompt templates."],
             constraints=["Must stay plan-only in v1."],
@@ -3143,12 +3146,12 @@ def test_software_dev_plan_generation():
         ),
         planning_options=PlanningOptions(
             approaches=[
-                {
-                    "name": "Dedicated planner module",
-                    "summary": "Add a new backend service and UI page.",
-                    "tradeoffs": ["Slightly more code, but clearer boundaries."],
-                    "file_impact": ["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
-                }
+                PlanningApproach(
+                    name="Dedicated planner module",
+                    summary="Add a new backend service and UI page.",
+                    tradeoffs=["Slightly more code, but clearer boundaries."],
+                    file_impact=["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
+                )
             ],
             recommended_approach="Dedicated planner module",
             rationale="Keeps planner-specific orchestration separate from RAG logic.",

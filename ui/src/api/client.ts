@@ -1,9 +1,9 @@
 import type {
+  BillingUsageSummary,
   Citation,
   FollowupStreamEvent,
   HealthResponse,
   RagAgent,
-  BillingUsageSummary,
   RagCitation,
   RagChatStreamEvent,
   RagAgentDraft,
@@ -15,6 +15,7 @@ import type {
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
+  SoftwareDevPlanResponse,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -445,6 +446,24 @@ export async function generateRagAgentDraft(
     throw new Error(await parseApiError(response, `Failed to generate agent draft: ${response.status}`))
   }
   return (await response.json()) as { draft: RagAgentDraft }
+}
+
+export async function generateSoftwareDevPlan(
+  prompt: string,
+  accessToken: string | null,
+): Promise<SoftwareDevPlanResponse> {
+  const response = await fetch(`${API_BASE}/api/planner/software-dev`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to generate implementation plan: ${response.status}`))
+  }
+  return (await response.json()) as SoftwareDevPlanResponse
 }
 
 export async function createRagAgent(
