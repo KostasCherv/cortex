@@ -254,6 +254,29 @@ export type SavedSoftwareDevPlanListResponse = {
   plans: SavedSoftwareDevPlanSummary[]
 }
 
+export type PlannerChatStreamEvent =
+  | { type: 'session'; thread_id: string }
+  | { type: 'chunk'; text: string }
+  | {
+      type: 'plan'
+      plan: SoftwareDevPlan
+      markdown: string
+      suggested_filename: string
+      planning_brief: SoftwareDevPlanningBrief
+      repo_analysis: SoftwareDevRepoAnalysis
+      planning_options: SoftwareDevPlanningOptions
+    }
+  | { type: 'done' }
+  | { type: 'error'; error: string }
+
+export type PlannerChatMessage = {
+  message_id: string
+  role: 'user' | 'assistant'
+  content: string
+  plan_event?: PlannerChatStreamEvent & { type: 'plan' }
+  created_at: string
+}
+
 export type BillingUsageSummary = {
   plan: 'free' | 'pro'
   date: string

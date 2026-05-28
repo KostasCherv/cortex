@@ -113,6 +113,8 @@ from src.storage import ensure_rag_storage_ready
 from src.billing.application import BillingService, UsageIncrement
 from src.billing.domain import BillingSyncError, QuotaExceededError
 from src.billing.interfaces.http import build_billing_service, usage_summary_to_response
+from src.api.planner_chat import router as planner_chat_router
+from src.planner_graph.thread_store import planner_thread_store
 
 logger = logging.getLogger(__name__)
 _LIVE_REPORT_FLUSH_SECONDS = 0.3
@@ -151,6 +153,7 @@ app.add_middleware(
 )
 
 _inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_research_run, dispatch_outbox_cron])
+app.include_router(planner_chat_router)
 
 
 @app.on_event("startup")
@@ -206,6 +209,15 @@ async def validate_session_store_configuration() -> None:
             logger.warning(
                 "[startup] Redis is configured but unreachable — caching disabled for this run."
             )
+
+    async def _evict_planner_threads_periodically() -> None:
+        while True:
+            await asyncio.sleep(600)  # every 10 minutes
+            count = planner_thread_store.evict_expired()
+            if count > 0:
+                logger.info("[planner] Evicted %d expired planner threads.", count)
+
+    asyncio.ensure_future(_evict_planner_threads_periodically())
 
 
 @app.on_event("shutdown")
@@ -278,6 +290,11 @@ class RagChatRequest(BaseModel):
 
 class BillingCheckoutRequest(BaseModel):
     pass
+
+
+class PlannerChatRequest(BaseModel):
+    message: str
+    thread_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

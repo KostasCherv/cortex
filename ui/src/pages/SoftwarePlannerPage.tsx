@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Download, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Download, Loader2, MessageSquare, SendHorizontal, Square, Zap } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { generateSoftwareDevPlan, getSoftwareDevPlan } from '@/api/client'
+import { streamPlannerChat } from '@/api/plannerChatClient'
 import { SavedPlanDetailView } from '@/components/planner/SavedPlanDetailView'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import type { SavedSoftwareDevPlan } from '@/types'
+import type { PlannerChatMessage, PlannerChatStreamEvent, SavedSoftwareDevPlan } from '@/types'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 function downloadMarkdown(markdown: string, filename: string) {
   const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
@@ -20,6 +24,285 @@ function downloadMarkdown(markdown: string, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function planEventToSavedPlan(
+  event: PlannerChatStreamEvent & { type: 'plan' },
+  prompt: string,
+): SavedSoftwareDevPlan {
+  return {
+    plan_id: '',
+    plan: event.plan,
+    markdown: event.markdown,
+    suggested_filename: event.suggested_filename,
+    planning_brief: event.planning_brief,
+    repo_analysis: event.repo_analysis,
+    planning_options: event.planning_options,
+    prompt,
+    prompt_preview: prompt.slice(0, 120),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive chat component
+// ---------------------------------------------------------------------------
+
+type ChatMessage = PlannerChatMessage & { plan_saved?: SavedSoftwareDevPlan }
+
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-0 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none prose-table:my-2">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  )
+}
+
+function PlannerInteractiveChat({
+  accessToken,
+  onPlansChanged,
+}: {
+  accessToken: string
+  onPlansChanged?: () => void
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const [streamingText, setStreamingText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [latestPlan, setLatestPlan] = useState<SavedSoftwareDevPlan | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, streamingText])
+
+  const send = async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim()
+    if (!text || streaming) return
+
+    const requestId = ++requestIdRef.current
+    const userMessage: ChatMessage = {
+      message_id: `tmp-user-${requestId}`,
+      role: 'user',
+      content: text,
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, userMessage])
+    setInput('')
+    setStreamingText('')
+    setStreaming(true)
+    setError(null)
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    let accumulated = ''
+    let planEvent: (PlannerChatStreamEvent & { type: 'plan' }) | null = null
+    let currentThreadId = threadId
+    let streamFailed = false
+
+    try {
+      await streamPlannerChat(text, threadId, accessToken, {
+        signal: controller.signal,
+        onSession: (newThreadId) => {
+          if (requestIdRef.current !== requestId) return
+          currentThreadId = newThreadId
+          setThreadId(newThreadId)
+        },
+        onChunk: (chunk) => {
+          if (requestIdRef.current !== requestId) return
+          accumulated += chunk
+          setStreamingText((prev) => prev + chunk)
+        },
+        onPlan: (event) => {
+          if (requestIdRef.current !== requestId) return
+          planEvent = event
+        },
+        onDone: () => {
+          if (requestIdRef.current !== requestId) return
+          const savedPlan = planEvent ? planEventToSavedPlan(planEvent, text) : null
+          const assistantMessage: ChatMessage = {
+            message_id: `tmp-assistant-${requestId}`,
+            role: 'assistant',
+            content: accumulated.trim(),
+            created_at: new Date().toISOString(),
+            plan_saved: savedPlan ?? undefined,
+          }
+          setMessages((prev) => [...prev, assistantMessage])
+          setStreamingText('')
+          if (savedPlan) {
+            setLatestPlan(savedPlan)
+            onPlansChanged?.()
+          }
+          void currentThreadId
+        },
+        onError: (err) => {
+          streamFailed = true
+          if (requestIdRef.current !== requestId) return
+          setError(err)
+          setStreamingText('')
+        },
+      })
+    } catch (err) {
+      if (controller.signal.aborted) return
+      if (requestIdRef.current === requestId) {
+        setError(err instanceof Error ? err.message : 'Chat failed.')
+        setStreamingText('')
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null
+      if (requestIdRef.current === requestId) {
+        setStreaming(false)
+        if (streamFailed) onPlansChanged?.()
+      }
+    }
+  }
+
+  const lastPlan = useMemo(
+    () =>
+      latestPlan ??
+      [...messages]
+        .reverse()
+        .map((m) => m.plan_saved)
+        .find(Boolean) ??
+      null,
+    [latestPlan, messages],
+  )
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Interactive planner</CardTitle>
+          <CardDescription>
+            The AI will ask clarifying questions before generating your implementation plan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ScrollArea className="h-[420px] px-6 py-4">
+            <div className="space-y-4">
+              {messages.length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Describe a feature or goal to start. The AI will ask a few questions first.
+                </p>
+              )}
+              {messages.map((m) =>
+                m.role === 'user' ? (
+                  <div key={m.message_id} className="flex flex-col items-end">
+                    <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+                      {m.content}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={m.message_id} className="flex gap-2 items-start">
+                    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
+                      AI
+                    </div>
+                    <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm">
+                      <MarkdownMessage content={m.content} />
+                    </div>
+                  </div>
+                ),
+              )}
+              {streaming && (
+                <div className="flex gap-2 items-start">
+                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">
+                    AI
+                  </div>
+                  <div className="max-w-[75%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-sm">
+                    <MarkdownMessage content={streamingText || 'Thinking...'} />
+                  </div>
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          </ScrollArea>
+
+          {error && (
+            <p
+              role="alert"
+              className="mx-6 mb-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="border-t px-6 py-4">
+            <div className="flex gap-2 items-end">
+              <Textarea
+                className="resize-none min-h-10 max-h-32 text-sm"
+                placeholder="Describe your feature or goal..."
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    void send()
+                  }
+                }}
+                disabled={streaming}
+              />
+              {streaming ? (
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  onClick={() => {
+                    abortRef.current?.abort()
+                    setStreamingText('')
+                    setStreaming(false)
+                    setError(null)
+                  }}
+                  aria-label="Stop generating"
+                >
+                  <Square size={15} />
+                </Button>
+              ) : (
+                <Button
+                  size="icon"
+                  onClick={() => void send()}
+                  disabled={!input.trim()}
+                  aria-label="Send message"
+                >
+                  <SendHorizontal size={15} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {lastPlan && (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Generated plan</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => downloadMarkdown(lastPlan.markdown, lastPlan.suggested_filename)}
+            >
+              <Download size={14} />
+              Download markdown
+            </Button>
+          </div>
+          <SavedPlanDetailView result={lastPlan} />
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
+type Mode = 'single-shot' | 'interactive'
+
 export function SoftwarePlannerPage({
   authSession,
   activePlanId,
@@ -31,6 +314,7 @@ export function SoftwarePlannerPage({
   onPlanActivated?: (planId: string | null) => void
   onPlansChanged?: () => void
 }) {
+  const [mode, setMode] = useState<Mode>('single-shot')
   const [prompt, setPrompt] = useState('')
   const [result, setResult] = useState<SavedSoftwareDevPlan | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
@@ -129,72 +413,118 @@ export function SoftwarePlannerPage({
   return (
     <main className="h-full overflow-y-auto bg-background px-4 py-6">
       <div className="mx-auto flex max-w-6xl flex-col gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-xl">Software implementation planner</CardTitle>
-            <CardDescription>
-              Turn a feature request or architecture change into a repo-grounded implementation plan.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="software-planner-prompt" className="text-sm font-medium">
-                What should the planner design?
-              </label>
-              <Textarea
-                id="software-planner-prompt"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="Describe the feature, goal, constraints, and any files or areas of the repo that matter."
-                className="min-h-[160px]"
-                disabled={loading}
-              />
-            </div>
-            {!signedIn && (
-              <p className="text-sm text-muted-foreground">Sign in to generate a software implementation plan.</p>
-            )}
-            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" onClick={() => void handleSubmit()} disabled={!canSubmit}>
-                {loading ? <Loader2 className="animate-spin" size={16} /> : null}
-                Generate plan
-              </Button>
-              {result && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => downloadMarkdown(result.markdown, result.suggested_filename)}
-                >
-                  <Download size={16} />
-                  Download markdown
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={mode === 'single-shot' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setMode('single-shot')}
+          >
+            <Zap size={14} />
+            Single-shot
+          </Button>
+          <Button
+            type="button"
+            variant={mode === 'interactive' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setMode('interactive')}
+          >
+            <MessageSquare size={14} />
+            Interactive
+          </Button>
+        </div>
 
-        {detailLoading ? (
-          <Card>
-            <CardContent className="py-12">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="animate-spin" size={16} />
-                Loading saved plan...
-              </div>
-            </CardContent>
-          </Card>
-        ) : result ? (
-          <SavedPlanDetailView result={result} />
+        {mode === 'interactive' ? (
+          signedIn && authSession?.access_token ? (
+            <PlannerInteractiveChat
+              accessToken={authSession.access_token}
+              onPlansChanged={onPlansChanged}
+            />
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-xl">Interactive planner</CardTitle>
+                <CardDescription>Sign in to use the interactive planning mode.</CardDescription>
+              </CardHeader>
+            </Card>
+          )
         ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Select a saved plan</CardTitle>
-              <CardDescription>
-                {selectedPlanId
-                  ? 'Loading the selected saved plan from the sidebar...'
-                  : 'Generate a new plan or choose one from the sidebar to view its details.'}
-              </CardDescription>
-            </CardHeader>
-          </Card>
+          <>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-xl">Software implementation planner</CardTitle>
+                <CardDescription>
+                  Turn a feature request or architecture change into a repo-grounded implementation plan.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="software-planner-prompt" className="text-sm font-medium">
+                    What should the planner design?
+                  </label>
+                  <Textarea
+                    id="software-planner-prompt"
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                    placeholder="Describe the feature, goal, constraints, and any files or areas of the repo that matter."
+                    className="min-h-[160px]"
+                    disabled={loading}
+                  />
+                </div>
+                {!signedIn && (
+                  <p className="text-sm text-muted-foreground">
+                    Sign in to generate a software implementation plan.
+                  </p>
+                )}
+                {error && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" onClick={() => void handleSubmit()} disabled={!canSubmit}>
+                    {loading ? <Loader2 className="animate-spin" size={16} /> : null}
+                    Generate plan
+                  </Button>
+                  {result && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => downloadMarkdown(result.markdown, result.suggested_filename)}
+                    >
+                      <Download size={16} />
+                      Download markdown
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {detailLoading ? (
+              <Card>
+                <CardContent className="py-12">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="animate-spin" size={16} />
+                    Loading saved plan...
+                  </div>
+                </CardContent>
+              </Card>
+            ) : result ? (
+              <SavedPlanDetailView result={result} />
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Select a saved plan</CardTitle>
+                  <CardDescription>
+                    {selectedPlanId
+                      ? 'Loading the selected saved plan from the sidebar...'
+                      : 'Generate a new plan or choose one from the sidebar to view its details.'}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            )}
+          </>
         )}
       </div>
     </main>

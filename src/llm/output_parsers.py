@@ -219,6 +219,33 @@ class EntityRelationExtractionEnvelope(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
 
 
+class ClarificationDecision(BaseModel):
+    """Router decision produced by the clarification node."""
+
+    ready: bool
+    question: str | None = None
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        return _trim_required_text(value, field_name="reason")
+
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped if stripped else None
+
+    @model_validator(mode="after")
+    def validate_question_required_when_not_ready(self) -> "ClarificationDecision":
+        if not self.ready and not self.question:
+            raise ValueError("question is required when ready is false")
+        return self
+
+
 CHAT_ACTION_DECISION_ADAPTER = TypeAdapter(ChatActionDecisionPayload)
 RESEARCH_SUMMARY_LIST_ADAPTER = TypeAdapter(list[ResearchSummary])
 FINANCE_TOOL_SELECTION_ADAPTER = TypeAdapter(FinanceToolSelectionPayload)
@@ -351,3 +378,8 @@ def parse_research_summaries_json(text: str) -> list[ResearchSummary]:
 def parse_entity_relation_extraction_json(text: str) -> EntityRelationExtractionEnvelope:
     """Parse graph extraction output into validated nested entity and relation models."""
     return parse_model_json(text, model=EntityRelationExtractionEnvelope)
+
+
+def parse_clarification_decision_json(text: str) -> ClarificationDecision:
+    """Parse the clarification node's router decision into the expected model."""
+    return parse_model_json(text, model=ClarificationDecision)
