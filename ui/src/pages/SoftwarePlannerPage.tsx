@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Loader2, MessageSquare, SendHorizontal, Square, Zap } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { generateSoftwareDevPlan, getSoftwareDevPlan } from '@/api/client'
-import { streamPlannerChat } from '@/api/plannerChatClient'
+import { getPlannerChatMessages, streamPlannerChat } from '@/api/plannerChatClient'
 import { SavedPlanDetailView } from '@/components/planner/SavedPlanDetailView'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -49,6 +49,8 @@ function planEventToSavedPlan(
 
 type ChatMessage = PlannerChatMessage & { plan_saved?: SavedSoftwareDevPlan }
 
+const THREAD_STORAGE_KEY = 'planner_interactive_thread_id'
+
 function PlannerInteractiveChat({
   accessToken,
   onPlansChanged,
@@ -57,15 +59,46 @@ function PlannerInteractiveChat({
   onPlansChanged?: () => void
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [threadId, setThreadId] = useState<string | null>(null)
+  const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(THREAD_STORAGE_KEY))
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [latestPlan, setLatestPlan] = useState<SavedSoftwareDevPlan | null>(null)
+  const [restoring, setRestoring] = useState(() => Boolean(sessionStorage.getItem(THREAD_STORAGE_KEY)))
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const requestIdRef = useRef(0)
+
+  // Restore conversation history when mounting with a previously-used thread
+  useEffect(() => {
+    const storedId = sessionStorage.getItem(THREAD_STORAGE_KEY)
+    if (!storedId) return
+    setRestoring(true)
+    getPlannerChatMessages(storedId, accessToken)
+      .then(({ messages: history }) => {
+        setMessages(history.map((m) => ({ ...m })))
+        setThreadId(storedId)
+      })
+      .catch(() => {
+        // Thread expired on the server — start fresh
+        sessionStorage.removeItem(THREAD_STORAGE_KEY)
+        setThreadId(null)
+        setMessages([])
+      })
+      .finally(() => setRestoring(false))
+  // Only run once on mount — accessToken is stable for the component lifetime
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist thread ID whenever it changes
+  useEffect(() => {
+    if (threadId) {
+      sessionStorage.setItem(THREAD_STORAGE_KEY, threadId)
+    } else {
+      sessionStorage.removeItem(THREAD_STORAGE_KEY)
+    }
+  }, [threadId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -165,19 +198,42 @@ function PlannerInteractiveChat({
     [latestPlan, messages],
   )
 
+  const handleNewChat = () => {
+    abortRef.current?.abort()
+    setThreadId(null)
+    setMessages([])
+    setStreamingText('')
+    setStreaming(false)
+    setError(null)
+    setLatestPlan(null)
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader>
-          <CardTitle className="text-xl">Interactive planner</CardTitle>
-          <CardDescription>
-            The AI will ask clarifying questions before generating your implementation plan.
-          </CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-xl">Interactive planner</CardTitle>
+            <CardDescription>
+              The AI will ask clarifying questions before generating your implementation plan.
+            </CardDescription>
+          </div>
+          {(messages.length > 0 || threadId) && (
+            <Button type="button" variant="outline" size="sm" onClick={handleNewChat} disabled={streaming}>
+              New chat
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <ScrollArea className="h-[420px] px-6 py-4">
             <div className="space-y-4">
-              {messages.length === 0 && (
+              {restoring && (
+                <div className="flex items-center gap-2 py-8 justify-center text-sm text-muted-foreground">
+                  <Loader2 size={14} className="animate-spin" />
+                  Restoring conversation...
+                </div>
+              )}
+              {!restoring && messages.length === 0 && (
                 <p className="py-8 text-center text-sm text-muted-foreground">
                   Describe a feature or goal to start. The AI will ask a few questions first.
                 </p>
