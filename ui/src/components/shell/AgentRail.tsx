@@ -8,6 +8,7 @@ import {
   deleteRagAgentChatSession,
   deleteRagWorkspaceChatSession,
   deleteSession,
+  deleteSoftwareDevPlan,
   getBillingUsage,
   listRagAgentChatSessions,
   listRagWorkspaceChatSessions,
@@ -701,13 +702,16 @@ function SoftwarePlannerHistoryList({
   activePlanId,
   refreshToken,
   onSelect,
+  onDeleted,
 }: {
   accessToken: string
   activePlanId: string | null
   refreshToken: number
   onSelect: (planId: string) => void
+  onDeleted: (planId: string) => void
 }) {
   const [plans, setPlans] = useState<SavedSoftwareDevPlanSummary[] | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const fetchedTokenRef = useRef(-1)
 
   useEffect(() => {
@@ -717,6 +721,17 @@ function SoftwarePlannerHistoryList({
       .then(({ plans: data }) => setPlans(data))
       .catch(() => setPlans([]))
   }, [accessToken, refreshToken])
+
+  const handleDelete = async (planId: string) => {
+    setDeletingId(planId)
+    try {
+      await deleteSoftwareDevPlan(planId, accessToken)
+      setPlans((prev) => prev?.filter((p) => p.plan_id !== planId) ?? null)
+      onDeleted(planId)
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   if (plans === null) {
     return (
@@ -734,21 +749,33 @@ function SoftwarePlannerHistoryList({
   return (
     <>
       {plans.slice(0, 10).map((plan) => (
-        <button
-          key={plan.plan_id}
-          type="button"
-          onClick={() => onSelect(plan.plan_id)}
-          className={cn(
-            'w-full rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
-            activePlanId === plan.plan_id
-              ? 'bg-primary/10 text-primary font-medium'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
-          )}
-          title={plan.title}
-        >
-          <span className="block truncate">{plan.title}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{plan.prompt_preview}</span>
-        </button>
+        <div key={plan.plan_id} className="group relative flex items-center">
+          <button
+            type="button"
+            onClick={() => onSelect(plan.plan_id)}
+            className={cn(
+              'min-w-0 flex-1 rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+              activePlanId === plan.plan_id
+                ? 'bg-primary/10 text-primary font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+            )}
+            title={plan.title}
+          >
+            <span className="block truncate">{plan.title}</span>
+            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{plan.prompt_preview}</span>
+          </button>
+          <button
+            type="button"
+            aria-label={`Delete plan: ${plan.title}`}
+            disabled={deletingId === plan.plan_id}
+            onClick={(e) => { e.stopPropagation(); void handleDelete(plan.plan_id) }}
+            className="absolute right-1 hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:flex focus-visible:flex disabled:opacity-50"
+          >
+            {deletingId === plan.plan_id
+              ? <Loader2 size={12} className="animate-spin" />
+              : <Trash2 size={12} />}
+          </button>
+        </div>
       ))}
     </>
   )
@@ -936,6 +963,9 @@ export function AgentRail({
                   activePlanId={activeView.planId ?? null}
                   refreshToken={plannerRefreshToken}
                   onSelect={(planId) => onViewChange({ type: 'software-planner', planId })}
+                  onDeleted={(planId) => {
+                    if (activeView.planId === planId) onViewChange({ type: 'software-planner', planId: null })
+                  }}
                 />
               </div>
             </ScrollArea>

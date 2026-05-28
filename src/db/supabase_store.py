@@ -1277,6 +1277,27 @@ class SupabaseSessionStore:
             return None
         return rows[0]
 
+    async def delete_software_dev_plan(
+        self,
+        *,
+        plan_id: str,
+        owner_id: str,
+        workspace_id: str,
+    ) -> bool:
+        response = await self._request(
+            "DELETE",
+            "software_dev_plans",
+            params={
+                "id": f"eq.{plan_id}",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+            },
+        )
+        deleted = response.status_code in (200, 204)
+        if deleted:
+            await self._invalidate_software_dev_plans_list_cache(owner_id, workspace_id)
+        return deleted
+
     # ------------------------------------------------------------------
     # RAG chat sessions + messages
     # ------------------------------------------------------------------

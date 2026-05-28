@@ -618,3 +618,11 @@ async def get_saved_software_dev_plan(user_id: str, plan_id: str) -> SavedSoftwa
     if row is None:
         return None
     return _saved_plan_response_from_row(row)
+
+
+async def delete_saved_software_dev_plan(user_id: str, plan_id: str) -> bool:
+    return await _get_store().delete_software_dev_plan(
+        plan_id=plan_id,
+        owner_id=user_id,
+        workspace_id=_workspace_id_for_user(user_id),
+    )

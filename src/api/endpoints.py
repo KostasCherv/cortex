@@ -75,6 +75,7 @@ from src.planner import (
     SavedSoftwareDevPlan,
     SavedSoftwareDevPlanListResponse,
     SoftwareDevPlanResponse,
+    delete_saved_software_dev_plan,
     generate_software_dev_plan,
     get_saved_software_dev_plan,
     list_saved_software_dev_plans,
@@ -1976,6 +1977,17 @@ async def get_software_dev_plan_history_detail(
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
     return plan
+
+
+@app.delete("/api/planner/software-dev/plans/{plan_id}", tags=["Planner"])
+async def delete_software_dev_plan(
+    plan_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict:
+    deleted = await delete_saved_software_dev_plan(current_user.user_id, plan_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
+    return {"plan_id": plan_id, "deleted": True}
 
 
 @app.post("/api/rag/agents/draft", tags=["RAG"])

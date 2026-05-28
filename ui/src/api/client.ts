@@ -492,6 +492,19 @@ export async function getSoftwareDevPlan(
   return (await response.json()) as SavedSoftwareDevPlan
 }
 
+export async function deleteSoftwareDevPlan(
+  planId: string,
+  accessToken: string | null,
+): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans/${planId}`, {
+    method: 'DELETE',
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to delete plan: ${response.status}`))
+  }
+}
+
 export async function createRagAgent(
   payload: RagAgentPayload,
   accessToken: string | null,

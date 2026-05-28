@@ -3334,6 +3334,30 @@ def test_get_saved_software_dev_plan_returns_404_when_missing():
 
 
 
+def test_delete_saved_software_dev_plan_returns_deleted():
+    with patch(
+        "src.api.endpoints.delete_saved_software_dev_plan",
+        new=AsyncMock(return_value=True),
+    ):
+        response = client.delete("/api/planner/software-dev/plans/plan-abc")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["plan_id"] == "plan-abc"
+    assert body["deleted"] is True
+
+
+def test_delete_saved_software_dev_plan_returns_404_when_missing():
+    with patch(
+        "src.api.endpoints.delete_saved_software_dev_plan",
+        new=AsyncMock(return_value=False),
+    ):
+        response = client.delete("/api/planner/software-dev/plans/no-such-plan")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Saved plan 'no-such-plan' not found."
+
+
 def test_software_dev_plan_generation_maps_validation_errors():
     with patch(
         "src.api.endpoints.generate_software_dev_plan",
