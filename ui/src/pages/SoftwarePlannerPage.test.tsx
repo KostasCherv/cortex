@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SoftwarePlannerPage } from './SoftwarePlannerPage'
-import type { SavedSoftwareDevPlan, SavedSoftwareDevPlanSummary } from '@/types'
+import type { SavedSoftwareDevPlan } from '@/types'
 
 const { generateSoftwareDevPlanMock, getSoftwareDevPlanMock, listSoftwareDevPlansMock } = vi.hoisted(() => ({
   generateSoftwareDevPlanMock: vi.fn(),
@@ -80,15 +80,14 @@ function buildSavedPlan(overrides: Partial<SavedSoftwareDevPlan> = {}): SavedSof
   }
 }
 
-function toSummary(plan: SavedSoftwareDevPlan): SavedSoftwareDevPlanSummary {
-  return {
-    plan_id: plan.plan_id,
-    title: plan.plan.title,
-    summary: plan.plan.summary,
-    prompt_preview: plan.prompt_preview,
-    created_at: plan.created_at,
-    updated_at: plan.updated_at,
-  }
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (error?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 describe('SoftwarePlannerPage', () => {
@@ -96,46 +95,105 @@ describe('SoftwarePlannerPage', () => {
     generateSoftwareDevPlanMock.mockReset()
     getSoftwareDevPlanMock.mockReset()
     listSoftwareDevPlansMock.mockReset()
-    listSoftwareDevPlansMock.mockResolvedValue({ plans: [] })
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn(() => 'blob:test-url'),
       revokeObjectURL: vi.fn(),
     })
   })
 
-  it('loads history on mount', async () => {
-    const savedPlan = buildSavedPlan()
-    listSoftwareDevPlansMock.mockResolvedValue({ plans: [toSummary(savedPlan)] })
-
+  it('keeps saved plans out of the planner page and relies on the sidebar for selection', () => {
     render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
 
-    await waitFor(() => {
-      expect(listSoftwareDevPlansMock).toHaveBeenCalledWith('token')
-    })
-
-    expect(await screen.findByText('Planner for feature delivery')).toBeInTheDocument()
-    expect(screen.getByText('Build a software-dev implementation planner.')).toBeInTheDocument()
+    expect(listSoftwareDevPlansMock).not.toHaveBeenCalled()
+    expect(screen.queryByText('Saved plans')).not.toBeInTheDocument()
+    expect(screen.getByText('Generate a new plan or choose one from the sidebar to view its details.')).toBeInTheDocument()
   })
 
-  it('prepends and selects a newly generated saved plan', async () => {
-    const olderPlan = buildSavedPlan({
-      plan_id: 'plan-older',
-      created_at: '2026-05-27T10:00:00+00:00',
-      updated_at: '2026-05-27T10:00:00+00:00',
-      prompt_preview: 'Older prompt preview',
+  it('loads the externally selected saved plan', async () => {
+    const detail = buildSavedPlan({
+      plan_id: 'plan-sidebar',
+      prompt_preview: 'Load me from the sidebar',
       plan: {
         ...buildSavedPlan().plan,
-        title: 'Older planner',
-        summary: 'Older summary',
+        title: 'Sidebar selected plan',
+        summary: 'Selected from the rail',
       },
+      markdown: '# Sidebar selected plan\n',
     })
+    getSoftwareDevPlanMock.mockResolvedValue(detail)
+
+    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-sidebar" />)
+
+    await waitFor(() => {
+      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-sidebar', 'token')
+    })
+
+    expect(screen.getAllByText('Sidebar selected plan').length).toBeGreaterThan(0)
+    expect(screen.getByText('Load me from the sidebar')).toBeInTheDocument()
+  })
+
+  it('ignores stale saved-plan detail responses when the sidebar selection changes quickly', async () => {
+    const firstDetail = buildSavedPlan({
+      plan_id: 'plan-1',
+      prompt_preview: 'First prompt preview',
+      plan: { ...buildSavedPlan().plan, title: 'First saved plan', summary: 'First summary' },
+      markdown: '# First saved plan\n',
+    })
+    const secondDetail = buildSavedPlan({
+      plan_id: 'plan-2',
+      prompt_preview: 'Second prompt preview',
+      plan: { ...buildSavedPlan().plan, title: 'Second saved plan', summary: 'Second summary' },
+      markdown: '# Second saved plan\n',
+    })
+    const firstDeferred = createDeferred<SavedSoftwareDevPlan>()
+    const secondDeferred = createDeferred<SavedSoftwareDevPlan>()
+    getSoftwareDevPlanMock.mockImplementation((planId: string) =>
+      planId === 'plan-1' ? firstDeferred.promise : secondDeferred.promise,
+    )
+
+    const { rerender } = render(
+      <SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-1" />,
+    )
+
+    await waitFor(() => {
+      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-1', 'token')
+    })
+
+    rerender(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-2" />)
+
+    await waitFor(() => {
+      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-2', 'token')
+    })
+
+    await act(async () => {
+      secondDeferred.resolve(secondDetail)
+      await secondDeferred.promise
+    })
+
+    expect(screen.getAllByText('Second saved plan').length).toBeGreaterThan(0)
+
+    await act(async () => {
+      firstDeferred.resolve(firstDetail)
+      await firstDeferred.promise
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Second saved plan').length).toBeGreaterThan(0)
+    })
+    expect(screen.queryByText('First summary')).not.toBeInTheDocument()
+  })
+
+  it('renders a newly generated plan and notifies the sidebar to refresh', async () => {
     const newPlan = buildSavedPlan()
-    listSoftwareDevPlansMock.mockResolvedValue({ plans: [toSummary(olderPlan)] })
+    const onPlansChanged = vi.fn()
     generateSoftwareDevPlanMock.mockResolvedValue(newPlan)
 
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
-
-    await screen.findByText('Older planner')
+    render(
+      <SoftwarePlannerPage
+        authSession={{ access_token: 'token' } as never}
+        onPlansChanged={onPlansChanged}
+      />,
+    )
 
     fireEvent.change(screen.getByLabelText(/what should the planner design/i), {
       target: { value: 'Build a software-dev implementation planner.' },
@@ -152,55 +210,7 @@ describe('SoftwarePlannerPage', () => {
     const plannerTitles = await screen.findAllByText('Planner for feature delivery')
     expect(plannerTitles.length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /download markdown/i })).toBeInTheDocument()
-
-    const historyButtons = screen.getAllByRole('button')
-    const savedPlanButton = historyButtons.find((button) => button.textContent?.includes('Planner for feature delivery'))
-    expect(savedPlanButton?.textContent).toContain('Build a software-dev implementation planner.')
-  })
-
-  it('clicking a history item loads and renders its detail', async () => {
-    const summary = toSummary(
-      buildSavedPlan({
-        plan_id: 'plan-2',
-        prompt_preview: 'Open the older saved plan',
-        plan: {
-          ...buildSavedPlan().plan,
-          title: 'Saved planner from history',
-          summary: 'History summary',
-        },
-      }),
-    )
-    const detail = buildSavedPlan({
-      plan_id: 'plan-2',
-      prompt_preview: 'Open the older saved plan',
-      plan: {
-        ...buildSavedPlan().plan,
-        title: 'Saved planner from history',
-        summary: 'History summary',
-      },
-      markdown: '# Saved planner from history\n',
-    })
-    listSoftwareDevPlansMock.mockResolvedValue({ plans: [summary] })
-    getSoftwareDevPlanMock.mockResolvedValue(detail)
-
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
-
-    fireEvent.click(await screen.findByRole('button', { name: /saved planner from history/i }))
-
-    await waitFor(() => {
-      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-2', 'token')
-    })
-
-    expect(screen.getAllByText('Saved planner from history').length).toBeGreaterThan(0)
-    expect(screen.getByText('Dedicated planner module')).toBeInTheDocument()
-  })
-
-  it('renders the empty history state', async () => {
-    listSoftwareDevPlansMock.mockResolvedValue({ plans: [] })
-
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
-
-    expect(await screen.findByText('No saved plans yet.')).toBeInTheDocument()
+    expect(onPlansChanged).toHaveBeenCalledTimes(1)
   })
 
   it('downloads markdown for the selected saved plan', async () => {

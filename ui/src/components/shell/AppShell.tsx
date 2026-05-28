@@ -16,7 +16,7 @@ type HealthState = 'loading' | 'online' | 'offline'
 export type ActiveView =
   | { type: 'chat' }
   | { type: 'research' }
-  | { type: 'software-planner' }
+  | { type: 'software-planner'; planId?: string | null }
   | { type: 'rag-agent'; agent: RagAgent }
   | { type: 'resources' }
 
@@ -28,6 +28,7 @@ export function AppShell() {
   const [resources, setResources] = useState<RagResource[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [sessionRefreshToken, setSessionRefreshToken] = useState(0)
+  const [plannerRefreshToken, setPlannerRefreshToken] = useState(0)
   const [newAgentSheetOpen, setNewAgentSheetOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<RagAgent | null>(null)
 
@@ -188,6 +189,7 @@ export function AppShell() {
         ragAgents={ragAgents}
         activeSessionId={activeSessionId}
         sessionRefreshToken={sessionRefreshToken}
+        plannerRefreshToken={plannerRefreshToken}
         onViewChange={handleViewChange}
         onSessionSelect={setActiveSessionId}
         onSignIn={() => void signInWithGoogle()}
@@ -232,7 +234,14 @@ export function AppShell() {
             onSessionsChanged={handleSessionsChanged}
           />
         )}
-        {activeView.type === 'software-planner' && <SoftwarePlannerPage authSession={authSession} />}
+        {activeView.type === 'software-planner' && (
+          <SoftwarePlannerPage
+            authSession={authSession}
+            activePlanId={activeView.planId ?? null}
+            onPlanActivated={(planId) => setActiveView({ type: 'software-planner', planId })}
+            onPlansChanged={() => setPlannerRefreshToken((value) => value + 1)}
+          />
+        )}
         {activeView.type === 'rag-agent' && authSession && (
           <AgentChat
             agent={activeView.agent}

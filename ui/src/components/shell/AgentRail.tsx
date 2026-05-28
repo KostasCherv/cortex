@@ -12,6 +12,7 @@ import {
   listRagAgentChatSessions,
   listRagWorkspaceChatSessions,
   listSessions,
+  listSoftwareDevPlans,
   updateRagAgentChatSessionTitle,
   updateRagWorkspaceChatSessionTitle,
   updateSessionTitle,
@@ -37,7 +38,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
-import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SessionSummary } from '@/types'
+import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SavedSoftwareDevPlanSummary, SessionSummary } from '@/types'
 import type { ActiveView } from './AppShell'
 
 type Props = {
@@ -47,6 +48,7 @@ type Props = {
   ragAgents: RagAgent[]
   activeSessionId: string | null
   sessionRefreshToken: number
+  plannerRefreshToken: number
   onViewChange: (view: ActiveView) => void
   onSessionSelect: (id: string | null) => void
   onSignIn: () => void
@@ -694,6 +696,64 @@ function WorkspaceChatSessionList({
   )
 }
 
+function SoftwarePlannerHistoryList({
+  accessToken,
+  activePlanId,
+  refreshToken,
+  onSelect,
+}: {
+  accessToken: string
+  activePlanId: string | null
+  refreshToken: number
+  onSelect: (planId: string) => void
+}) {
+  const [plans, setPlans] = useState<SavedSoftwareDevPlanSummary[] | null>(null)
+  const fetchedTokenRef = useRef(-1)
+
+  useEffect(() => {
+    if (fetchedTokenRef.current === refreshToken) return
+    fetchedTokenRef.current = refreshToken
+    void listSoftwareDevPlans(accessToken)
+      .then(({ plans: data }) => setPlans(data))
+      .catch(() => setPlans([]))
+  }, [accessToken, refreshToken])
+
+  if (plans === null) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Loading plans</span>
+      </div>
+    )
+  }
+
+  if (plans.length === 0) {
+    return <p className="px-2 py-1 text-xs text-muted-foreground">No saved plans yet.</p>
+  }
+
+  return (
+    <>
+      {plans.slice(0, 10).map((plan) => (
+        <button
+          key={plan.plan_id}
+          type="button"
+          onClick={() => onSelect(plan.plan_id)}
+          className={cn(
+            'w-full rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+            activePlanId === plan.plan_id
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+          )}
+          title={plan.title}
+        >
+          <span className="block truncate">{plan.title}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{plan.prompt_preview}</span>
+        </button>
+      ))}
+    </>
+  )
+}
+
 export function AgentRail({
   health,
   authSession,
@@ -701,6 +761,7 @@ export function AgentRail({
   ragAgents,
   activeSessionId,
   sessionRefreshToken,
+  plannerRefreshToken,
   onViewChange,
   onSessionSelect,
   onSignIn,
@@ -856,7 +917,29 @@ export function AgentRail({
               <ClipboardList size={15} className="shrink-0" />
               Planner
             </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0 rounded-md border border-border bg-background text-foreground shadow-sm hover:border-primary/30 hover:bg-background hover:text-primary"
+              onClick={() => onViewChange({ type: 'software-planner', planId: null })}
+              aria-label="New planner session"
+              title="New planner session"
+            >
+              <Plus size={14} />
+            </Button>
           </div>
+          {isSoftwarePlanner && authSession && (
+            <ScrollArea className="max-h-44 shrink-0">
+              <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
+                <SoftwarePlannerHistoryList
+                  accessToken={authSession.access_token}
+                  activePlanId={activeView.planId ?? null}
+                  refreshToken={plannerRefreshToken}
+                  onSelect={(planId) => onViewChange({ type: 'software-planner', planId })}
+                />
+              </div>
+            </ScrollArea>
+          )}
         </div>
 
         {/* My Agents section */}
