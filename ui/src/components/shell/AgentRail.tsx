@@ -711,8 +711,10 @@ function SoftwarePlannerHistoryList({
   onDeleted: (planId: string) => void
 }) {
   const [plans, setPlans] = useState<SavedSoftwareDevPlanSummary[] | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
   const fetchedTokenRef = useRef(-1)
+  const [contextMenu, setContextMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
+  const [deletePending, setDeletePending] = useState(false)
 
   useEffect(() => {
     if (fetchedTokenRef.current === refreshToken) return
@@ -722,16 +724,18 @@ function SoftwarePlannerHistoryList({
       .catch(() => setPlans([]))
   }, [accessToken, refreshToken])
 
-  const handleDelete = async (planId: string) => {
-    setDeletingId(planId)
-    try {
-      await deleteSoftwareDevPlan(planId, accessToken)
-      setPlans((prev) => prev?.filter((p) => p.plan_id !== planId) ?? null)
-      onDeleted(planId)
-    } finally {
-      setDeletingId(null)
+  useEffect(() => {
+    if (!contextMenu) return
+    const closeMenu = () => setContextMenu(null)
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', closeMenu)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', closeMenu)
     }
-  }
+  }, [contextMenu])
 
   if (plans === null) {
     return (
@@ -749,34 +753,82 @@ function SoftwarePlannerHistoryList({
   return (
     <>
       {plans.slice(0, 10).map((plan) => (
-        <div key={plan.plan_id} className="group relative flex items-center">
+        <button
+          key={plan.plan_id}
+          type="button"
+          onClick={() => onSelect(plan.plan_id)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setContextMenu({ id: plan.plan_id, title: plan.title, x: e.clientX, y: e.clientY })
+          }}
+          className={cn(
+            'w-full rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+            activePlanId === plan.plan_id
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+          )}
+          title={plan.title}
+        >
+          <span className="block truncate">{plan.title}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{plan.prompt_preview}</span>
+        </button>
+      ))}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button
             type="button"
-            onClick={() => onSelect(plan.plan_id)}
-            className={cn(
-              'min-w-0 flex-1 rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
-              activePlanId === plan.plan_id
-                ? 'bg-primary/10 text-primary font-medium'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
-            )}
-            title={plan.title}
+            className="w-full rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+            onClick={() => {
+              setDeleteTarget({ id: contextMenu.id, title: contextMenu.title })
+              setContextMenu(null)
+            }}
           >
-            <span className="block truncate">{plan.title}</span>
-            <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{plan.prompt_preview}</span>
-          </button>
-          <button
-            type="button"
-            aria-label={`Delete plan: ${plan.title}`}
-            disabled={deletingId === plan.plan_id}
-            onClick={(e) => { e.stopPropagation(); void handleDelete(plan.plan_id) }}
-            className="absolute right-1 hidden shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive group-hover:flex focus-visible:flex disabled:opacity-50"
-          >
-            {deletingId === plan.plan_id
-              ? <Loader2 size={12} className="animate-spin" />
-              : <Trash2 size={12} />}
+            Delete
           </button>
         </div>
-      ))}
+      )}
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open: boolean) => {
+          if (!open && !deletePending) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Plan</DialogTitle>
+            <DialogDescription>
+              This will permanently delete "{deleteTarget?.title ?? 'this plan'}".
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deletePending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deletePending || !deleteTarget}
+              onClick={() => {
+                if (!deleteTarget) return
+                setDeletePending(true)
+                void deleteSoftwareDevPlan(deleteTarget.id, accessToken)
+                  .then(() => {
+                    setPlans((prev) => prev?.filter((p) => p.plan_id !== deleteTarget.id) ?? prev)
+                    if (activePlanId === deleteTarget.id) onDeleted(deleteTarget.id)
+                    setDeleteTarget(null)
+                  })
+                  .finally(() => setDeletePending(false))
+              }}
+            >
+              {deletePending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
