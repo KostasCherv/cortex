@@ -609,7 +609,7 @@ async def list_saved_software_dev_plans(user_id: str) -> list[SavedSoftwareDevPl
     return [_saved_plan_summary_from_row(row) for row in rows]
 
 
-async def get_saved_software_dev_plan(user_id: str, plan_id: str) -> SavedSoftwareDevPlan | None:
+async def get_saved_software_dev_plan(plan_id: str, user_id: str) -> SavedSoftwareDevPlan | None:
     row = await _get_store().get_software_dev_plan(
         plan_id=plan_id,
         owner_id=user_id,

@@ -80,6 +80,19 @@ from src.planner import (
     list_saved_software_dev_plans,
     save_software_dev_plan,
 )
+from src.itinerary import (
+    ItineraryPlannerResponse,
+    ItineraryPlannerValidationError,
+    ItinerarySessionDetail,
+    ItinerarySessionListResponse,
+    ItinerarySessionSummary,
+    create_itinerary_session,
+    delete_itinerary_session,
+    get_itinerary_session_detail,
+    list_itinerary_sessions,
+    process_itinerary_session_message,
+    rename_itinerary_session,
+)
 from src.rag import (
     CHAT_SCOPE_AGENT,
     CHAT_SCOPE_WORKSPACE,
@@ -260,6 +273,18 @@ class SoftwareDevPlanRequest(BaseModel):
     prompt: str
 
 
+class ItinerarySessionCreateRequest(BaseModel):
+    message: str | None = None
+
+
+class ItinerarySessionMessageRequest(BaseModel):
+    message: str
+
+
+class ItinerarySessionUpdateRequest(BaseModel):
+    title: str
+
+
 class RagAgentUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -310,6 +335,18 @@ def _raise_planner_validation_error(exc: PlannerValidationError) -> None:
     status_by_code = {
         "planner_prompt_required": 400,
         "planner_generation_failed": 502,
+    }
+    raise HTTPException(
+        status_code=status_by_code.get(exc.code, 400),
+        detail={"code": exc.code, "message": str(exc)},
+    )
+
+
+def _raise_itinerary_validation_error(exc: ItineraryPlannerValidationError) -> None:
+    status_by_code = {
+        "itinerary_message_required": 400,
+        "itinerary_session_not_found": 404,
+        "itinerary_generation_failed": 502,
     }
     raise HTTPException(
         status_code=status_by_code.get(exc.code, 400),
@@ -1947,6 +1984,8 @@ async def list_software_dev_plan_history(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> SavedSoftwareDevPlanListResponse:
     plans = await list_saved_software_dev_plans(current_user.user_id)
+    if isinstance(plans, SavedSoftwareDevPlanListResponse):
+        return plans
     return SavedSoftwareDevPlanListResponse(plans=plans)
 
 
@@ -1955,10 +1994,91 @@ async def get_software_dev_plan_history_detail(
     plan_id: str,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> SavedSoftwareDevPlan:
-    plan = await get_saved_software_dev_plan(current_user.user_id, plan_id)
+    plan = await get_saved_software_dev_plan(plan_id, current_user.user_id)
     if plan is None:
         raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
     return plan
+
+
+@app.post("/api/itinerary/sessions", tags=["Itinerary"])
+async def create_itinerary_planner_session(
+    body: ItinerarySessionCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> ItinerarySessionSummary | ItineraryPlannerResponse:
+    session = await create_itinerary_session(current_user.user_id)
+    if body.message and body.message.strip():
+        try:
+            return await process_itinerary_session_message(
+                session.session_id,
+                current_user.user_id,
+                body.message,
+            )
+        except ItineraryPlannerValidationError as exc:
+            _raise_itinerary_validation_error(exc)
+            raise AssertionError("unreachable")
+    return session
+
+
+@app.get("/api/itinerary/sessions", tags=["Itinerary"])
+async def list_itinerary_planner_sessions(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> ItinerarySessionListResponse:
+    return await list_itinerary_sessions(current_user.user_id)
+
+
+@app.get("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
+async def get_itinerary_planner_session_detail(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> ItinerarySessionDetail:
+    session = await get_itinerary_session_detail(session_id, current_user.user_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Itinerary session '{session_id}' not found.")
+    return session
+
+
+@app.patch("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
+async def patch_itinerary_planner_session(
+    session_id: str,
+    body: ItinerarySessionUpdateRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, str]:
+    try:
+        renamed = await rename_itinerary_session(session_id, current_user.user_id, body.title)
+    except ItineraryPlannerValidationError as exc:
+        _raise_itinerary_validation_error(exc)
+        raise AssertionError("unreachable")
+    if not renamed:
+        raise HTTPException(status_code=404, detail=f"Itinerary session '{session_id}' not found.")
+    return {"session_id": session_id, "title": body.title.strip()}
+
+
+@app.delete("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
+async def remove_itinerary_planner_session(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, object]:
+    deleted = await delete_itinerary_session(session_id, current_user.user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Itinerary session '{session_id}' not found.")
+    return {"session_id": session_id, "deleted": True}
+
+
+@app.post("/api/itinerary/sessions/{session_id}/messages", tags=["Itinerary"])
+async def post_itinerary_planner_message(
+    session_id: str,
+    body: ItinerarySessionMessageRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> ItineraryPlannerResponse:
+    try:
+        return await process_itinerary_session_message(
+            session_id,
+            current_user.user_id,
+            body.message,
+        )
+    except ItineraryPlannerValidationError as exc:
+        _raise_itinerary_validation_error(exc)
+        raise AssertionError("unreachable")
 
 
 @app.post("/api/rag/agents/draft", tags=["RAG"])

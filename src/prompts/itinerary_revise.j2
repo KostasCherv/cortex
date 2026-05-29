@@ -1,0 +1,21 @@
+Revise the current itinerary to incorporate the user's latest request while preserving the rest of the trip where possible.
+
+Return JSON only. No markdown fences. No explanation outside JSON.
+
+Requirements:
+{{ requirements_json }}
+
+Current itinerary:
+{{ current_itinerary_json }}
+
+Conversation:
+{{ conversation_text }}
+
+Latest user request:
+{{ user_message }}
+
+Grounding notes:
+{{ grounding_context }}
+
+Return JSON matching this schema:
+{{ itinerary_schema_json }}

@@ -254,6 +254,90 @@ export type SavedSoftwareDevPlanListResponse = {
   plans: SavedSoftwareDevPlanSummary[]
 }
 
+export type TravelRequirements = {
+  destination?: string | null
+  start_date?: string | null
+  end_date?: string | null
+  trip_length_days?: number | null
+  traveler_count?: number | null
+  party_type?: string | null
+  budget_band?: string | null
+  interests: string[]
+  constraints: string[]
+  pace?: string | null
+}
+
+export type ItineraryDay = {
+  day_number: number
+  title: string
+  morning: string[]
+  afternoon: string[]
+  evening: string[]
+  notes: string[]
+}
+
+export type GeneratedItinerary = {
+  title: string
+  summary: string
+  destination: string
+  budget_band: string
+  days: ItineraryDay[]
+  tips: string[]
+  revision_summary?: string | null
+}
+
+export type ItinerarySessionMessage = {
+  message_id: string
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export type ItineraryVersion = {
+  version_id: string
+  session_id: string
+  version_number: number
+  revision_summary: string
+  markdown: string
+  itinerary: GeneratedItinerary
+  created_at: string
+}
+
+export type ItinerarySessionSummary = {
+  session_id: string
+  owner_id: string
+  workspace_id: string
+  title: string
+  status: string
+  current_version_id?: string | null
+  prompt_preview: string
+  last_message_preview: string
+  created_at: string
+  updated_at: string
+}
+
+export type ItinerarySessionDetail = ItinerarySessionSummary & {
+  requirements: TravelRequirements
+  messages: ItinerarySessionMessage[]
+  versions: ItineraryVersion[]
+  current_version?: ItineraryVersion | null
+}
+
+export type ItinerarySessionListResponse = {
+  sessions: ItinerarySessionSummary[]
+}
+
+export type ItineraryPlannerResponse = {
+  session: ItinerarySessionDetail
+  assistant_message: ItinerarySessionMessage
+  current_itinerary?: GeneratedItinerary | null
+  new_version?: ItineraryVersion | null
+  created_new_version: boolean
+  missing_fields: string[]
+}
+
 export type BillingUsageSummary = {
   plan: 'free' | 'pro'
   date: string

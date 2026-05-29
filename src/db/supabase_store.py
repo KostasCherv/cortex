@@ -67,6 +67,7 @@ class SupabaseSessionStore:
     _CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST = "rag:chat:sessions:list"
     _CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST = "rag:chat:messages:list"
     _CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST = "planner:software-dev:list"
+    _CACHE_PREFIX_ITINERARY_SESSIONS_LIST = "planner:itinerary:list"
 
     async def _request(
         self,
@@ -192,6 +193,13 @@ class SupabaseSessionStore:
     async def _invalidate_software_dev_plans_list_cache(self, owner_id: str, workspace_id: str) -> None:
         key = self._cache_key(
             self._CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_itinerary_sessions_list_cache(self, owner_id: str, workspace_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_ITINERARY_SESSIONS_LIST,
             f"{owner_id}:{workspace_id}",
         )
         await self._cache_delete(key)
@@ -1276,6 +1284,200 @@ class SupabaseSessionStore:
         if not rows:
             return None
         return rows[0]
+
+    # ------------------------------------------------------------------
+    # Itinerary planner sessions
+    # ------------------------------------------------------------------
+
+    async def create_itinerary_session(self, payload: dict[str, Any]) -> None:
+        body = {
+            "id": payload["id"],
+            "owner_id": payload["owner_id"],
+            "workspace_id": payload["workspace_id"],
+            "title": payload["title"],
+            "status": payload["status"],
+            "requirements_json": payload["requirements_json"],
+            "current_version_id": payload.get("current_version_id"),
+            "prompt_preview": payload.get("prompt_preview") or "",
+            "last_message_preview": payload.get("last_message_preview") or "",
+            "created_at": payload["created_at"],
+            "updated_at": payload["updated_at"],
+        }
+        await self._request("POST", "itinerary_sessions", json_body=body)
+        await self._invalidate_itinerary_sessions_list_cache(
+            payload["owner_id"],
+            payload["workspace_id"],
+        )
+
+    async def list_itinerary_sessions(
+        self,
+        *,
+        owner_id: str,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        cache_key = self._cache_key(
+            self._CACHE_PREFIX_ITINERARY_SESSIONS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        cached = await self._cache_get_list(cache_key)
+        if cached is not None:
+            return cached
+
+        response = await self._request(
+            "GET",
+            "itinerary_sessions",
+            params={
+                "select": (
+                    "id,owner_id,workspace_id,title,status,current_version_id,"
+                    "prompt_preview,last_message_preview,created_at,updated_at"
+                ),
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+                "order": "updated_at.desc",
+                "limit": str(limit),
+            },
+        )
+        rows = response.json()
+        await self._cache_set_list(cache_key, rows)
+        return rows
+
+    async def get_itinerary_session(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        workspace_id: str,
+    ) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "itinerary_sessions",
+            params={
+                "select": (
+                    "id,owner_id,workspace_id,title,status,requirements_json,current_version_id,"
+                    "prompt_preview,last_message_preview,created_at,updated_at"
+                ),
+                "id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        if not rows:
+            return None
+        return rows[0]
+
+    async def update_itinerary_session(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        patch: dict[str, Any],
+    ) -> bool:
+        response = await self._request(
+            "PATCH",
+            "itinerary_sessions",
+            params={
+                "id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+            },
+            json_body=patch,
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            row = rows[0]
+            await self._invalidate_itinerary_sessions_list_cache(
+                owner_id,
+                str(row.get("workspace_id") or ""),
+            )
+        return bool(rows)
+
+    async def delete_itinerary_session(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        workspace_id: str,
+    ) -> bool:
+        response = await self._request(
+            "DELETE",
+            "itinerary_sessions",
+            params={
+                "id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            await self._invalidate_itinerary_sessions_list_cache(owner_id, workspace_id)
+        return bool(rows)
+
+    async def create_itinerary_message(self, payload: dict[str, Any]) -> None:
+        body = {
+            "id": payload["id"],
+            "session_id": payload["session_id"],
+            "owner_id": payload["owner_id"],
+            "role": payload["role"],
+            "content": payload["content"],
+            "metadata_json": payload.get("metadata_json") or {},
+            "created_at": payload["created_at"],
+        }
+        await self._request("POST", "itinerary_messages", json_body=body)
+
+    async def list_itinerary_messages(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+    ) -> list[dict[str, Any]]:
+        response = await self._request(
+            "GET",
+            "itinerary_messages",
+            params={
+                "select": "id,session_id,role,content,metadata_json,created_at",
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "order": "created_at.asc",
+            },
+        )
+        return response.json()
+
+    async def create_itinerary_version(self, payload: dict[str, Any]) -> None:
+        body = {
+            "id": payload["id"],
+            "session_id": payload["session_id"],
+            "owner_id": payload["owner_id"],
+            "version_number": payload["version_number"],
+            "revision_summary": payload["revision_summary"],
+            "markdown": payload["markdown"],
+            "itinerary_json": payload["itinerary_json"],
+            "created_at": payload["created_at"],
+        }
+        await self._request("POST", "itinerary_versions", json_body=body)
+
+    async def list_itinerary_versions(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+    ) -> list[dict[str, Any]]:
+        response = await self._request(
+            "GET",
+            "itinerary_versions",
+            params={
+                "select": (
+                    "id,session_id,version_number,revision_summary,markdown,itinerary_json,created_at"
+                ),
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "order": "version_number.asc",
+            },
+        )
+        return response.json()
 
     # ------------------------------------------------------------------
     # RAG chat sessions + messages
