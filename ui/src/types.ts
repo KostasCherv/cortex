@@ -268,6 +268,12 @@ export type ItineraryDay = {
   notes: string[]
 }
 
+export type RecommendedArea = {
+  name: string
+  why: string
+  vibe: string
+}
+
 export type GeneratedItinerary = {
   title: string
   summary: string
@@ -275,6 +281,11 @@ export type GeneratedItinerary = {
   budget_band: string
   days: ItineraryDay[]
   tips: string[]
+  recommended_areas: RecommendedArea[]
+  getting_there: string[]
+  getting_around: string[]
+  must_do_highlights: string[]
+  booking_advice: string[]
   revision_summary?: string | null
 }
 

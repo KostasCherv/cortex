@@ -85,6 +85,40 @@ function ItineraryView({ itinerary }: { itinerary: GeneratedItinerary | null }) 
           <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.destination}</span>
           <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.budget_band}</span>
         </div>
+        {itinerary.recommended_areas.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Recommended areas</h3>
+            <div className="mt-2 space-y-2">
+              {itinerary.recommended_areas.map((area) => (
+                <div key={`${area.name}-${area.vibe}`} className="rounded-lg border border-border/70 bg-muted/10 p-3">
+                  <p className="text-sm font-medium text-foreground">{area.name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{area.why}</p>
+                  <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">{area.vibe}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {itinerary.getting_there.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Getting there</h3>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {itinerary.getting_there.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {itinerary.getting_around.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Getting around</h3>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {itinerary.getting_around.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div className="space-y-3">
           {itinerary.days.map((day) => (
             <section key={`${day.day_number}-${day.title}`} className="rounded-lg border border-border/70 bg-background/70 p-4">
@@ -104,6 +138,26 @@ function ItineraryView({ itinerary }: { itinerary: GeneratedItinerary | null }) 
             <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
               {itinerary.tips.map((tip) => (
                 <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {itinerary.must_do_highlights.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Must-do highlights</h3>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {itinerary.must_do_highlights.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {itinerary.booking_advice.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Booking advice</h3>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {itinerary.booking_advice.map((item) => (
+                <li key={item}>{item}</li>
               ))}
             </ul>
           </div>

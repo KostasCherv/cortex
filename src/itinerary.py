@@ -167,6 +167,17 @@ class ItineraryDay(BaseModel):
         return []
 
 
+class RecommendedArea(BaseModel):
+    name: str
+    why: str
+    vibe: str
+
+    @field_validator("name", "why", "vibe")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        return _require_text(value)
+
+
 class GeneratedItinerary(BaseModel):
     title: str
     summary: str
@@ -174,6 +185,11 @@ class GeneratedItinerary(BaseModel):
     budget_band: str
     days: list[ItineraryDay] = Field(default_factory=list)
     tips: list[str] = Field(default_factory=list)
+    recommended_areas: list[RecommendedArea] = Field(default_factory=list)
+    getting_there: list[str] = Field(default_factory=list)
+    getting_around: list[str] = Field(default_factory=list)
+    must_do_highlights: list[str] = Field(default_factory=list)
+    booking_advice: list[str] = Field(default_factory=list)
     revision_summary: str | None = None
 
     @field_validator("title", "summary", "destination", "budget_band")
@@ -181,7 +197,7 @@ class GeneratedItinerary(BaseModel):
     def validate_required_text(cls, value: str) -> str:
         return _require_text(value)
 
-    @field_validator("tips", mode="before")
+    @field_validator("tips", "getting_there", "getting_around", "must_do_highlights", "booking_advice", mode="before")
     @classmethod
     def normalize_tips(cls, value: object) -> list[str]:
         if value is None:
@@ -322,6 +338,18 @@ def _render_itinerary_markdown(itinerary: GeneratedItinerary) -> str:
     lines = [f"# {itinerary.title}", "", itinerary.summary, "", "## Overview", ""]
     lines.append(f"- Destination: {itinerary.destination}")
     lines.append(f"- Budget: {itinerary.budget_band}")
+    if itinerary.recommended_areas:
+        lines.extend(["", "## Recommended Areas", ""])
+        for area in itinerary.recommended_areas:
+            lines.append(f"- {area.name}: {area.why} ({area.vibe})")
+    if itinerary.getting_there:
+        lines.extend(["", "## Getting There", ""])
+        for item in itinerary.getting_there:
+            lines.append(f"- {item}")
+    if itinerary.getting_around:
+        lines.extend(["", "## Getting Around", ""])
+        for item in itinerary.getting_around:
+            lines.append(f"- {item}")
     lines.extend(["", "## Daily Plan", ""])
     for day in itinerary.days:
         lines.append(f"### Day {day.day_number}: {day.title}")
@@ -339,6 +367,14 @@ def _render_itinerary_markdown(itinerary: GeneratedItinerary) -> str:
         lines.extend(["## Tips", ""])
         for tip in itinerary.tips:
             lines.append(f"- {tip}")
+    if itinerary.must_do_highlights:
+        lines.extend(["", "## Must-Do Highlights", ""])
+        for item in itinerary.must_do_highlights:
+            lines.append(f"- {item}")
+    if itinerary.booking_advice:
+        lines.extend(["", "## Booking Advice", ""])
+        for item in itinerary.booking_advice:
+            lines.append(f"- {item}")
     return "\n".join(lines).strip() + "\n"
 
 

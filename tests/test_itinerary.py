@@ -89,6 +89,11 @@ def _persisted_version(
             "budget_band": "mid-range",
             "days": [],
             "tips": [],
+            "recommended_areas": [],
+            "getting_there": [],
+            "getting_around": [],
+            "must_do_highlights": [],
+            "booking_advice": [],
         },
         created_at="2026-05-29T10:05:00+00:00",
     )
@@ -187,6 +192,13 @@ async def test_process_itinerary_message_generates_first_itinerary_and_version()
                     }
                 ],
                 "tips": ["Reserve the museum in advance"],
+                "recommended_areas": [
+                    {"name": "Le Marais", "why": "Walkable and lively", "vibe": "romantic neighborhood"}
+                ],
+                "getting_there": ["Fly into Paris and take the RER into the city."],
+                "getting_around": ["Use the Metro for most sightseeing."],
+                "must_do_highlights": ["Sunset Seine walk", "Musee d'Orsay"],
+                "booking_advice": ["Reserve museum tickets in advance."],
             }
         ),
     ]
@@ -243,6 +255,13 @@ async def test_process_itinerary_message_generates_first_itinerary_and_version()
                             }
                         ],
                         "tips": ["Reserve the museum in advance"],
+                        "recommended_areas": [
+                            {"name": "Le Marais", "why": "Walkable and lively", "vibe": "romantic neighborhood"}
+                        ],
+                        "getting_there": ["Fly into Paris and take the RER into the city."],
+                        "getting_around": ["Use the Metro for most sightseeing."],
+                        "must_do_highlights": ["Sunset Seine walk", "Musee d'Orsay"],
+                        "booking_advice": ["Reserve museum tickets in advance."],
                     },
                     revision_summary="Generated the first itinerary draft.",
                     version_id="ver-1",
@@ -262,6 +281,9 @@ async def test_process_itinerary_message_generates_first_itinerary_and_version()
     assert response.new_version.version_number == 1
     assert response.current_itinerary is not None
     assert response.current_itinerary.title == "Paris art and cafe getaway"
+    assert response.current_itinerary.recommended_areas[0].name == "Le Marais"
+    assert response.current_itinerary.getting_there[0].startswith("Fly into Paris")
+    assert "Sunset Seine walk" in response.current_itinerary.must_do_highlights
     assert "generated" in response.assistant_message.content.lower()
     assert append_message_mock.await_count == 2
     update_session_mock.assert_awaited()
@@ -288,6 +310,13 @@ async def test_process_itinerary_message_revises_existing_itinerary_and_adds_new
                 }
             ],
             "tips": ["Swap one museum for a neighborhood walk"],
+            "recommended_areas": [
+                {"name": "Montmartre", "why": "More neighborhood charm", "vibe": "romantic and local"}
+            ],
+            "getting_there": ["Arrive in Paris and transfer by train into the center."],
+            "getting_around": ["Favor Metro rides and neighborhood walks."],
+            "must_do_highlights": ["Montmartre stroll", "Budget bistro dinner"],
+            "booking_advice": ["Keep museum bookings flexible if budget is tight."],
             "revision_summary": "Reduced the spend and added more neighborhood time.",
         }
     )
@@ -305,6 +334,11 @@ async def test_process_itinerary_message_revises_existing_itinerary_and_adds_new
             "budget_band": "mid-range",
             "days": [],
             "tips": [],
+            "recommended_areas": [],
+            "getting_there": [],
+            "getting_around": [],
+            "must_do_highlights": [],
+            "booking_advice": [],
         },
         created_at="2026-05-29T10:00:00+00:00",
     )
@@ -357,6 +391,13 @@ async def test_process_itinerary_message_revises_existing_itinerary_and_adds_new
                             }
                         ],
                         "tips": ["Swap one museum for a neighborhood walk"],
+                        "recommended_areas": [
+                            {"name": "Montmartre", "why": "More neighborhood charm", "vibe": "romantic and local"}
+                        ],
+                        "getting_there": ["Arrive in Paris and transfer by train into the center."],
+                        "getting_around": ["Favor Metro rides and neighborhood walks."],
+                        "must_do_highlights": ["Montmartre stroll", "Budget bistro dinner"],
+                        "booking_advice": ["Keep museum bookings flexible if budget is tight."],
                     },
                     version_id="ver-2",
                 )
@@ -375,6 +416,7 @@ async def test_process_itinerary_message_revises_existing_itinerary_and_adds_new
     assert response.new_version.version_number == 2
     assert response.current_itinerary is not None
     assert response.current_itinerary.budget_band == "budget-conscious"
+    assert response.current_itinerary.recommended_areas[0].name == "Montmartre"
     assert "updated" in response.assistant_message.content.lower()
     assert append_message_mock.await_count == 2
     update_session_mock.assert_awaited()

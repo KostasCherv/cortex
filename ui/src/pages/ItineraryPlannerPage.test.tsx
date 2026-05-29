@@ -88,6 +88,13 @@ function buildSessionDetail(overrides: Partial<ItinerarySessionDetail> = {}): It
             },
           ],
           tips: ['Book the museum ahead'],
+          recommended_areas: [
+            { name: 'Le Marais', why: 'Walkable and lively', vibe: 'romantic neighborhood' },
+          ],
+          getting_there: ['Fly into Paris and take the RER into the city.'],
+          getting_around: ['Use the Metro for most sightseeing.'],
+          must_do_highlights: ['Sunset Seine walk', 'Musee d’Orsay'],
+          booking_advice: ['Reserve the museum ahead.'],
           revision_summary: null,
         },
         created_at: '2026-05-29T10:05:00+00:00',
@@ -115,6 +122,13 @@ function buildSessionDetail(overrides: Partial<ItinerarySessionDetail> = {}): It
           },
         ],
         tips: ['Book the museum ahead'],
+        recommended_areas: [
+          { name: 'Le Marais', why: 'Walkable and lively', vibe: 'romantic neighborhood' },
+        ],
+        getting_there: ['Fly into Paris and take the RER into the city.'],
+        getting_around: ['Use the Metro for most sightseeing.'],
+        must_do_highlights: ['Sunset Seine walk', 'Musee d’Orsay'],
+        booking_advice: ['Reserve the museum ahead.'],
         revision_summary: null,
       },
       created_at: '2026-05-29T10:05:00+00:00',
@@ -196,6 +210,10 @@ describe('ItineraryPlannerPage', () => {
 
     expect(await screen.findByText('Paris spring city break')).toBeInTheDocument()
     expect(screen.getByText('A relaxed four-day Paris plan.')).toBeInTheDocument()
+    expect(screen.getByText('Recommended areas')).toBeInTheDocument()
+    expect(screen.getByText('Le Marais')).toBeInTheDocument()
+    expect(screen.getByText('Getting there')).toBeInTheDocument()
+    expect(screen.getByText('Must-do highlights')).toBeInTheDocument()
     expect(screen.queryByText('Version history')).not.toBeInTheDocument()
     expect(onSessionsChanged).toHaveBeenCalled()
     expect(onSessionActivated).toHaveBeenCalledWith('itin-1')
@@ -377,6 +395,11 @@ describe('ItineraryPlannerPage', () => {
           budget_band: 'mid-range',
           days: [],
           tips: ['Reserve omakase early'],
+          recommended_areas: [{ name: 'Asakusa', why: 'Easy food access', vibe: 'traditional and lively' }],
+          getting_there: ['Fly into Tokyo and take the train into the city.'],
+          getting_around: ['Use the metro and short taxi hops.'],
+          must_do_highlights: ['Tsukiji-style market breakfast'],
+          booking_advice: ['Reserve omakase early.'],
           revision_summary: null,
         },
         created_at: '2026-05-29T11:00:00+00:00',
@@ -395,6 +418,11 @@ describe('ItineraryPlannerPage', () => {
             budget_band: 'mid-range',
             days: [],
             tips: ['Reserve omakase early'],
+            recommended_areas: [{ name: 'Asakusa', why: 'Easy food access', vibe: 'traditional and lively' }],
+            getting_there: ['Fly into Tokyo and take the train into the city.'],
+            getting_around: ['Use the metro and short taxi hops.'],
+            must_do_highlights: ['Tsukiji-style market breakfast'],
+            booking_advice: ['Reserve omakase early.'],
             revision_summary: null,
           },
           created_at: '2026-05-29T11:00:00+00:00',
@@ -438,6 +466,11 @@ describe('ItineraryPlannerPage', () => {
             budget_band: 'budget-conscious',
             days: [],
             tips: ['Use metro passes'],
+            recommended_areas: [{ name: 'Montmartre', why: 'More charm for less spend', vibe: 'romantic and local' }],
+            getting_there: ['Arrive in Paris and transfer by train into the center.'],
+            getting_around: ['Favor Metro rides and neighborhood walks.'],
+            must_do_highlights: ['Montmartre stroll'],
+            booking_advice: ['Keep museum bookings flexible if budget is tight.'],
             revision_summary: null,
           },
           created_at: '2026-05-29T10:20:00+00:00',
@@ -457,6 +490,11 @@ describe('ItineraryPlannerPage', () => {
               budget_band: 'budget-conscious',
               days: [],
               tips: ['Use metro passes'],
+              recommended_areas: [{ name: 'Montmartre', why: 'More charm for less spend', vibe: 'romantic and local' }],
+              getting_there: ['Arrive in Paris and transfer by train into the center.'],
+              getting_around: ['Favor Metro rides and neighborhood walks.'],
+              must_do_highlights: ['Montmartre stroll'],
+              booking_advice: ['Keep museum bookings flexible if budget is tight.'],
               revision_summary: null,
             },
             created_at: '2026-05-29T10:20:00+00:00',
@@ -478,6 +516,11 @@ describe('ItineraryPlannerPage', () => {
         budget_band: 'budget-conscious',
         days: [],
         tips: ['Use metro passes'],
+        recommended_areas: [{ name: 'Montmartre', why: 'More charm for less spend', vibe: 'romantic and local' }],
+        getting_there: ['Arrive in Paris and transfer by train into the center.'],
+        getting_around: ['Favor Metro rides and neighborhood walks.'],
+        must_do_highlights: ['Montmartre stroll'],
+        booking_advice: ['Keep museum bookings flexible if budget is tight.'],
         revision_summary: null,
       },
     })
