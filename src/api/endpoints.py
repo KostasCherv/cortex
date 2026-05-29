@@ -72,14 +72,13 @@ from src.guards import claims_no_web_access
 from src import outbox
 from src.planner import (
     PlannerValidationError,
-    SavedSoftwareDevPlan,
-    SavedSoftwareDevPlanListResponse,
-    SoftwareDevPlanResponse,
-    delete_saved_software_dev_plan,
-    generate_software_dev_plan,
-    get_saved_software_dev_plan,
-    list_saved_software_dev_plans,
-    save_software_dev_plan,
+    SavedPRD,
+    SavedPRDListResponse,
+    delete_saved_prd,
+    generate_prd,
+    get_saved_prd,
+    list_saved_prds,
+    save_prd,
 )
 from src.rag import (
     CHAT_SCOPE_AGENT,
@@ -269,7 +268,7 @@ class RagAgentDraftRequest(BaseModel):
     prompt: str
 
 
-class SoftwareDevPlanRequest(BaseModel):
+class PRDRequest(BaseModel):
     prompt: str
 
 
@@ -1947,44 +1946,44 @@ async def rag_create_agent(
     return {"agent": agent.to_dict()}
 
 
-@app.post("/api/planner/software-dev", tags=["Planner"])
-async def generate_implementation_plan(
-    body: SoftwareDevPlanRequest,
+@app.post("/api/planner/prd", tags=["Planner"])
+async def generate_prd_plan(
+    body: PRDRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedSoftwareDevPlan:
+) -> SavedPRD:
     try:
-        response = await generate_software_dev_plan(body.prompt)
-        return await save_software_dev_plan(current_user.user_id, body.prompt, response)
+        response = await generate_prd(body.prompt)
+        return await save_prd(current_user.user_id, body.prompt, response)
     except PlannerValidationError as exc:
         _raise_planner_validation_error(exc)
         raise AssertionError("unreachable")
 
 
-@app.get("/api/planner/software-dev/plans", tags=["Planner"])
-async def list_software_dev_plan_history(
+@app.get("/api/planner/prd/plans", tags=["Planner"])
+async def list_prd_history(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedSoftwareDevPlanListResponse:
-    plans = await list_saved_software_dev_plans(current_user.user_id)
-    return SavedSoftwareDevPlanListResponse(plans=plans)
+) -> SavedPRDListResponse:
+    plans = await list_saved_prds(current_user.user_id)
+    return SavedPRDListResponse(plans=plans)
 
 
-@app.get("/api/planner/software-dev/plans/{plan_id}", tags=["Planner"])
-async def get_software_dev_plan_history_detail(
+@app.get("/api/planner/prd/plans/{plan_id}", tags=["Planner"])
+async def get_prd_history_detail(
     plan_id: str,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedSoftwareDevPlan:
-    plan = await get_saved_software_dev_plan(current_user.user_id, plan_id)
+) -> SavedPRD:
+    plan = await get_saved_prd(current_user.user_id, plan_id)
     if plan is None:
-        raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
+        raise HTTPException(status_code=404, detail=f"Saved PRD '{plan_id}' not found.")
     return plan
 
 
-@app.delete("/api/planner/software-dev/plans/{plan_id}", tags=["Planner"])
-async def delete_software_dev_plan(
+@app.delete("/api/planner/prd/plans/{plan_id}", tags=["Planner"])
+async def delete_prd_plan(
     plan_id: str,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> dict:
-    deleted = await delete_saved_software_dev_plan(current_user.user_id, plan_id)
+    deleted = await delete_saved_prd(current_user.user_id, plan_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
     return {"plan_id": plan_id, "deleted": True}

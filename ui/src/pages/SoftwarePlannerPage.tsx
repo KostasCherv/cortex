@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Loader2, MessageSquare, SendHorizontal, Square, Zap } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
-import { generateSoftwareDevPlan, getSoftwareDevPlan } from '@/api/client'
+import { generatePRD, getPRD } from '@/api/client'
 import { getPlannerChatMessages, streamPlannerChat } from '@/api/plannerChatClient'
 import { SavedPlanDetailView } from '@/components/planner/SavedPlanDetailView'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import type { PlannerChatMessage, PlannerChatStreamEvent, SavedSoftwareDevPlan } from '@/types'
+import type { PlannerChatMessage, PlannerChatStreamEvent, SavedPRD } from '@/types'
 import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { cn } from '@/lib/utils'
 
@@ -27,15 +27,13 @@ function downloadMarkdown(markdown: string, filename: string) {
 function planEventToSavedPlan(
   event: PlannerChatStreamEvent & { type: 'plan' },
   prompt: string,
-): SavedSoftwareDevPlan {
+): SavedPRD {
   return {
     plan_id: '',
     plan: event.plan,
     markdown: event.markdown,
     suggested_filename: event.suggested_filename,
     planning_brief: event.planning_brief,
-    repo_analysis: event.repo_analysis,
-    planning_options: event.planning_options,
     prompt,
     prompt_preview: prompt.slice(0, 120),
     created_at: new Date().toISOString(),
@@ -47,7 +45,7 @@ function planEventToSavedPlan(
 // Interactive chat component
 // ---------------------------------------------------------------------------
 
-type ChatMessage = PlannerChatMessage & { plan_saved?: SavedSoftwareDevPlan }
+type ChatMessage = PlannerChatMessage & { plan_saved?: SavedPRD }
 
 const THREAD_STORAGE_KEY = 'planner_interactive_thread_id'
 
@@ -64,7 +62,7 @@ function PlannerInteractiveChat({
   const [streaming, setStreaming] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [latestPlan, setLatestPlan] = useState<SavedSoftwareDevPlan | null>(null)
+  const [latestPlan, setLatestPlan] = useState<SavedPRD | null>(null)
   const [restoring, setRestoring] = useState(() => Boolean(sessionStorage.getItem(THREAD_STORAGE_KEY)))
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -224,7 +222,7 @@ function PlannerInteractiveChat({
           <div>
             <CardTitle className="text-xl">Interactive planner</CardTitle>
             <CardDescription>
-              The AI will ask clarifying questions before generating your implementation plan.
+              The AI will ask clarifying questions before generating your PRD.
             </CardDescription>
           </div>
           {(messages.length > 0 || threadId) && (
@@ -288,7 +286,7 @@ function PlannerInteractiveChat({
             <div className="flex gap-2 items-end">
               <Textarea
                 className="resize-none min-h-10 max-h-32 text-sm"
-                placeholder={lastPlan ? 'Describe what to change or add to the plan…' : 'Describe your feature or goal…'}
+                placeholder={lastPlan ? 'Describe what to change or add to the PRD…' : 'Describe your product idea, the problem it solves, and who it\'s for…'}
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -369,7 +367,7 @@ export function SoftwarePlannerPage({
 }) {
   const [mode, setMode] = useState<Mode>('single-shot')
   const [prompt, setPrompt] = useState('')
-  const [result, setResult] = useState<SavedSoftwareDevPlan | null>(null)
+  const [result, setResult] = useState<SavedPRD | null>(null)
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -396,7 +394,7 @@ export function SoftwarePlannerPage({
       setResult(null)
       setError(null)
       try {
-        const savedPlan = await getSoftwareDevPlan(planId, authSession.access_token)
+        const savedPlan = await getPRD(planId, authSession.access_token)
         if (detailRequestIdRef.current !== requestId) return
         setResult(savedPlan)
       } catch (detailError) {
@@ -434,14 +432,14 @@ export function SoftwarePlannerPage({
       return
     }
     if (!authSession?.access_token) {
-      setError('Sign in to generate a software implementation plan.')
+      setError('Sign in to generate a PRD.')
       return
     }
 
     setLoading(true)
     setError(null)
     try {
-      const response = await generateSoftwareDevPlan(normalizedPrompt, authSession.access_token)
+      const response = await generatePRD(normalizedPrompt, authSession.access_token)
       detailRequestIdRef.current += 1
       setResult(response)
       setSelectedPlanId(response.plan_id)
@@ -506,28 +504,28 @@ export function SoftwarePlannerPage({
           <>
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl">Software implementation planner</CardTitle>
+                <CardTitle className="text-xl">PRD Planner</CardTitle>
                 <CardDescription>
-                  Turn a feature request or architecture change into a repo-grounded implementation plan.
+                  Turn a product idea into a structured Product Requirements Document.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <label htmlFor="software-planner-prompt" className="text-sm font-medium">
-                    What should the planner design?
+                  <label htmlFor="prd-planner-prompt" className="text-sm font-medium">
+                    What product idea should we document?
                   </label>
                   <Textarea
-                    id="software-planner-prompt"
+                    id="prd-planner-prompt"
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
-                    placeholder="Describe the feature, goal, constraints, and any files or areas of the repo that matter."
+                    placeholder="Describe the product, feature, or initiative — the problem it solves, who it's for, and any known constraints."
                     className="min-h-[160px]"
                     disabled={loading}
                   />
                 </div>
                 {!signedIn && (
                   <p className="text-sm text-muted-foreground">
-                    Sign in to generate a software implementation plan.
+                    Sign in to generate a PRD.
                   </p>
                 )}
                 {error && (
@@ -538,7 +536,7 @@ export function SoftwarePlannerPage({
                 <div className="flex flex-wrap items-center gap-2">
                   <Button type="button" onClick={() => void handleSubmit()} disabled={!canSubmit}>
                     {loading ? <Loader2 className="animate-spin" size={16} /> : null}
-                    Generate plan
+                    Generate PRD
                   </Button>
                   {result && (
                     <Button

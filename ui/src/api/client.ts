@@ -12,8 +12,8 @@ import type {
   RagResource,
   ResearchRequest,
   RunFeedbackRequest,
-  SavedSoftwareDevPlan,
-  SavedSoftwareDevPlanListResponse,
+  SavedPRD,
+  SavedPRDListResponse,
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
@@ -449,11 +449,11 @@ export async function generateRagAgentDraft(
   return (await response.json()) as { draft: RagAgentDraft }
 }
 
-export async function generateSoftwareDevPlan(
+export async function generatePRD(
   prompt: string,
   accessToken: string | null,
-): Promise<SavedSoftwareDevPlan> {
-  const response = await fetch(`${API_BASE}/api/planner/software-dev`, {
+): Promise<SavedPRD> {
+  const response = await fetch(`${API_BASE}/api/planner/prd`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -462,46 +462,46 @@ export async function generateSoftwareDevPlan(
     body: JSON.stringify({ prompt }),
   })
   if (!response.ok) {
-    throw new Error(await parseApiError(response, `Failed to generate implementation plan: ${response.status}`))
+    throw new Error(await parseApiError(response, `Failed to generate PRD: ${response.status}`))
   }
-  return (await response.json()) as SavedSoftwareDevPlan
+  return (await response.json()) as SavedPRD
 }
 
-export async function listSoftwareDevPlans(
+export async function listPRDs(
   accessToken: string | null,
-): Promise<SavedSoftwareDevPlanListResponse> {
-  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans`, {
+): Promise<SavedPRDListResponse> {
+  const response = await fetch(`${API_BASE}/api/planner/prd/plans`, {
     headers: authHeaders(accessToken),
   })
   if (!response.ok) {
-    throw new Error(await parseApiError(response, `Failed to load saved plans: ${response.status}`))
+    throw new Error(await parseApiError(response, `Failed to load saved PRDs: ${response.status}`))
   }
-  return (await response.json()) as SavedSoftwareDevPlanListResponse
+  return (await response.json()) as SavedPRDListResponse
 }
 
-export async function getSoftwareDevPlan(
+export async function getPRD(
   planId: string,
   accessToken: string | null,
-): Promise<SavedSoftwareDevPlan> {
-  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans/${planId}`, {
+): Promise<SavedPRD> {
+  const response = await fetch(`${API_BASE}/api/planner/prd/plans/${planId}`, {
     headers: authHeaders(accessToken),
   })
   if (!response.ok) {
-    throw new Error(await parseApiError(response, `Failed to load saved plan: ${response.status}`))
+    throw new Error(await parseApiError(response, `Failed to load saved PRD: ${response.status}`))
   }
-  return (await response.json()) as SavedSoftwareDevPlan
+  return (await response.json()) as SavedPRD
 }
 
-export async function deleteSoftwareDevPlan(
+export async function deletePRD(
   planId: string,
   accessToken: string | null,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/planner/software-dev/plans/${planId}`, {
+  const response = await fetch(`${API_BASE}/api/planner/prd/plans/${planId}`, {
     method: 'DELETE',
     headers: authHeaders(accessToken),
   })
   if (!response.ok) {
-    throw new Error(await parseApiError(response, `Failed to delete plan: ${response.status}`))
+    throw new Error(await parseApiError(response, `Failed to delete PRD: ${response.status}`))
   }
 }
 

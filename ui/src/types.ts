@@ -158,7 +158,7 @@ export type RagChatStreamEvent =
   | { type: 'done' }
   | { type: 'error'; error: string }
 
-export type SoftwareDevPlanningBrief = {
+export type PRDPlanningBrief = {
   problem_statement: string
   desired_outcome: string
   constraints: string[]
@@ -166,74 +166,45 @@ export type SoftwareDevPlanningBrief = {
   open_questions: string[]
 }
 
-export type SoftwareDevRepoRelevantFile = {
-  path: string
-  reason: string
-}
-
-export type SoftwareDevRepoAnalysis = {
-  summary: string
-  relevant_files: SoftwareDevRepoRelevantFile[]
-  existing_patterns: string[]
-  constraints: string[]
-  unknowns: string[]
-}
-
-export type SoftwareDevPlanningApproach = {
-  name: string
-  summary: string
-  tradeoffs: string[]
-  file_impact: string[]
-}
-
-export type SoftwareDevPlanningOptions = {
-  approaches: SoftwareDevPlanningApproach[]
-  recommended_approach: string
+export type PRDRequirement = {
+  id: string
+  description: string
+  priority: 'Must Have' | 'Should Have' | 'Could Have' | "Won't Have"
   rationale: string
-  out_of_scope: string[]
 }
 
-export type SoftwareDevPlanFile = {
-  path: string
-  reason: string
-}
-
-export type SoftwareDevPlanPhase = {
+export type PRDMilestone = {
   id: string
   title: string
-  objective: string
-  files: string[]
+  description: string
   deliverables: string[]
-  verification: string[]
 }
 
-export type SoftwareDevPlan = {
+export type PRDPlan = {
   title: string
-  summary: string
-  goal: string
-  repo_fit: string
-  architecture: string
-  recommended_approach: string
-  file_map: SoftwareDevPlanFile[]
-  data_api_ui_impacts: string[]
-  phases: SoftwareDevPlanPhase[]
-  validation: string[]
+  executive_summary: string
+  problem_statement: string
+  goals: string[]
+  non_goals: string[]
+  target_users: string[]
+  user_stories: string[]
+  requirements: PRDRequirement[]
+  success_metrics: string[]
+  milestones: PRDMilestone[]
+  out_of_scope: string[]
   risks: string[]
   assumptions: string[]
   open_questions: string[]
-  out_of_scope: string[]
 }
 
-export type SoftwareDevPlanResponse = {
-  plan: SoftwareDevPlan
+export type PRDPlanResponse = {
+  plan: PRDPlan
   markdown: string
   suggested_filename: string
-  planning_brief: SoftwareDevPlanningBrief
-  repo_analysis: SoftwareDevRepoAnalysis
-  planning_options: SoftwareDevPlanningOptions
+  planning_brief: PRDPlanningBrief
 }
 
-export type SavedSoftwareDevPlanSummary = {
+export type SavedPRDSummary = {
   plan_id: string
   title: string
   summary: string
@@ -242,7 +213,7 @@ export type SavedSoftwareDevPlanSummary = {
   updated_at: string
 }
 
-export type SavedSoftwareDevPlan = SoftwareDevPlanResponse & {
+export type SavedPRD = PRDPlanResponse & {
   plan_id: string
   prompt: string
   prompt_preview: string
@@ -250,8 +221,8 @@ export type SavedSoftwareDevPlan = SoftwareDevPlanResponse & {
   updated_at: string
 }
 
-export type SavedSoftwareDevPlanListResponse = {
-  plans: SavedSoftwareDevPlanSummary[]
+export type SavedPRDListResponse = {
+  plans: SavedPRDSummary[]
 }
 
 export type PlannerChatStreamEvent =
@@ -259,12 +230,10 @@ export type PlannerChatStreamEvent =
   | { type: 'chunk'; text: string }
   | {
       type: 'plan'
-      plan: SoftwareDevPlan
+      plan: PRDPlan
       markdown: string
       suggested_filename: string
-      planning_brief: SoftwareDevPlanningBrief
-      repo_analysis: SoftwareDevRepoAnalysis
-      planning_options: SoftwareDevPlanningOptions
+      planning_brief: PRDPlanningBrief
     }
   | { type: 'done' }
   | { type: 'error'; error: string }

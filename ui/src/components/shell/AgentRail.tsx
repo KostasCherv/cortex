@@ -8,12 +8,12 @@ import {
   deleteRagAgentChatSession,
   deleteRagWorkspaceChatSession,
   deleteSession,
-  deleteSoftwareDevPlan,
+  deletePRD,
   getBillingUsage,
   listRagAgentChatSessions,
   listRagWorkspaceChatSessions,
   listSessions,
-  listSoftwareDevPlans,
+  listPRDs,
   updateRagAgentChatSessionTitle,
   updateRagWorkspaceChatSessionTitle,
   updateSessionTitle,
@@ -39,7 +39,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
-import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SavedSoftwareDevPlanSummary, SessionSummary } from '@/types'
+import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SavedPRDSummary, SessionSummary } from '@/types'
 import type { ActiveView } from './AppShell'
 
 type Props = {
@@ -710,7 +710,7 @@ function SoftwarePlannerHistoryList({
   onSelect: (planId: string) => void
   onDeleted: (planId: string) => void
 }) {
-  const [plans, setPlans] = useState<SavedSoftwareDevPlanSummary[] | null>(null)
+  const [plans, setPlans] = useState<SavedPRDSummary[] | null>(null)
   const fetchedTokenRef = useRef(-1)
   const [contextMenu, setContextMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null)
@@ -719,7 +719,7 @@ function SoftwarePlannerHistoryList({
   useEffect(() => {
     if (fetchedTokenRef.current === refreshToken) return
     fetchedTokenRef.current = refreshToken
-    void listSoftwareDevPlans(accessToken)
+    void listPRDs(accessToken)
       .then(({ plans: data }) => setPlans(data))
       .catch(() => setPlans([]))
   }, [accessToken, refreshToken])
@@ -800,9 +800,9 @@ function SoftwarePlannerHistoryList({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Plan</DialogTitle>
+            <DialogTitle>Delete PRD</DialogTitle>
             <DialogDescription>
-              This will permanently delete "{deleteTarget?.title ?? 'this plan'}".
+              This will permanently delete "{deleteTarget?.title ?? 'this PRD'}".
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -815,7 +815,7 @@ function SoftwarePlannerHistoryList({
               onClick={() => {
                 if (!deleteTarget) return
                 setDeletePending(true)
-                void deleteSoftwareDevPlan(deleteTarget.id, accessToken)
+                void deletePRD(deleteTarget.id, accessToken)
                   .then(() => {
                     setPlans((prev) => prev?.filter((p) => p.plan_id !== deleteTarget.id) ?? prev)
                     if (activePlanId === deleteTarget.id) onDeleted(deleteTarget.id)
@@ -994,7 +994,7 @@ export function AgentRail({
               )}
             >
               <ClipboardList size={15} className="shrink-0" />
-              Planner
+              PRD Planner
             </button>
             <Button
               variant="ghost"

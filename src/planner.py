@@ -1,4 +1,4 @@
-"""Software-development implementation planner service."""
+"""PRD (Product Requirements Document) planner service."""
 
 from __future__ import annotations
 
@@ -6,9 +6,7 @@ import asyncio
 import json
 import re
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Mapping, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -17,40 +15,6 @@ from src.db.supabase_store import SupabaseSessionStore
 from src.errors import StructuredOutputError
 from src.llm.output_parsers import build_validation_retry_prompt, parse_model_json
 from src.prompts.registry import prompt_registry
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_REPO_FILES = [
-    "src/api/endpoints.py",
-    "src/planner.py",
-    "src/prompts/registry.py",
-    "src/llm/output_parsers.py",
-    "src/rag.py",
-    "ui/src/api/client.ts",
-    "ui/src/components/shell/AppShell.tsx",
-    "ui/src/components/shell/AgentRail.tsx",
-    "ui/src/components/research/ReportViewer.tsx",
-    "tests/test_api.py",
-    "tests/test_rag.py",
-]
-_EXCLUDED_SEGMENTS = {".git", "node_modules", "dist", "build", ".venv", "venv", "__pycache__"}
-_STOP_WORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "build",
-    "for",
-    "from",
-    "into",
-    "implementation",
-    "need",
-    "plan",
-    "planner",
-    "that",
-    "the",
-    "this",
-    "with",
-}
 
 MODEL_T = TypeVar("MODEL_T", bound=BaseModel)
 _PLANS_LIST_LIMIT = 20
@@ -78,205 +42,165 @@ class PlanningBrief(BaseModel):
         return _require_text(value)
 
 
-class RepoRelevantFile(BaseModel):
-    path: str
-    reason: str
-
-    @field_validator("path", "reason")
-    @classmethod
-    def validate_required_text(cls, value: str) -> str:
-        return _require_text(value)
-
-
-class RepoAnalysis(BaseModel):
-    summary: str
-    relevant_files: list[RepoRelevantFile] = Field(default_factory=list)
-    existing_patterns: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
-    unknowns: list[str] = Field(default_factory=list)
-
-    @field_validator("summary")
-    @classmethod
-    def validate_required_text(cls, value: str) -> str:
-        return _require_text(value)
-
-
-class PlanningApproach(BaseModel):
-    name: str
-    summary: str
-    tradeoffs: list[str] = Field(default_factory=list)
-    file_impact: list[str] = Field(default_factory=list)
-
-    @field_validator("name", "summary")
-    @classmethod
-    def validate_required_text(cls, value: str) -> str:
-        return _require_text(value)
-
-
-class PlanningOptions(BaseModel):
-    approaches: list[PlanningApproach] = Field(default_factory=list)
-    recommended_approach: str
+class PRDRequirement(BaseModel):
+    id: str
+    description: str
+    priority: str  # Must Have / Should Have / Could Have / Won't Have
     rationale: str
-    out_of_scope: list[str] = Field(default_factory=list)
 
-    @field_validator("recommended_approach", "rationale")
-    @classmethod
-    def validate_required_text(cls, value: str) -> str:
-        return _require_text(value)
-
-    @model_validator(mode="after")
-    def validate_approaches(self) -> "PlanningOptions":
-        if not self.approaches:
-            raise ValueError("approaches must not be empty")
-        return self
-
-
-class SoftwareDevPlanFile(BaseModel):
-    path: str
-    reason: str
-
-    @field_validator("path", "reason")
+    @field_validator("id", "description", "priority", "rationale")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         return _require_text(value)
 
 
-class SoftwareDevPlanPhase(BaseModel):
+class PRDMilestone(BaseModel):
     id: str
     title: str
-    objective: str
-    files: list[str] = Field(default_factory=list)
+    description: str
     deliverables: list[str] = Field(default_factory=list)
-    verification: list[str] = Field(default_factory=list)
 
-    @field_validator("id", "title", "objective")
+    @field_validator("id", "title", "description")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         return _require_text(value)
 
 
-class SoftwareDevPlan(BaseModel):
+class PRDPlan(BaseModel):
     title: str
-    summary: str
-    goal: str
-    repo_fit: str
-    architecture: str
-    recommended_approach: str
-    file_map: list[SoftwareDevPlanFile] = Field(default_factory=list)
-    data_api_ui_impacts: list[str] = Field(default_factory=list)
-    phases: list[SoftwareDevPlanPhase] = Field(default_factory=list)
-    validation: list[str] = Field(default_factory=list)
+    executive_summary: str
+    problem_statement: str
+    goals: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    target_users: list[str] = Field(default_factory=list)
+    user_stories: list[str] = Field(default_factory=list)
+    requirements: list[PRDRequirement] = Field(default_factory=list)
+    success_metrics: list[str] = Field(default_factory=list)
+    milestones: list[PRDMilestone] = Field(default_factory=list)
+    out_of_scope: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
-    out_of_scope: list[str] = Field(default_factory=list)
 
-    @field_validator("title", "summary", "goal", "repo_fit", "architecture", "recommended_approach")
+    @field_validator("title", "executive_summary", "problem_statement")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
         return _require_text(value)
 
     @model_validator(mode="after")
-    def validate_lists(self) -> "SoftwareDevPlan":
-        if not self.file_map:
-            raise ValueError("file_map must not be empty")
-        if not self.phases:
-            raise ValueError("phases must not be empty")
-        if not self.validation:
-            raise ValueError("validation must not be empty")
-        if not self.risks:
-            raise ValueError("risks must not be empty")
-        if not self.assumptions:
-            raise ValueError("assumptions must not be empty")
-        if not self.out_of_scope:
-            raise ValueError("out_of_scope must not be empty")
+    def validate_lists(self) -> "PRDPlan":
+        if not self.goals:
+            raise ValueError("goals must not be empty")
+        if not self.target_users:
+            raise ValueError("target_users must not be empty")
+        if not self.user_stories:
+            raise ValueError("user_stories must not be empty")
+        if not self.requirements:
+            raise ValueError("requirements must not be empty")
+        if not self.success_metrics:
+            raise ValueError("success_metrics must not be empty")
+        if not self.milestones:
+            raise ValueError("milestones must not be empty")
         return self
 
     def to_markdown(self) -> str:
         lines: list[str] = [
             f"# {self.title}",
             "",
-            f"{self.summary}",
+            f"{self.executive_summary}",
             "",
-            "## Goal",
+            "## Problem Statement",
             "",
-            self.goal,
+            self.problem_statement,
             "",
-            "## Why this approach fits the current repo",
-            "",
-            self.repo_fit,
-            "",
-            "## Architecture summary",
-            "",
-            self.architecture,
-            "",
-            "## Recommended approach",
-            "",
-            self.recommended_approach,
-            "",
-            "## File/component map",
+            "## Goals",
             "",
         ]
-        for item in self.file_map:
-            lines.append(f"- `{item.path}` — {item.reason}")
-        lines.extend(["", "## Data/API/UI impacts", ""])
-        for impact in self.data_api_ui_impacts:
-            lines.append(f"- {impact}")
-        lines.extend(["", "## Implementation phases", ""])
-        for phase in self.phases:
-            lines.extend(
-                [
-                    f"### {phase.id}: {phase.title}",
-                    "",
-                    phase.objective,
-                    "",
-                    "Files:",
-                ]
-            )
-            for path in phase.files:
-                lines.append(f"- `{path}`")
-            lines.append("")
-            lines.append("Deliverables:")
-            for item in phase.deliverables:
-                lines.append(f"- {item}")
-            lines.append("")
-            lines.append("Verification:")
-            for item in phase.verification:
-                lines.append(f"- {item}")
-            lines.append("")
-        lines.extend(["## Validation plan", ""])
-        for item in self.validation:
+        for goal in self.goals:
+            lines.append(f"- {goal}")
+
+        lines.extend(["", "## Non-Goals", ""])
+        for item in self.non_goals:
             lines.append(f"- {item}")
-        lines.extend(["", "## Risks", ""])
-        for item in self.risks:
-            lines.append(f"- {item}")
-        lines.extend(["", "## Open questions / assumptions", ""])
-        for item in self.assumptions:
-            lines.append(f"- Assumption: {item}")
-        for item in self.open_questions:
-            lines.append(f"- Open question: {item}")
-        lines.extend(["", "## Out of scope", ""])
+
+        lines.extend(["", "## Target Users", ""])
+        for persona in self.target_users:
+            lines.append(f"- {persona}")
+
+        lines.extend(["", "## User Stories", ""])
+        for story in self.user_stories:
+            lines.append(f"- {story}")
+
+        lines.extend(["", "## Requirements", ""])
+        must_haves = [r for r in self.requirements if r.priority == "Must Have"]
+        should_haves = [r for r in self.requirements if r.priority == "Should Have"]
+        could_haves = [r for r in self.requirements if r.priority == "Could Have"]
+        wont_haves = [r for r in self.requirements if r.priority == "Won't Have"]
+
+        for group_label, group in [
+            ("Must Have", must_haves),
+            ("Should Have", should_haves),
+            ("Could Have", could_haves),
+            ("Won't Have", wont_haves),
+        ]:
+            if group:
+                lines.extend([f"### {group_label}", ""])
+                for req in group:
+                    lines.append(f"- **{req.id}**: {req.description}")
+                    lines.append(f"  - *Rationale*: {req.rationale}")
+                lines.append("")
+
+        lines.extend(["## Success Metrics", ""])
+        for metric in self.success_metrics:
+            lines.append(f"- {metric}")
+
+        lines.extend(["", "## Milestones", ""])
+        for milestone in self.milestones:
+            lines.extend([
+                f"### {milestone.id}: {milestone.title}",
+                "",
+                milestone.description,
+                "",
+                "Deliverables:",
+            ])
+            for deliverable in milestone.deliverables:
+                lines.append(f"- {deliverable}")
+            lines.append("")
+
+        lines.extend(["## Out of Scope", ""])
         for item in self.out_of_scope:
             lines.append(f"- {item}")
+
+        lines.extend(["", "## Risks", ""])
+        for risk in self.risks:
+            lines.append(f"- {risk}")
+
+        lines.extend(["", "## Assumptions", ""])
+        for assumption in self.assumptions:
+            lines.append(f"- {assumption}")
+
+        if self.open_questions:
+            lines.extend(["", "## Open Questions", ""])
+            for question in self.open_questions:
+                lines.append(f"- {question}")
+
         return "\n".join(lines).strip() + "\n"
 
 
-class SoftwareDevPlanReview(BaseModel):
+class PRDPlanReview(BaseModel):
     approved: bool
     reviewer_notes: list[str] = Field(default_factory=list)
-    revised_plan: SoftwareDevPlan
+    revised_plan: PRDPlan
 
 
-class SoftwareDevPlanResponse(BaseModel):
-    plan: SoftwareDevPlan
+class PRDPlanResponse(BaseModel):
+    plan: PRDPlan
     markdown: str
     suggested_filename: str
     planning_brief: PlanningBrief
-    repo_analysis: RepoAnalysis
-    planning_options: PlanningOptions
 
 
-class SavedSoftwareDevPlanSummary(BaseModel):
+class SavedPRDSummary(BaseModel):
     plan_id: str
     title: str
     summary: str
@@ -285,7 +209,7 @@ class SavedSoftwareDevPlanSummary(BaseModel):
     updated_at: str
 
 
-class SavedSoftwareDevPlan(SoftwareDevPlanResponse):
+class SavedPRD(PRDPlanResponse):
     plan_id: str
     prompt: str
     prompt_preview: str
@@ -293,22 +217,8 @@ class SavedSoftwareDevPlan(SoftwareDevPlanResponse):
     updated_at: str
 
 
-class SavedSoftwareDevPlanListResponse(BaseModel):
-    plans: list[SavedSoftwareDevPlanSummary] = Field(default_factory=list)
-
-
-@dataclass
-class RepoContext:
-    inventory: list[str]
-    highlighted_files: list[str]
-
-    def render(self) -> str:
-        lines = ["Repository inventory:"]
-        lines.extend(f"- {item}" for item in self.inventory)
-        lines.append("")
-        lines.append("Highlighted files:")
-        lines.extend(f"- {item}" for item in self.highlighted_files)
-        return "\n".join(lines)
+class SavedPRDListResponse(BaseModel):
+    plans: list[SavedPRDSummary] = Field(default_factory=list)
 
 
 def _require_text(value: str) -> str:
@@ -336,8 +246,8 @@ def _prompt_preview(prompt: str) -> str:
     return cleaned[: _PROMPT_PREVIEW_LIMIT - 1].rstrip() + "…"
 
 
-def _saved_plan_summary_from_row(row: dict[str, object]) -> SavedSoftwareDevPlanSummary:
-    return SavedSoftwareDevPlanSummary(
+def _saved_prd_summary_from_row(row: dict[str, object]) -> SavedPRDSummary:
+    return SavedPRDSummary(
         plan_id=str(row["id"]),
         title=str(row.get("title") or ""),
         summary=str(row.get("summary") or ""),
@@ -347,16 +257,25 @@ def _saved_plan_summary_from_row(row: dict[str, object]) -> SavedSoftwareDevPlan
     )
 
 
-def _saved_plan_response_from_row(row: dict[str, object]) -> SavedSoftwareDevPlan:
-    response = SoftwareDevPlanResponse(
-        plan=SoftwareDevPlan.model_validate(row.get("plan_json") or {}),
+def _saved_prd_from_row(row: dict[str, object]) -> SavedPRD:
+    try:
+        plan = PRDPlan.model_validate(row.get("plan_json") or {})
+    except (ValidationError, Exception):
+        raise PlannerValidationError("prd_load_failed", "Stored PRD has an incompatible format.")
+
+    brief_raw = row.get("planning_brief_json") or {}
+    try:
+        planning_brief = PlanningBrief.model_validate(brief_raw)
+    except (ValidationError, Exception):
+        planning_brief = PlanningBrief(problem_statement="—", desired_outcome="—")
+
+    response = PRDPlanResponse(
+        plan=plan,
         markdown=str(row.get("markdown") or ""),
         suggested_filename=str(row.get("suggested_filename") or ""),
-        planning_brief=PlanningBrief.model_validate(row.get("planning_brief_json") or {}),
-        repo_analysis=RepoAnalysis.model_validate(row.get("repo_analysis_json") or {}),
-        planning_options=PlanningOptions.model_validate(row.get("planning_options_json") or {}),
+        planning_brief=planning_brief,
     )
-    return SavedSoftwareDevPlan(
+    return SavedPRD(
         plan_id=str(row["id"]),
         prompt=str(row.get("prompt") or ""),
         prompt_preview=str(row.get("prompt_preview") or ""),
@@ -366,71 +285,9 @@ def _saved_plan_response_from_row(row: dict[str, object]) -> SavedSoftwareDevPla
     )
 
 
-def _normalize_keywords(prompt: str) -> list[str]:
-    words = re.findall(r"[a-zA-Z0-9_./-]+", prompt.lower())
-    keywords: list[str] = []
-    for word in words:
-        token = word.strip("._-/")
-        if len(token) < 4 or token in _STOP_WORDS:
-            continue
-        if token not in keywords:
-            keywords.append(token)
-    return keywords[:8]
-
-
-def _iter_repo_files() -> list[Path]:
-    candidates: list[Path] = []
-    for root_name in ("src", "ui/src", "tests", "docs", ".archon"):
-        root = PROJECT_ROOT / root_name
-        if not root.exists():
-            continue
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            if any(segment in _EXCLUDED_SEGMENTS for segment in path.parts):
-                continue
-            if path.suffix.lower() not in {".py", ".ts", ".tsx", ".md", ".yaml", ".yml", ".json"}:
-                continue
-            candidates.append(path)
-    return candidates
-
-
-def _build_repo_context(user_prompt: str) -> RepoContext:
-    keywords = _normalize_keywords(user_prompt)
-    repo_files = _iter_repo_files()
-
-    inventory_counts: dict[str, int] = {}
-    for path in repo_files:
-        rel = path.relative_to(PROJECT_ROOT)
-        top = rel.parts[0]
-        inventory_counts[top] = inventory_counts.get(top, 0) + 1
-
-    inventory = [f"{name}/ ({count} files)" for name, count in sorted(inventory_counts.items())]
-
-    highlighted: list[str] = []
-    for rel_path in _DEFAULT_REPO_FILES:
-        candidate = PROJECT_ROOT / rel_path
-        if candidate.exists():
-            highlighted.append(rel_path)
-
-    ranked: list[tuple[int, str]] = []
-    for path in repo_files:
-        rel = str(path.relative_to(PROJECT_ROOT))
-        rel_lower = rel.lower()
-        score = sum(2 for keyword in keywords if keyword in rel_lower)
-        if score:
-            ranked.append((score, rel))
-
-    for _, rel in sorted(ranked, key=lambda item: (-item[0], item[1]))[:12]:
-        if rel not in highlighted:
-            highlighted.append(rel)
-
-    return RepoContext(inventory=inventory[:10], highlighted_files=highlighted[:16])
-
-
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return slug[:80] or "implementation-plan"
+    return slug[:80] or "prd"
 
 
 def _llm_result_to_text(result: object) -> str:
@@ -492,90 +349,61 @@ def _invoke_structured_stage(
         ) from exc
 
 
-def _generate_software_dev_plan_sync(user_prompt: str) -> SoftwareDevPlanResponse:
+def _generate_prd_sync(user_prompt: str) -> PRDPlanResponse:
     normalized_prompt = user_prompt.strip()
     if not normalized_prompt:
         raise PlannerValidationError("planner_prompt_required", "A planning request is required.")
 
-    repo_context = _build_repo_context(normalized_prompt)
-    shared_context = {
-        "user_prompt": normalized_prompt,
-        "repo_context": repo_context.render(),
-    }
+    shared_context: dict[str, object] = {"user_prompt": normalized_prompt}
 
     planning_brief = _invoke_structured_stage(
-        prompt_name="software_dev_plan_intake",
+        prompt_name="prd_intake",
         context=shared_context,
         model=PlanningBrief,
         temperature=0.1,
     )
-    repo_analysis = _invoke_structured_stage(
-        prompt_name="software_dev_plan_repo_analysis",
+    draft_plan = _invoke_structured_stage(
+        prompt_name="prd_synthesis",
         context={
             **shared_context,
             "planning_brief_json": planning_brief.model_dump_json(indent=2),
         },
-        model=RepoAnalysis,
-        temperature=0.1,
-    )
-    planning_options = _invoke_structured_stage(
-        prompt_name="software_dev_plan_options",
-        context={
-            **shared_context,
-            "planning_brief_json": planning_brief.model_dump_json(indent=2),
-            "repo_analysis_json": repo_analysis.model_dump_json(indent=2),
-        },
-        model=PlanningOptions,
+        model=PRDPlan,
         temperature=0.2,
     )
-    draft_plan = _invoke_structured_stage(
-        prompt_name="software_dev_plan_synthesis",
-        context={
-            **shared_context,
-            "planning_brief_json": planning_brief.model_dump_json(indent=2),
-            "repo_analysis_json": repo_analysis.model_dump_json(indent=2),
-            "planning_options_json": planning_options.model_dump_json(indent=2),
-        },
-        model=SoftwareDevPlan,
-        temperature=0.15,
-    )
     review = _invoke_structured_stage(
-        prompt_name="software_dev_plan_review",
+        prompt_name="prd_review",
         context={
             **shared_context,
             "planning_brief_json": planning_brief.model_dump_json(indent=2),
-            "repo_analysis_json": repo_analysis.model_dump_json(indent=2),
-            "planning_options_json": planning_options.model_dump_json(indent=2),
             "draft_plan_json": draft_plan.model_dump_json(indent=2),
         },
-        model=SoftwareDevPlanReview,
+        model=PRDPlanReview,
         temperature=0.1,
     )
 
     final_plan = review.revised_plan
     markdown = final_plan.to_markdown()
     suggested_filename = (
-        f"{datetime.now(UTC).date().isoformat()}-{_slugify(final_plan.title)}-implementation-plan.md"
+        f"{datetime.now(UTC).date().isoformat()}-{_slugify(final_plan.title)}-prd.md"
     )
-    return SoftwareDevPlanResponse(
+    return PRDPlanResponse(
         plan=final_plan,
         markdown=markdown,
         suggested_filename=suggested_filename,
         planning_brief=planning_brief,
-        repo_analysis=repo_analysis,
-        planning_options=planning_options,
     )
 
 
-async def generate_software_dev_plan(user_prompt: str) -> SoftwareDevPlanResponse:
-    return await asyncio.to_thread(_generate_software_dev_plan_sync, user_prompt)
+async def generate_prd(user_prompt: str) -> PRDPlanResponse:
+    return await asyncio.to_thread(_generate_prd_sync, user_prompt)
 
 
-async def save_software_dev_plan(
+async def save_prd(
     user_id: str,
     prompt: str,
-    response: SoftwareDevPlanResponse,
-) -> SavedSoftwareDevPlan:
+    response: PRDPlanResponse,
+) -> SavedPRD:
     now = datetime.now(UTC).isoformat()
     plan_id = str(uuid.uuid4())
     normalized_prompt = prompt.strip()
@@ -586,30 +414,30 @@ async def save_software_dev_plan(
         "prompt": normalized_prompt,
         "prompt_preview": _prompt_preview(normalized_prompt),
         "title": response.plan.title,
-        "summary": response.plan.summary,
+        "summary": response.plan.executive_summary,
         "suggested_filename": response.suggested_filename,
         "markdown": response.markdown,
         "plan_json": response.plan.model_dump(mode="json"),
         "planning_brief_json": response.planning_brief.model_dump(mode="json"),
-        "repo_analysis_json": response.repo_analysis.model_dump(mode="json"),
-        "planning_options_json": response.planning_options.model_dump(mode="json"),
+        "repo_analysis_json": {},
+        "planning_options_json": {},
         "created_at": now,
         "updated_at": now,
     }
     await _get_store().create_software_dev_plan(saved_row)
-    return _saved_plan_response_from_row(saved_row)
+    return _saved_prd_from_row(saved_row)
 
 
-async def list_saved_software_dev_plans(user_id: str) -> list[SavedSoftwareDevPlanSummary]:
+async def list_saved_prds(user_id: str) -> list[SavedPRDSummary]:
     rows = await _get_store().list_software_dev_plans(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
         limit=_PLANS_LIST_LIMIT,
     )
-    return [_saved_plan_summary_from_row(row) for row in rows]
+    return [_saved_prd_summary_from_row(row) for row in rows]
 
 
-async def get_saved_software_dev_plan(user_id: str, plan_id: str) -> SavedSoftwareDevPlan | None:
+async def get_saved_prd(user_id: str, plan_id: str) -> SavedPRD | None:
     row = await _get_store().get_software_dev_plan(
         plan_id=plan_id,
         owner_id=user_id,
@@ -617,10 +445,13 @@ async def get_saved_software_dev_plan(user_id: str, plan_id: str) -> SavedSoftwa
     )
     if row is None:
         return None
-    return _saved_plan_response_from_row(row)
+    try:
+        return _saved_prd_from_row(row)
+    except PlannerValidationError:
+        return None
 
 
-async def delete_saved_software_dev_plan(user_id: str, plan_id: str) -> bool:
+async def delete_saved_prd(user_id: str, plan_id: str) -> bool:
     return await _get_store().delete_software_dev_plan(
         plan_id=plan_id,
         owner_id=user_id,

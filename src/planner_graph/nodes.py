@@ -15,7 +15,7 @@ from src.llm.output_parsers import (
 )
 from src.planner import (
     PlannerValidationError,
-    _generate_software_dev_plan_sync,
+    _generate_prd_sync,
     _llm_result_to_text,
     _schema_text,
 )
@@ -156,7 +156,7 @@ def generation_node(state: PlannerState) -> PlannerState:
             inputs={"prompt": consolidated_prompt, "is_refinement": previous_plan is not None},
             tags=["planner", "generation"],
         ):
-            response = _generate_software_dev_plan_sync(consolidated_prompt)
+            response = _generate_prd_sync(consolidated_prompt)
     except PlannerValidationError as exc:
         return {
             "error": exc.code,

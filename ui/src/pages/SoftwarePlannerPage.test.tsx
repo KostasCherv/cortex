@@ -1,80 +1,56 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SoftwarePlannerPage } from './SoftwarePlannerPage'
-import type { SavedSoftwareDevPlan } from '@/types'
+import type { SavedPRD } from '@/types'
 
-const { generateSoftwareDevPlanMock, getSoftwareDevPlanMock, listSoftwareDevPlansMock } = vi.hoisted(() => ({
-  generateSoftwareDevPlanMock: vi.fn(),
-  getSoftwareDevPlanMock: vi.fn(),
-  listSoftwareDevPlansMock: vi.fn(),
+const { generatePRDMock, getPRDMock } = vi.hoisted(() => ({
+  generatePRDMock: vi.fn(),
+  getPRDMock: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
-  generateSoftwareDevPlan: generateSoftwareDevPlanMock,
-  getSoftwareDevPlan: getSoftwareDevPlanMock,
-  listSoftwareDevPlans: listSoftwareDevPlansMock,
+  generatePRD: generatePRDMock,
+  getPRD: getPRDMock,
 }))
 
-function buildSavedPlan(overrides: Partial<SavedSoftwareDevPlan> = {}): SavedSoftwareDevPlan {
+function buildSavedPlan(overrides: Partial<SavedPRD> = {}): SavedPRD {
   return {
     plan_id: 'plan-1',
-    prompt: 'Build a software-dev implementation planner.',
-    prompt_preview: 'Build a software-dev implementation planner.',
+    prompt: 'Build a mobile onboarding flow.',
+    prompt_preview: 'Build a mobile onboarding flow.',
     created_at: '2026-05-28T10:00:00+00:00',
     updated_at: '2026-05-28T10:00:00+00:00',
     plan: {
-      title: 'Planner for feature delivery',
-      summary: 'Adds a staged planning workflow.',
-      goal: 'Turn a feature request into an implementation plan.',
-      repo_fit: 'Fits the existing backend/frontend split.',
-      architecture: 'Dedicated planner service plus UI page.',
-      recommended_approach: 'Use staged prompts and a synchronous endpoint.',
-      file_map: [{ path: 'src/planner.py', reason: 'Planner orchestration lives here.' }],
-      data_api_ui_impacts: ['Adds a planner API route and shell view.'],
-      phases: [
-        {
-          id: 'phase-1',
-          title: 'Backend',
-          objective: 'Implement planner service and endpoint.',
-          files: ['src/planner.py', 'src/api/endpoints.py'],
-          deliverables: ['Planner service', 'Planner API route'],
-          verification: ['pytest tests/test_planner.py tests/test_api.py -q'],
-        },
+      title: 'Mobile Onboarding PRD',
+      executive_summary: 'Streamline user onboarding for mobile.',
+      problem_statement: 'New users drop off during onboarding.',
+      goals: ['Reduce onboarding drop-off by 30%', 'Improve first-session activation'],
+      non_goals: ['Redesign the entire mobile app'],
+      target_users: ['New mobile users', 'Enterprise admins'],
+      user_stories: [
+        'As a new user, I want to complete onboarding in under 2 minutes so that I can start using the product quickly.',
       ],
-      validation: ['pytest tests/test_planner.py tests/test_api.py -q'],
-      risks: ['Structured output may require retries.'],
-      assumptions: ['Synchronous generation is acceptable for v1.'],
-      open_questions: ['Should plan history be persisted later?'],
-      out_of_scope: ['Automated implementation.'],
+      requirements: [
+        { id: 'REQ-001', description: 'Onboarding wizard with 3 steps', priority: 'Must Have', rationale: 'Core flow' },
+        { id: 'REQ-002', description: 'Progress indicator', priority: 'Should Have', rationale: 'Reduces anxiety' },
+      ],
+      success_metrics: ['30% reduction in drop-off', 'NPS +10', 'Activation rate > 60%'],
+      milestones: [
+        { id: 'M1', title: 'MVP', description: 'Basic onboarding flow', deliverables: ['Wizard component', 'API endpoint'] },
+      ],
+      out_of_scope: ['Localization'],
+      risks: ['High engineering effort if scope creeps'],
+      assumptions: ['Users have the latest app version'],
+      open_questions: ['Should onboarding be skippable?'],
     },
-    markdown: '# Planner for feature delivery\n',
-    suggested_filename: '2026-05-28-planner-for-feature-delivery-implementation-plan.md',
+    markdown: '# Mobile Onboarding PRD\n',
+    suggested_filename: '2026-05-28-mobile-onboarding-prd.md',
     planning_brief: {
-      problem_statement: 'Need implementation planning.',
-      desired_outcome: 'Return a markdown plan.',
-      constraints: ['Stay repo-grounded.'],
-      assumptions: ['Users are signed in.'],
+      problem_statement: 'Users drop off during onboarding.',
+      desired_outcome: 'Increase activation rate.',
+      constraints: ['Must ship in Q3'],
+      assumptions: ['Users are on iOS or Android'],
       open_questions: [],
-    },
-    repo_analysis: {
-      summary: 'Existing endpoint and shell patterns are reusable.',
-      relevant_files: [{ path: 'src/api/endpoints.py', reason: 'Planner endpoint belongs here.' }],
-      existing_patterns: ['Prompt-template driven generation.'],
-      constraints: ['Plan only in v1.'],
-      unknowns: [],
-    },
-    planning_options: {
-      approaches: [
-        {
-          name: 'Dedicated planner module',
-          summary: 'Keep planner logic separate from RAG helpers.',
-          tradeoffs: ['Slightly larger diff, but cleaner boundaries.'],
-          file_impact: ['src/planner.py', 'ui/src/pages/SoftwarePlannerPage.tsx'],
-        },
-      ],
-      recommended_approach: 'Dedicated planner module',
-      rationale: 'Clear ownership and easier iteration.',
-      out_of_scope: ['True distributed multi-agent execution.'],
     },
     ...overrides,
   }
@@ -92,9 +68,8 @@ function createDeferred<T>() {
 
 describe('SoftwarePlannerPage', () => {
   beforeEach(() => {
-    generateSoftwareDevPlanMock.mockReset()
-    getSoftwareDevPlanMock.mockReset()
-    listSoftwareDevPlansMock.mockReset()
+    generatePRDMock.mockReset()
+    getPRDMock.mockReset()
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn(() => 'blob:test-url'),
       revokeObjectURL: vi.fn(),
@@ -104,7 +79,6 @@ describe('SoftwarePlannerPage', () => {
   it('keeps saved plans out of the planner page and relies on the sidebar for selection', () => {
     render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
 
-    expect(listSoftwareDevPlansMock).not.toHaveBeenCalled()
     expect(screen.queryByText('Saved plans')).not.toBeInTheDocument()
     expect(screen.getByText('Generate a new plan or choose one from the sidebar to view its details.')).toBeInTheDocument()
   })
@@ -116,16 +90,16 @@ describe('SoftwarePlannerPage', () => {
       plan: {
         ...buildSavedPlan().plan,
         title: 'Sidebar selected plan',
-        summary: 'Selected from the rail',
+        executive_summary: 'Selected from the rail',
       },
       markdown: '# Sidebar selected plan\n',
     })
-    getSoftwareDevPlanMock.mockResolvedValue(detail)
+    getPRDMock.mockResolvedValue(detail)
 
     render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-sidebar" />)
 
     await waitFor(() => {
-      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-sidebar', 'token')
+      expect(getPRDMock).toHaveBeenCalledWith('plan-sidebar', 'token')
     })
 
     expect(screen.getAllByText('Sidebar selected plan').length).toBeGreaterThan(0)
@@ -136,18 +110,18 @@ describe('SoftwarePlannerPage', () => {
     const firstDetail = buildSavedPlan({
       plan_id: 'plan-1',
       prompt_preview: 'First prompt preview',
-      plan: { ...buildSavedPlan().plan, title: 'First saved plan', summary: 'First summary' },
+      plan: { ...buildSavedPlan().plan, title: 'First saved plan', executive_summary: 'First summary' },
       markdown: '# First saved plan\n',
     })
     const secondDetail = buildSavedPlan({
       plan_id: 'plan-2',
       prompt_preview: 'Second prompt preview',
-      plan: { ...buildSavedPlan().plan, title: 'Second saved plan', summary: 'Second summary' },
+      plan: { ...buildSavedPlan().plan, title: 'Second saved plan', executive_summary: 'Second summary' },
       markdown: '# Second saved plan\n',
     })
-    const firstDeferred = createDeferred<SavedSoftwareDevPlan>()
-    const secondDeferred = createDeferred<SavedSoftwareDevPlan>()
-    getSoftwareDevPlanMock.mockImplementation((planId: string) =>
+    const firstDeferred = createDeferred<SavedPRD>()
+    const secondDeferred = createDeferred<SavedPRD>()
+    getPRDMock.mockImplementation((planId: string) =>
       planId === 'plan-1' ? firstDeferred.promise : secondDeferred.promise,
     )
 
@@ -156,13 +130,13 @@ describe('SoftwarePlannerPage', () => {
     )
 
     await waitFor(() => {
-      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-1', 'token')
+      expect(getPRDMock).toHaveBeenCalledWith('plan-1', 'token')
     })
 
     rerender(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-2" />)
 
     await waitFor(() => {
-      expect(getSoftwareDevPlanMock).toHaveBeenCalledWith('plan-2', 'token')
+      expect(getPRDMock).toHaveBeenCalledWith('plan-2', 'token')
     })
 
     await act(async () => {
@@ -186,7 +160,7 @@ describe('SoftwarePlannerPage', () => {
   it('renders a newly generated plan and notifies the sidebar to refresh', async () => {
     const newPlan = buildSavedPlan()
     const onPlansChanged = vi.fn()
-    generateSoftwareDevPlanMock.mockResolvedValue(newPlan)
+    generatePRDMock.mockResolvedValue(newPlan)
 
     render(
       <SoftwarePlannerPage
@@ -195,19 +169,19 @@ describe('SoftwarePlannerPage', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText(/what should the planner design/i), {
-      target: { value: 'Build a software-dev implementation planner.' },
+    fireEvent.change(screen.getByLabelText(/what product idea should we document/i), {
+      target: { value: 'Build a mobile onboarding flow.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /generate plan/i }))
+    fireEvent.click(screen.getByRole('button', { name: /generate prd/i }))
 
     await waitFor(() => {
-      expect(generateSoftwareDevPlanMock).toHaveBeenCalledWith(
-        'Build a software-dev implementation planner.',
+      expect(generatePRDMock).toHaveBeenCalledWith(
+        'Build a mobile onboarding flow.',
         'token',
       )
     })
 
-    const plannerTitles = await screen.findAllByText('Planner for feature delivery')
+    const plannerTitles = await screen.findAllByText('Mobile Onboarding PRD')
     expect(plannerTitles.length).toBeGreaterThan(0)
     expect(screen.getByRole('button', { name: /download markdown/i })).toBeInTheDocument()
     expect(onPlansChanged).toHaveBeenCalledTimes(1)
@@ -215,7 +189,7 @@ describe('SoftwarePlannerPage', () => {
 
   it('downloads markdown for the selected saved plan', async () => {
     const savedPlan = buildSavedPlan()
-    generateSoftwareDevPlanMock.mockResolvedValue(savedPlan)
+    generatePRDMock.mockResolvedValue(savedPlan)
 
     const anchor = document.createElement('a')
     const clickSpy = vi.spyOn(anchor, 'click').mockImplementation(() => {})
@@ -228,10 +202,10 @@ describe('SoftwarePlannerPage', () => {
 
     render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
 
-    fireEvent.change(screen.getByLabelText(/what should the planner design/i), {
-      target: { value: 'Build a software-dev implementation planner.' },
+    fireEvent.change(screen.getByLabelText(/what product idea should we document/i), {
+      target: { value: 'Build a mobile onboarding flow.' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /generate plan/i }))
+    fireEvent.click(screen.getByRole('button', { name: /generate prd/i }))
 
     const downloadButton = await screen.findByRole('button', { name: /download markdown/i })
     fireEvent.click(downloadButton)

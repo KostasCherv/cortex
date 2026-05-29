@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
 from src.auth import AuthenticatedUser, get_authenticated_user
-from src.planner import save_software_dev_plan
+from src.planner import save_prd
 from src.planner_graph.graph import planner_graph
 from src.planner_graph.thread_store import planner_thread_store
 
@@ -122,8 +122,6 @@ async def _stream_planner_turn(
             "markdown": final_plan.markdown,
             "suggested_filename": final_plan.suggested_filename,
             "planning_brief": final_plan.planning_brief.model_dump(mode="json"),
-            "repo_analysis": final_plan.repo_analysis.model_dump(mode="json"),
-            "planning_options": final_plan.planning_options.model_dump(mode="json"),
         }
         yield _sse_line(plan_event)
 
@@ -138,7 +136,7 @@ async def _stream_planner_turn(
 
         # Persist to Supabase (non-fatal if it fails)
         try:
-            await save_software_dev_plan(user_id, message, final_plan)
+            await save_prd(user_id, message, final_plan)
         except Exception as persist_exc:
             logger.warning("Failed to persist planner output: %s", persist_exc)
 
