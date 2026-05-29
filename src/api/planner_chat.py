@@ -106,6 +106,9 @@ async def _stream_planner_turn(
         yield _sse_line({"type": "done"})
         return
 
+    # Determine AI response content and update LangGraph conversation history
+    ai_history_content: str | None = None
+
     if final_plan is not None:
         # Stream the plan markdown in chunks for a streaming feel
         markdown = final_plan.markdown
@@ -139,6 +142,13 @@ async def _stream_planner_turn(
         except Exception as persist_exc:
             logger.warning("Failed to persist planner output: %s", persist_exc)
 
+        # Store a compact summary in history (not the full markdown) to keep
+        # the context manageable for future clarification/refinement turns.
+        ai_history_content = (
+            "I have generated a complete software development plan based on our discussion. "
+            "If you'd like to refine it, describe what you'd like to change."
+        )
+
     elif clarification_question:
         yield _sse_line({"type": "chunk", "text": clarification_question})
         planner_thread_store.append_message(
@@ -150,6 +160,7 @@ async def _stream_planner_turn(
                 "created_at": datetime.now(UTC).isoformat(),
             },
         )
+        ai_history_content = clarification_question
     else:
         # Graph ended without producing a question or plan (unexpected)
         msg = "I'm ready to generate your plan. What else would you like to clarify?"
@@ -163,6 +174,20 @@ async def _stream_planner_turn(
                 "created_at": datetime.now(UTC).isoformat(),
             },
         )
+        ai_history_content = msg
+
+    # Persist the AI response back into the LangGraph conversation history so
+    # future turns (refinements) have full context about what was said.
+    if ai_history_content:
+        updated_history = new_history + [AIMessage(content=ai_history_content)]
+        try:
+            await asyncio.to_thread(
+                planner_graph.update_state,
+                config,
+                {"conversation_history": updated_history},
+            )
+        except Exception as update_exc:
+            logger.warning("Failed to update planner graph state: %s", update_exc)
 
     yield _sse_line({"type": "done"})
 

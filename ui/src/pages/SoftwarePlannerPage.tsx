@@ -157,7 +157,16 @@ function PlannerInteractiveChat({
             created_at: new Date().toISOString(),
             plan_saved: savedPlan ?? undefined,
           }
-          setMessages((prev) => [...prev, assistantMessage])
+          const nextMessages: ChatMessage[] = [assistantMessage]
+          if (savedPlan) {
+            nextMessages.push({
+              message_id: `hint-${requestId}`,
+              role: 'assistant',
+              content: "_Plan generated. Describe any changes you’d like to make — the AI will produce a refined version._",
+              created_at: new Date().toISOString(),
+            })
+          }
+          setMessages((prev) => [...prev, ...nextMessages])
           setStreamingText('')
           if (savedPlan) {
             setLatestPlan(savedPlan)
@@ -279,7 +288,7 @@ function PlannerInteractiveChat({
             <div className="flex gap-2 items-end">
               <Textarea
                 className="resize-none min-h-10 max-h-32 text-sm"
-                placeholder="Describe your feature or goal..."
+                placeholder={lastPlan ? 'Describe what to change or add to the plan…' : 'Describe your feature or goal…'}
                 rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

@@ -126,19 +126,34 @@ def generation_node(state: PlannerState) -> PlannerState:
         return {"error": state["error"]}
 
     conversation_history = state.get("conversation_history") or []
-    human_messages = [
-        msg.content if isinstance(msg.content, str) else str(msg.content)
-        for msg in conversation_history
-        if msg.type == "human"
-    ]
-    consolidated_prompt = "\n\n".join(human_messages)
+    previous_plan = state.get("final_plan")
+
+    if previous_plan is not None:
+        # Refinement mode: pass the previous plan + full conversation so the
+        # generator knows exactly what to change.
+        history_text = _serialize_history(conversation_history)
+        consolidated_prompt = (
+            "PREVIOUS PLAN (to be refined):\n"
+            f"{previous_plan.markdown}\n\n"
+            "---\n\n"
+            "FULL CONVERSATION (including refinement requests):\n"
+            f"{history_text}"
+        )
+    else:
+        # Initial generation: distil all human messages into one requirement block.
+        human_messages = [
+            msg.content if isinstance(msg.content, str) else str(msg.content)
+            for msg in conversation_history
+            if msg.type == "human"
+        ]
+        consolidated_prompt = "\n\n".join(human_messages)
 
     try:
         with start_step_span(
             name="planner.generation_node.generate_plan",
             run_type="chain",
             node_name="generation_node",
-            inputs={"prompt": consolidated_prompt},
+            inputs={"prompt": consolidated_prompt, "is_refinement": previous_plan is not None},
             tags=["planner", "generation"],
         ):
             response = _generate_software_dev_plan_sync(consolidated_prompt)
