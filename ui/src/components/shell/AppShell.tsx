@@ -16,7 +16,7 @@ type HealthState = 'loading' | 'online' | 'offline'
 export type ActiveView =
   | { type: 'chat' }
   | { type: 'research' }
-  | { type: 'software-planner'; planId?: string | null }
+  | { type: 'prd-planner'; planId?: string | null }
   | { type: 'rag-agent'; agent: RagAgent }
   | { type: 'resources' }
 
@@ -234,11 +234,11 @@ export function AppShell() {
             onSessionsChanged={handleSessionsChanged}
           />
         )}
-        {activeView.type === 'software-planner' && (
+        {activeView.type === 'prd-planner' && (
           <PRDPlannerPage
             authSession={authSession}
             activePlanId={activeView.planId ?? null}
-            onPlanActivated={(planId) => setActiveView({ type: 'software-planner', planId })}
+            onPlanActivated={(planId) => setActiveView({ type: 'prd-planner', planId })}
             onPlansChanged={() => setPlannerRefreshToken((value) => value + 1)}
           />
         )}

@@ -28,7 +28,7 @@ function renderRail(overrides: Partial<ComponentProps<typeof AgentRail>> = {}) {
       <AgentRail
         health="online"
         authSession={{ access_token: 'token', user: { email: 'user@example.com' } } as never}
-        activeView={{ type: 'software-planner' }}
+        activeView={{ type: 'prd-planner' }}
         ragAgents={[]}
         activeSessionId={null}
         sessionRefreshToken={0}
@@ -90,6 +90,6 @@ describe('AgentRail', () => {
     const savedPlanButton = await screen.findByRole('button', { name: /mobile onboarding prd/i })
     savedPlanButton.click()
 
-    expect(onViewChange).toHaveBeenCalledWith({ type: 'software-planner', planId: 'plan-1' })
+    expect(onViewChange).toHaveBeenCalledWith({ type: 'prd-planner', planId: 'plan-1' })
   })
 })

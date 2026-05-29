@@ -887,7 +887,7 @@ export function AgentRail({
 
   const isChat = activeView.type === 'chat'
   const isResearch = activeView.type === 'research'
-  const isPRDPlanner = activeView.type === 'software-planner'
+  const isPRDPlanner = activeView.type === 'prd-planner'
   const isResources = activeView.type === 'resources'
 
   return (
@@ -985,7 +985,7 @@ export function AgentRail({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => onViewChange({ type: 'software-planner' })}
+              onClick={() => onViewChange({ type: 'prd-planner' })}
               className={cn(
                 'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
                 isPRDPlanner
@@ -1000,7 +1000,7 @@ export function AgentRail({
               variant="ghost"
               size="icon"
               className="size-6 shrink-0 rounded-md border border-border bg-background text-foreground shadow-sm hover:border-primary/30 hover:bg-background hover:text-primary"
-              onClick={() => onViewChange({ type: 'software-planner', planId: null })}
+              onClick={() => onViewChange({ type: 'prd-planner', planId: null })}
               aria-label="New planner session"
               title="New planner session"
             >
@@ -1014,9 +1014,9 @@ export function AgentRail({
                   accessToken={authSession.access_token}
                   activePlanId={activeView.planId ?? null}
                   refreshToken={plannerRefreshToken}
-                  onSelect={(planId) => onViewChange({ type: 'software-planner', planId })}
+                  onSelect={(planId) => onViewChange({ type: 'prd-planner', planId })}
                   onDeleted={(planId) => {
-                    if (activeView.planId === planId) onViewChange({ type: 'software-planner', planId: null })
+                    if (activeView.planId === planId) onViewChange({ type: 'prd-planner', planId: null })
                   }}
                 />
               </div>
