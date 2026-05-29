@@ -322,7 +322,15 @@ def _invoke_structured_stage(
 
     prompt_text, _ = prompt_registry.render(prompt_name, dict(context))
     llm = get_llm(temperature=temperature)
-    result = llm.invoke(prompt_text)
+    try:
+        result = llm.invoke(prompt_text)
+    except (ValidationError, StructuredOutputError):
+        raise
+    except Exception as api_exc:
+        raise PlannerValidationError(
+            "llm_api_error",
+            f"LLM API error in stage '{prompt_name}': {api_exc}",
+        ) from api_exc
     raw_text = _llm_result_to_text(result)
 
     try:
@@ -333,7 +341,13 @@ def _invoke_structured_stage(
             invalid_response=raw_text,
             validation_error=exc,
         )
-        repair_result = llm.invoke(repair_prompt)
+        try:
+            repair_result = llm.invoke(repair_prompt)
+        except Exception as api_exc:
+            raise PlannerValidationError(
+                "llm_api_error",
+                f"LLM API error during repair in stage '{prompt_name}': {api_exc}",
+            ) from api_exc
         repair_text = _llm_result_to_text(repair_result)
         try:
             return parse_model_json(repair_text, model=model)

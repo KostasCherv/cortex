@@ -71,14 +71,22 @@ def clarification_node(state: PlannerState) -> PlannerState:
     )
 
     llm = get_llm(temperature=0.2)
-    with start_step_span(
-        name="planner.clarification_node.llm_invoke",
-        run_type="llm",
-        node_name="clarification_node",
-        inputs={"prompt": prompt_text},
-        tags=["planner", "clarification"],
-    ):
-        result = llm.invoke(prompt_text)
+    try:
+        with start_step_span(
+            name="planner.clarification_node.llm_invoke",
+            run_type="llm",
+            node_name="clarification_node",
+            inputs={"prompt": prompt_text},
+            tags=["planner", "clarification"],
+        ):
+            result = llm.invoke(prompt_text)
+    except Exception as exc:
+        logger.error("LLM API error in clarification_node: %s", exc)
+        return {
+            "error": "llm_api_error",
+            "ready_to_generate": True,
+            "turn_count": turn_count,
+        }
     raw_text = _llm_result_to_text(result)
 
     try:
@@ -160,6 +168,12 @@ def generation_node(state: PlannerState) -> PlannerState:
     except PlannerValidationError as exc:
         return {
             "error": exc.code,
+            "final_plan": None,
+        }
+    except Exception as exc:
+        logger.error("Unexpected error in generation_node: %s", exc)
+        return {
+            "error": "generation_unexpected_error",
             "final_plan": None,
         }
 
