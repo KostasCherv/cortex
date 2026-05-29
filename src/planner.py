@@ -438,12 +438,12 @@ async def save_prd(
         "created_at": now,
         "updated_at": now,
     }
-    await _get_store().create_software_dev_plan(saved_row)
+    await _get_store().create_prd_plan(saved_row)
     return _saved_prd_from_row(saved_row)
 
 
 async def list_saved_prds(user_id: str) -> list[SavedPRDSummary]:
-    rows = await _get_store().list_software_dev_plans(
+    rows = await _get_store().list_prd_plans(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
         limit=_PLANS_LIST_LIMIT,
@@ -452,7 +452,7 @@ async def list_saved_prds(user_id: str) -> list[SavedPRDSummary]:
 
 
 async def get_saved_prd(user_id: str, plan_id: str) -> SavedPRD | None:
-    row = await _get_store().get_software_dev_plan(
+    row = await _get_store().get_prd_plan(
         plan_id=plan_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
@@ -466,7 +466,7 @@ async def get_saved_prd(user_id: str, plan_id: str) -> SavedPRD | None:
 
 
 async def delete_saved_prd(user_id: str, plan_id: str) -> bool:
-    return await _get_store().delete_software_dev_plan(
+    return await _get_store().delete_prd_plan(
         plan_id=plan_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),

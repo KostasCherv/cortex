@@ -66,7 +66,7 @@ class SupabaseSessionStore:
     _CACHE_PREFIX_RAG_AGENTS_LIST = "rag:agents:list"
     _CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST = "rag:chat:sessions:list"
     _CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST = "rag:chat:messages:list"
-    _CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST = "planner:software-dev:list"
+    _CACHE_PREFIX_PRD_PLANS_LIST = "planner:prd:list"
 
     async def _request(
         self,
@@ -189,9 +189,9 @@ class SupabaseSessionStore:
         )
         await self._cache_delete(key)
 
-    async def _invalidate_software_dev_plans_list_cache(self, owner_id: str, workspace_id: str) -> None:
+    async def _invalidate_prd_plans_list_cache(self, owner_id: str, workspace_id: str) -> None:
         key = self._cache_key(
-            self._CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST,
+            self._CACHE_PREFIX_PRD_PLANS_LIST,
             f"{owner_id}:{workspace_id}",
         )
         await self._cache_delete(key)
@@ -1193,10 +1193,10 @@ class SupabaseSessionStore:
         return response.json()
 
     # ------------------------------------------------------------------
-    # Software planner plans
+    # PRD plans
     # ------------------------------------------------------------------
 
-    async def create_software_dev_plan(self, payload: dict[str, Any]) -> None:
+    async def create_prd_plan(self, payload: dict[str, Any]) -> None:
         body = {
             "id": payload["id"],
             "owner_id": payload["owner_id"],
@@ -1215,12 +1215,12 @@ class SupabaseSessionStore:
             "updated_at": payload["updated_at"],
         }
         await self._request("POST", "software_dev_plans", json_body=body)
-        await self._invalidate_software_dev_plans_list_cache(
+        await self._invalidate_prd_plans_list_cache(
             payload["owner_id"],
             payload["workspace_id"],
         )
 
-    async def list_software_dev_plans(
+    async def list_prd_plans(
         self,
         *,
         owner_id: str,
@@ -1228,7 +1228,7 @@ class SupabaseSessionStore:
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         cache_key = self._cache_key(
-            self._CACHE_PREFIX_SOFTWARE_DEV_PLANS_LIST,
+            self._CACHE_PREFIX_PRD_PLANS_LIST,
             f"{owner_id}:{workspace_id}",
         )
         cached = await self._cache_get_list(cache_key)
@@ -1250,7 +1250,7 @@ class SupabaseSessionStore:
         await self._cache_set_list(cache_key, rows)
         return rows
 
-    async def get_software_dev_plan(
+    async def get_prd_plan(
         self,
         *,
         plan_id: str,
@@ -1277,7 +1277,7 @@ class SupabaseSessionStore:
             return None
         return rows[0]
 
-    async def delete_software_dev_plan(
+    async def delete_prd_plan(
         self,
         *,
         plan_id: str,
@@ -1295,7 +1295,7 @@ class SupabaseSessionStore:
         )
         deleted = response.status_code in (200, 204)
         if deleted:
-            await self._invalidate_software_dev_plans_list_cache(owner_id, workspace_id)
+            await self._invalidate_prd_plans_list_cache(owner_id, workspace_id)
         return deleted
 
     # ------------------------------------------------------------------

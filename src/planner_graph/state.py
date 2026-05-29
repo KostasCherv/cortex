@@ -13,7 +13,7 @@ class PlannerState(TypedDict, total=False):
     conversation_history: list[BaseMessage]
     ready_to_generate: bool
     clarification_question: str | None
-    final_plan: Any  # SoftwareDevPlanResponse | None — Any avoids forward-ref resolution by LangGraph
+    final_plan: Any  # PRDPlanResponse | None — Any avoids forward-ref resolution by LangGraph
     turn_count: int
     max_clarification_turns: int
     thread_id: str
