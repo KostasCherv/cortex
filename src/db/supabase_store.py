@@ -1209,12 +1209,10 @@ class SupabaseSessionStore:
             "markdown": payload["markdown"],
             "plan_json": payload["plan_json"],
             "planning_brief_json": payload["planning_brief_json"],
-            "repo_analysis_json": payload["repo_analysis_json"],
-            "planning_options_json": payload["planning_options_json"],
             "created_at": payload["created_at"],
             "updated_at": payload["updated_at"],
         }
-        await self._request("POST", "software_dev_plans", json_body=body)
+        await self._request("POST", "prds", json_body=body)
         await self._invalidate_prd_plans_list_cache(
             payload["owner_id"],
             payload["workspace_id"],
@@ -1237,7 +1235,7 @@ class SupabaseSessionStore:
 
         response = await self._request(
             "GET",
-            "software_dev_plans",
+            "prds",
             params={
                 "select": "id,title,summary,prompt_preview,created_at,updated_at",
                 "owner_id": f"eq.{owner_id}",
@@ -1259,12 +1257,12 @@ class SupabaseSessionStore:
     ) -> dict[str, Any] | None:
         response = await self._request(
             "GET",
-            "software_dev_plans",
+            "prds",
             params={
                 "select": (
                     "id,owner_id,workspace_id,prompt,prompt_preview,title,summary,"
                     "suggested_filename,markdown,plan_json,planning_brief_json,"
-                    "repo_analysis_json,planning_options_json,created_at,updated_at"
+                    "created_at,updated_at"
                 ),
                 "id": f"eq.{plan_id}",
                 "owner_id": f"eq.{owner_id}",
@@ -1286,7 +1284,7 @@ class SupabaseSessionStore:
     ) -> bool:
         response = await self._request(
             "DELETE",
-            "software_dev_plans",
+            "prds",
             params={
                 "id": f"eq.{plan_id}",
                 "owner_id": f"eq.{owner_id}",

@@ -433,8 +433,6 @@ async def save_prd(
         "markdown": response.markdown,
         "plan_json": response.plan.model_dump(mode="json"),
         "planning_brief_json": response.planning_brief.model_dump(mode="json"),
-        "repo_analysis_json": {},
-        "planning_options_json": {},
         "created_at": now,
         "updated_at": now,
     }
