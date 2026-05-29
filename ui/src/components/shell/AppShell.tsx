@@ -6,6 +6,7 @@ import { GenericChat } from '@/components/chat/GenericChat'
 import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { AgentRail } from '@/components/shell/AgentRail'
 import { supabase } from '@/lib/supabase'
+import { ItineraryPlannerPage } from '@/pages/ItineraryPlannerPage'
 import { ResearchPage } from '@/pages/ResearchPage'
 import { ResourcesPage } from '@/pages/ResourcesPage'
 import { PRDPlannerPage } from '@/pages/PRDPlannerPage'
@@ -16,6 +17,8 @@ type HealthState = 'loading' | 'online' | 'offline'
 export type ActiveView =
   | { type: 'chat' }
   | { type: 'research' }
+  | { type: 'prd-planner'; planId?: string | null }
+  | { type: 'itinerary-planner'; sessionId?: string | null }
   | { type: 'prd-planner'; planId?: string | null }
   | { type: 'rag-agent'; agent: RagAgent }
   | { type: 'resources' }
@@ -29,6 +32,7 @@ export function AppShell() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [sessionRefreshToken, setSessionRefreshToken] = useState(0)
   const [plannerRefreshToken, setPlannerRefreshToken] = useState(0)
+  const [itineraryRefreshToken, setItineraryRefreshToken] = useState(0)
   const [newAgentSheetOpen, setNewAgentSheetOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<RagAgent | null>(null)
 
@@ -190,6 +194,7 @@ export function AppShell() {
         activeSessionId={activeSessionId}
         sessionRefreshToken={sessionRefreshToken}
         plannerRefreshToken={plannerRefreshToken}
+        itineraryRefreshToken={itineraryRefreshToken}
         onViewChange={handleViewChange}
         onSessionSelect={setActiveSessionId}
         onSignIn={() => void signInWithGoogle()}
@@ -206,6 +211,9 @@ export function AppShell() {
         onNewResearch={() => {
           setActiveView({ type: 'research' })
           setActiveSessionId(null)
+        }}
+        onNewItinerary={() => {
+          setActiveView({ type: 'itinerary-planner', sessionId: null })
         }}
         onNewChat={() => {
           setActiveView({ type: 'chat' })
@@ -232,6 +240,14 @@ export function AppShell() {
             activeSessionId={activeSessionId}
             onSessionActivated={handleSessionActivated}
             onSessionsChanged={handleSessionsChanged}
+          />
+        )}
+        {activeView.type === 'itinerary-planner' && (
+          <ItineraryPlannerPage
+            authSession={authSession}
+            activeSessionId={activeView.sessionId ?? null}
+            onSessionActivated={(sessionId) => setActiveView({ type: 'itinerary-planner', sessionId })}
+            onSessionsChanged={() => setItineraryRefreshToken((value) => value + 1)}
           />
         )}
         {activeView.type === 'prd-planner' && (

@@ -1,0 +1,17 @@
+Extract structured travel requirements from the latest user message.
+
+Return JSON only. Do not include markdown fences.
+Only include fields that can be confidently updated from the message or the conversation.
+If a field is not mentioned, leave it null or empty.
+
+Current requirements:
+{{ current_requirements_json }}
+
+Conversation:
+{{ conversation_text }}
+
+Latest user message:
+{{ user_message }}
+
+Return JSON matching this schema:
+{{ requirements_schema_json }}

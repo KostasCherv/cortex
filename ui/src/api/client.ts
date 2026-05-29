@@ -17,6 +17,10 @@ import type {
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
+  ItineraryPlannerResponse,
+  ItinerarySessionDetail,
+  ItinerarySessionListResponse,
+  ItinerarySessionSummary,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -503,6 +507,101 @@ export async function deletePRD(
   if (!response.ok) {
     throw new Error(await parseApiError(response, `Failed to delete PRD: ${response.status}`))
   }
+}
+
+export async function createItinerarySession(
+  accessToken: string | null,
+  message?: string,
+): Promise<ItinerarySessionSummary | ItineraryPlannerResponse> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ message: message ?? null }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to create itinerary session: ${response.status}`))
+  }
+  return (await response.json()) as ItinerarySessionSummary | ItineraryPlannerResponse
+}
+
+export async function listItinerarySessions(
+  accessToken: string | null,
+): Promise<ItinerarySessionListResponse> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to list itinerary sessions: ${response.status}`))
+  }
+  return (await response.json()) as ItinerarySessionListResponse
+}
+
+export async function getItinerarySession(
+  sessionId: string,
+  accessToken: string | null,
+): Promise<ItinerarySessionDetail> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions/${sessionId}`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to load itinerary session: ${response.status}`))
+  }
+  return (await response.json()) as ItinerarySessionDetail
+}
+
+export async function postItinerarySessionMessage(
+  sessionId: string,
+  message: string,
+  accessToken: string | null,
+): Promise<ItineraryPlannerResponse> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions/${sessionId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ message }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to send itinerary message: ${response.status}`))
+  }
+  return (await response.json()) as ItineraryPlannerResponse
+}
+
+export async function updateItinerarySessionTitle(
+  sessionId: string,
+  title: string,
+  accessToken: string | null,
+): Promise<{ session_id: string; title: string }> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to rename itinerary session: ${response.status}`))
+  }
+  return (await response.json()) as { session_id: string; title: string }
+}
+
+export async function deleteItinerarySession(
+  sessionId: string,
+  accessToken: string | null,
+): Promise<{ session_id: string; deleted: boolean }> {
+  const response = await fetch(`${API_BASE}/api/itinerary/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to delete itinerary session: ${response.status}`))
+  }
+  return (await response.json()) as { session_id: string; deleted: boolean }
 }
 
 export async function createRagAgent(

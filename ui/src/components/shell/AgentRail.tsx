@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ClipboardList, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
+import { Bot, ClipboardList, FolderOpen, Loader2, LogOut, Map, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
   createPortalSession,
+  deleteItinerarySession,
   deleteRagAgent,
   deleteRagAgentChatSession,
   deleteRagWorkspaceChatSession,
   deleteSession,
   deletePRD,
   getBillingUsage,
+  listItinerarySessions,
   listRagAgentChatSessions,
   listRagWorkspaceChatSessions,
   listSessions,
   listPRDs,
+  updateItinerarySessionTitle,
   updateRagAgentChatSessionTitle,
   updateRagWorkspaceChatSessionTitle,
   updateSessionTitle,
@@ -39,7 +42,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
-import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SavedPRDSummary, SessionSummary } from '@/types'
+import type { BillingUsageSummary, ItinerarySessionSummary, RagAgent, RagChatSessionSummary, SavedPRDSummary, SessionSummary } from '@/types'
 import type { ActiveView } from './AppShell'
 
 type Props = {
@@ -50,6 +53,7 @@ type Props = {
   activeSessionId: string | null
   sessionRefreshToken: number
   plannerRefreshToken: number
+  itineraryRefreshToken: number
   onViewChange: (view: ActiveView) => void
   onSessionSelect: (id: string | null) => void
   onSignIn: () => void
@@ -59,6 +63,7 @@ type Props = {
   onNewAgent: () => void
   onNewResearch: () => void
   onNewChat: () => void
+  onNewItinerary: () => void
 }
 
 type ResearchSession = SessionSummary
@@ -833,6 +838,128 @@ function PRDHistoryList({
   )
 }
 
+function ItinerarySessionList({
+  accessToken,
+  activeSessionId,
+  refreshToken,
+  onSelect,
+}: {
+  accessToken: string
+  activeSessionId: string | null
+  refreshToken: number
+  onSelect: (sessionId: string | null) => void
+}) {
+  const [sessions, setSessions] = useState<ItinerarySessionSummary[] | null>(null)
+  const fetchedTokenRef = useRef(-1)
+  const [contextMenu, setContextMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (fetchedTokenRef.current === refreshToken) return
+    fetchedTokenRef.current = refreshToken
+    void listItinerarySessions(accessToken)
+      .then(({ sessions: data }) => setSessions(data))
+      .catch(() => setSessions([]))
+  }, [accessToken, refreshToken])
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const closeMenu = () => setContextMenu(null)
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', closeMenu)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', closeMenu)
+    }
+  }, [contextMenu])
+
+  if (sessions === null) {
+    return (
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <Loader2 size={11} className="animate-spin text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">Loading itineraries</span>
+      </div>
+    )
+  }
+
+  if (sessions.length === 0) {
+    return <p className="px-2 py-1 text-xs text-muted-foreground">No itinerary sessions yet.</p>
+  }
+
+  return (
+    <>
+      {sessions.slice(0, 10).map((session) => (
+        <button
+          key={session.session_id}
+          type="button"
+          onClick={() => onSelect(session.session_id)}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setContextMenu({
+              id: session.session_id,
+              title: session.title,
+              x: event.clientX,
+              y: event.clientY,
+            })
+          }}
+          className={cn(
+            'w-full rounded px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+            activeSessionId === session.session_id
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+          )}
+          title={session.title}
+        >
+          <span className="block truncate">{session.title}</span>
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+            {session.last_message_preview || session.prompt_preview}
+          </span>
+        </button>
+      ))}
+      {contextMenu ? (
+        <div
+          className="fixed z-50 min-w-32 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="w-full rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+            onClick={() => {
+              const nextTitle = window.prompt('Rename itinerary', contextMenu.title)
+              if (!nextTitle?.trim()) return
+              void updateItinerarySessionTitle(contextMenu.id, nextTitle.trim(), accessToken).then(() => {
+                setSessions((prev) =>
+                  prev?.map((item) => (item.session_id === contextMenu.id ? { ...item, title: nextTitle.trim() } : item)) ?? prev,
+                )
+              })
+              setContextMenu(null)
+            }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-sm px-2 py-1.5 text-left text-sm text-destructive hover:bg-accent"
+            onClick={() => {
+              const targetId = contextMenu.id
+              void deleteItinerarySession(targetId, accessToken).then(() => {
+                setSessions((prev) => prev?.filter((item) => item.session_id !== targetId) ?? prev)
+                if (activeSessionId === targetId) onSelect(null)
+              })
+              setContextMenu(null)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 export function AgentRail({
   health,
   authSession,
@@ -841,6 +968,7 @@ export function AgentRail({
   activeSessionId,
   sessionRefreshToken,
   plannerRefreshToken,
+  itineraryRefreshToken,
   onViewChange,
   onSessionSelect,
   onSignIn,
@@ -850,6 +978,7 @@ export function AgentRail({
   onNewAgent,
   onNewResearch,
   onNewChat,
+  onNewItinerary,
 }: Props) {
   const { theme, toggle } = useTheme()
   const accessToken = authSession?.access_token ?? null
@@ -888,6 +1017,7 @@ export function AgentRail({
   const isChat = activeView.type === 'chat'
   const isResearch = activeView.type === 'research'
   const isPRDPlanner = activeView.type === 'prd-planner'
+  const isItineraryPlanner = activeView.type === 'itinerary-planner'
   const isResources = activeView.type === 'resources'
 
   return (
@@ -978,6 +1108,43 @@ export function AgentRail({
                   activeSessionId={activeSessionId}
                   refreshToken={sessionRefreshToken}
                   onSelect={onSessionSelect}
+                />
+              </div>
+            </ScrollArea>
+          )}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onViewChange({ type: 'itinerary-planner' })}
+              className={cn(
+                'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+                isItineraryPlanner
+                  ? 'bg-background text-foreground font-medium shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+              )}
+            >
+              <Map size={15} className="shrink-0" />
+              Itinerary planner
+            </button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0 rounded-md border border-border bg-background text-foreground shadow-sm hover:border-primary/30 hover:bg-background hover:text-primary"
+              onClick={authSession ? onNewItinerary : onSignIn}
+              aria-label={authSession ? 'New itinerary' : 'Sign in to create an itinerary session'}
+              title={authSession ? 'New itinerary' : 'Sign in to create an itinerary session'}
+            >
+              <Plus size={14} />
+            </Button>
+          </div>
+          {isItineraryPlanner && authSession && (
+            <ScrollArea className="max-h-44 shrink-0">
+              <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
+                <ItinerarySessionList
+                  accessToken={authSession.access_token}
+                  activeSessionId={activeView.type === 'itinerary-planner' ? activeView.sessionId ?? null : null}
+                  refreshToken={itineraryRefreshToken}
+                  onSelect={(sessionId) => onViewChange({ type: 'itinerary-planner', sessionId })}
                 />
               </div>
             </ScrollArea>
