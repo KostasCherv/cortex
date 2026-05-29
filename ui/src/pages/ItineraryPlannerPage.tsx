@@ -1,26 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2, SendHorizontal } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { createItinerarySession, getItinerarySession, postItinerarySessionMessage } from '@/api/client'
+import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import type {
   GeneratedItinerary,
   ItinerarySessionDetail,
+  ItinerarySessionMessage,
 } from '@/types'
-
-function formatDateLabel(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return iso
-  return date.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
 
 function RequirementsSummary({ session }: { session: ItinerarySessionDetail }) {
   const { requirements } = session
@@ -70,7 +62,7 @@ function RequirementsSummary({ session }: { session: ItinerarySessionDetail }) {
   )
 }
 
-function ItineraryView({ itinerary, versions }: { itinerary: GeneratedItinerary | null; versions: ItinerarySessionDetail['versions'] }) {
+function ItineraryView({ itinerary }: { itinerary: GeneratedItinerary | null }) {
   if (!itinerary) {
     return (
       <Card>
@@ -83,65 +75,41 @@ function ItineraryView({ itinerary, versions }: { itinerary: GeneratedItinerary 
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{itinerary.title}</CardTitle>
-          <CardDescription>{itinerary.summary}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.destination}</span>
-            <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.budget_band}</span>
-          </div>
-          <div className="space-y-3">
-            {itinerary.days.map((day) => (
-              <section key={`${day.day_number}-${day.title}`} className="rounded-lg border border-border/70 bg-background/70 p-4">
-                <h3 className="font-medium">Day {day.day_number}: {day.title}</h3>
-                <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                  {day.morning.length ? <p><strong className="text-foreground">Morning:</strong> {day.morning.join('; ')}</p> : null}
-                  {day.afternoon.length ? <p><strong className="text-foreground">Afternoon:</strong> {day.afternoon.join('; ')}</p> : null}
-                  {day.evening.length ? <p><strong className="text-foreground">Evening:</strong> {day.evening.join('; ')}</p> : null}
-                  {day.notes.length ? <p><strong className="text-foreground">Notes:</strong> {day.notes.join('; ')}</p> : null}
-                </div>
-              </section>
-            ))}
-          </div>
-          {itinerary.tips.length ? (
-            <div>
-              <h3 className="text-sm font-medium">Tips</h3>
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                {itinerary.tips.map((tip) => (
-                  <li key={tip}>{tip}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Version history</CardTitle>
-          <CardDescription>Saved revisions for this itinerary session.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {versions.length ? (
-            versions.slice().reverse().map((version) => (
-              <div key={version.version_id} className="rounded-md border border-border/70 bg-muted/15 px-3 py-2">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-medium">Version {version.version_number}</span>
-                  <span className="text-xs text-muted-foreground">{formatDateLabel(version.created_at)}</span>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">{version.revision_summary}</p>
+    <Card>
+      <CardHeader>
+        <CardTitle>{itinerary.title}</CardTitle>
+        <CardDescription>{itinerary.summary}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.destination}</span>
+          <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-xs">{itinerary.budget_band}</span>
+        </div>
+        <div className="space-y-3">
+          {itinerary.days.map((day) => (
+            <section key={`${day.day_number}-${day.title}`} className="rounded-lg border border-border/70 bg-background/70 p-4">
+              <h3 className="font-medium">Day {day.day_number}: {day.title}</h3>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                {day.morning.length ? <p><strong className="text-foreground">Morning:</strong> {day.morning.join('; ')}</p> : null}
+                {day.afternoon.length ? <p><strong className="text-foreground">Afternoon:</strong> {day.afternoon.join('; ')}</p> : null}
+                {day.evening.length ? <p><strong className="text-foreground">Evening:</strong> {day.evening.join('; ')}</p> : null}
+                {day.notes.length ? <p><strong className="text-foreground">Notes:</strong> {day.notes.join('; ')}</p> : null}
               </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">No saved versions yet.</p>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            </section>
+          ))}
+        </div>
+        {itinerary.tips.length ? (
+          <div>
+            <h3 className="text-sm font-medium">Tips</h3>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {itinerary.tips.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -161,24 +129,31 @@ export function ItineraryPlannerPage({
   const [detailLoading, setDetailLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const requestIdRef = useRef(0)
+  const [pendingMessage, setPendingMessage] = useState<ItinerarySessionMessage | null>(null)
+  const [dismissedSessionId, setDismissedSessionId] = useState<string | null>(null)
+  const loadRequestIdRef = useRef(0)
+  const submitRequestIdRef = useRef(0)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const restoreFocusRef = useRef(false)
 
   const loadSession = useCallback(
     async (sessionId: string) => {
       if (!authSession?.access_token) return
-      const requestId = requestIdRef.current + 1
-      requestIdRef.current = requestId
+      const requestId = loadRequestIdRef.current + 1
+      loadRequestIdRef.current = requestId
       setDetailLoading(true)
       setError(null)
       try {
         const detail = await getItinerarySession(sessionId, authSession.access_token)
-        if (requestIdRef.current !== requestId) return
+        if (loadRequestIdRef.current !== requestId) return
         setSession(detail)
+        setDismissedSessionId(null)
       } catch (loadError) {
-        if (requestIdRef.current !== requestId) return
+        if (loadRequestIdRef.current !== requestId) return
         setError(loadError instanceof Error ? loadError.message : 'Failed to load itinerary session.')
       } finally {
-        if (requestIdRef.current === requestId) {
+        if (loadRequestIdRef.current === requestId) {
           setDetailLoading(false)
         }
       }
@@ -188,23 +163,60 @@ export function ItineraryPlannerPage({
 
   useEffect(() => {
     if (!authSession?.access_token) {
+      loadRequestIdRef.current += 1
+      submitRequestIdRef.current += 1
       setSession(null)
       setDraft('')
       setError(null)
+      setPendingMessage(null)
       return
     }
     if (activeSessionId === undefined) {
       return
     }
     if (!activeSessionId) {
-      requestIdRef.current += 1
+      loadRequestIdRef.current += 1
       setSession(null)
+      setPendingMessage(null)
       setDetailLoading(false)
+      setDismissedSessionId(null)
+      return
+    }
+    if (activeSessionId === dismissedSessionId) {
       return
     }
     if (session?.session_id === activeSessionId) return
     void loadSession(activeSessionId)
-  }, [activeSessionId, authSession?.access_token, loadSession, session?.session_id])
+  }, [activeSessionId, authSession?.access_token, dismissedSessionId, loadSession, session?.session_id])
+
+  const displayedMessages = useMemo(() => {
+    if (!pendingMessage) return session?.messages ?? []
+    return [...(session?.messages ?? []), pendingMessage]
+  }, [pendingMessage, session?.messages])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [displayedMessages.length, sending, session?.session_id])
+
+  useEffect(() => {
+    if (sending || !restoreFocusRef.current) return
+    restoreFocusRef.current = false
+    inputRef.current?.focus()
+  }, [sending])
+
+  const resetConversation = useCallback(() => {
+    loadRequestIdRef.current += 1
+    submitRequestIdRef.current += 1
+    setDismissedSessionId(activeSessionId ?? session?.session_id ?? null)
+    setSession(null)
+    setDraft('')
+    setError(null)
+    setSending(false)
+    setDetailLoading(false)
+    setPendingMessage(null)
+    restoreFocusRef.current = true
+    onSessionActivated?.(null)
+  }, [activeSessionId, onSessionActivated, session?.session_id])
 
   const handleSubmit = useCallback(async () => {
     const normalized = draft.trim()
@@ -217,8 +229,21 @@ export function ItineraryPlannerPage({
       return
     }
 
+    const requestId = submitRequestIdRef.current + 1
+    submitRequestIdRef.current = requestId
+    restoreFocusRef.current = true
+    setPendingMessage({
+      message_id: `pending-${requestId}`,
+      session_id: session?.session_id ?? activeSessionId ?? 'pending',
+      role: 'user',
+      content: normalized,
+      metadata: {},
+      created_at: new Date().toISOString(),
+    })
     setSending(true)
     setError(null)
+    setDraft('')
+
     try {
       let sessionId = session?.session_id ?? activeSessionId ?? null
       if (!sessionId) {
@@ -231,90 +256,141 @@ export function ItineraryPlannerPage({
         }
         onSessionActivated?.(sessionId)
         onSessionsChanged?.()
+        setDismissedSessionId(null)
       }
       if (!sessionId) throw new Error('Failed to initialize itinerary session.')
       const response = await postItinerarySessionMessage(sessionId, normalized, authSession.access_token)
+      if (submitRequestIdRef.current !== requestId) return
       setSession(response.session)
-      setDraft('')
+      setPendingMessage(null)
+      setDismissedSessionId(null)
       onSessionActivated?.(response.session.session_id)
       onSessionsChanged?.()
     } catch (submitError) {
+      if (submitRequestIdRef.current !== requestId) return
+      setPendingMessage(null)
+      setDraft(normalized)
       setError(submitError instanceof Error ? submitError.message : 'Failed to update itinerary.')
     } finally {
-      setSending(false)
+      if (submitRequestIdRef.current === requestId) {
+        setSending(false)
+      }
     }
   }, [activeSessionId, authSession?.access_token, draft, onSessionActivated, onSessionsChanged, session?.session_id])
 
   const currentItinerary = session?.current_version?.itinerary ?? null
+  const showNewChat = Boolean(session || pendingMessage || activeSessionId)
 
   return (
     <main className="h-full overflow-y-auto bg-background px-4 py-6">
-      <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]">
-        <Card className="min-h-[70vh]">
-          <CardHeader>
-            <CardTitle className="text-xl">Itinerary planner</CardTitle>
-            <CardDescription>
-              Chat through trip details, generate a structured plan, and refine it in place.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex h-[calc(70vh-5rem)] flex-col gap-4">
-            {detailLoading ? (
-              <div className="flex-1 rounded-lg border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                Loading itinerary session...
-              </div>
-            ) : session ? (
-              <ScrollArea className="flex-1 rounded-lg border border-border/70 bg-muted/10 p-4">
-                <div className="space-y-4">
-                  {session.messages.map((message) => (
-                    <div
-                      key={message.message_id}
-                      className={message.role === 'user' ? 'ml-auto max-w-[85%]' : 'max-w-[85%]'}
-                    >
-                      <div
-                        className={
-                          message.role === 'user'
-                            ? 'rounded-2xl rounded-br-md bg-primary px-4 py-3 text-sm text-primary-foreground'
-                            : 'rounded-2xl rounded-bl-md border border-border/70 bg-background px-4 py-3 text-sm text-foreground'
-                        }
-                      >
-                        {message.content}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : (
-              <div className="flex-1 rounded-lg border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                Start a new itinerary chat or choose one from the sidebar.
-              </div>
-            )}
-
-            {error ? <p className="text-sm text-destructive">{error}</p> : null}
-            <div className="space-y-2">
-              <label htmlFor="itinerary-planner-input" className="text-sm font-medium">
-                Describe your trip
-              </label>
-              <Textarea
-                id="itinerary-planner-input"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Tell me where you want to go, for how long, your budget, and what kind of trip you want."
-                className="min-h-[120px]"
-                disabled={sending}
-              />
+      <div className="mx-auto flex max-w-5xl flex-col gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-start justify-between gap-2">
+            <div>
+              <CardTitle className="text-xl">Itinerary planner</CardTitle>
+              <CardDescription>
+                Chat through trip details, generate a structured plan, and refine it in place.
+              </CardDescription>
             </div>
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => void handleSubmit()} disabled={sending || !authSession}>
-                {sending ? 'Sending...' : 'Send'}
+            {showNewChat ? (
+              <Button type="button" variant="outline" size="sm" onClick={resetConversation} disabled={sending}>
+                New chat
               </Button>
+            ) : null}
+          </CardHeader>
+          <CardContent className="p-0">
+            <ScrollArea className="h-[440px] px-6 py-4">
+              <div className="space-y-4">
+                {displayedMessages.length ? (
+                  displayedMessages.map((message) =>
+                    message.role === 'user' ? (
+                      <div key={message.message_id} className="flex flex-col items-end">
+                        <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground">
+                          {message.content}
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={message.message_id} className="flex items-start gap-2">
+                        <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                        <div className={cn('max-w-[75%]', assistantBubbleClassName)}>
+                          <ChatMarkdown content={message.content} />
+                        </div>
+                      </div>
+                    ),
+                  )
+                ) : detailLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                    <Loader2 size={14} className="animate-spin" />
+                    Loading itinerary session...
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    Start a new itinerary chat or choose one from the sidebar.
+                  </p>
+                )}
+
+                {sending ? (
+                  <div className="flex items-start gap-2">
+                    <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                    <div className={cn('max-w-[75%]', assistantBubbleClassName)}>
+                      <ChatMarkdown content="Planning your next step..." />
+                    </div>
+                  </div>
+                ) : null}
+                <div ref={bottomRef} aria-hidden="true" />
+              </div>
+            </ScrollArea>
+
+            {error ? (
+              <p
+                role="alert"
+                className="mx-6 mb-2 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              >
+                {error}
+              </p>
+            ) : null}
+
+            <div className="border-t px-6 py-4">
+              <div className="flex items-end gap-2">
+                <label htmlFor="itinerary-planner-input" className="sr-only">
+                  Describe your trip
+                </label>
+                <Textarea
+                  ref={inputRef}
+                  id="itinerary-planner-input"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void handleSubmit()
+                    }
+                  }}
+                  placeholder={
+                    currentItinerary
+                      ? 'Describe what to change or add to the itinerary...'
+                      : 'Tell me where you want to go, for how long, your budget, and what kind of trip you want...'
+                  }
+                  className="min-h-[120px] max-h-56 resize-y text-sm"
+                  rows={4}
+                  disabled={sending}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={() => void handleSubmit()}
+                  disabled={sending || !authSession || !draft.trim()}
+                  aria-label="Send message"
+                >
+                  <SendHorizontal size={15} />
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          {session ? <RequirementsSummary session={session} /> : null}
-          <ItineraryView itinerary={currentItinerary} versions={session?.versions ?? []} />
-        </div>
+        {session ? <RequirementsSummary session={session} /> : null}
+        <ItineraryView itinerary={currentItinerary} />
       </div>
     </main>
   )
