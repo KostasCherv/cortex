@@ -1,10 +1,9 @@
 import json
-import re
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.planner import PlannerValidationError, SoftwareDevPlanResponse, generate_software_dev_plan
+from src.planner import PlannerValidationError, PRDPlanResponse, generate_prd
 
 
 class _LLMResult:
@@ -16,195 +15,84 @@ def _json_result(payload: object) -> _LLMResult:
     return _LLMResult(json.dumps(payload))
 
 
+def _minimal_prd_plan() -> dict:
+    return {
+        "title": "Mobile Onboarding PRD",
+        "executive_summary": "Streamline user onboarding.",
+        "problem_statement": "Users drop off during onboarding.",
+        "goals": ["Reduce drop-off by 30%", "Improve activation", "Increase retention"],
+        "non_goals": ["Full app redesign"],
+        "target_users": ["New mobile users", "Enterprise admins", "Power users"],
+        "user_stories": [
+            "As a new user, I want to complete onboarding quickly so that I can start using the app."
+        ],
+        "requirements": [
+            {"id": "REQ-001", "description": "3-step wizard", "priority": "Must Have", "rationale": "Core flow"},
+            {"id": "REQ-002", "description": "Progress bar", "priority": "Should Have", "rationale": "UX clarity"},
+        ],
+        "success_metrics": ["30% drop-off reduction", "NPS +10", "Activation > 60%"],
+        "milestones": [
+            {"id": "M1", "title": "MVP", "description": "Basic onboarding", "deliverables": ["Wizard", "API"]}
+        ],
+        "out_of_scope": ["Localization"],
+        "risks": ["Scope creep"],
+        "assumptions": ["Users on latest version"],
+        "open_questions": ["Should onboarding be skippable?"],
+    }
+
+
 @pytest.mark.asyncio
-async def test_generate_software_dev_plan_returns_structured_response():
+async def test_generate_prd_returns_structured_response():
     mock_llm = MagicMock()
+    prd_plan = _minimal_prd_plan()
     mock_llm.invoke.side_effect = [
-        _json_result(
-            {
-                "problem_statement": "Users need implementation plans for feature requests.",
-                "desired_outcome": "Return a reviewed downloadable plan.",
-                "constraints": ["Keep v1 synchronous."],
-                "assumptions": ["The current repo layout remains stable."],
-                "open_questions": ["Whether to persist plan history in a later version."],
-            }
-        ),
-        _json_result(
-            {
-                "summary": "Existing backend endpoint and frontend shell patterns are the main extension points.",
-                "relevant_files": [
-                    {"path": "src/api/endpoints.py", "reason": "Authenticated API routes live here."},
-                    {"path": "ui/src/components/shell/AppShell.tsx", "reason": "Top-level view routing lives here."},
-                ],
-                "existing_patterns": ["Prompt-template driven draft generation.", "Dedicated page routing through AppShell."],
-                "constraints": ["Need repo-grounded file references."],
-                "unknowns": ["No persisted plan-history model exists yet."],
-            }
-        ),
-        _json_result(
-            {
-                "approaches": [
-                    {
-                        "name": "Dedicated planner module",
-                        "summary": "Add a new planner backend module and dedicated UI page.",
-                        "tradeoffs": ["More code than reusing RAG directly, but clearer ownership."],
-                        "file_impact": ["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
-                    },
-                    {
-                        "name": "Extend RAG module",
-                        "summary": "Place planner generation inside the existing RAG helpers.",
-                        "tradeoffs": ["Smaller diff, but muddier domain boundaries."],
-                        "file_impact": ["src/rag.py", "src/api/endpoints.py"],
-                    },
-                ],
-                "recommended_approach": "Dedicated planner module",
-                "rationale": "Keeps software-planning orchestration separate from RAG chat concerns.",
-                "out_of_scope": ["Automated code execution from the generated plan."],
-            }
-        ),
-        _json_result(
-            {
-                "title": "Software Development Planner",
-                "summary": "Adds a staged implementation-planning workflow with a downloadable markdown artifact.",
-                "goal": "Turn a feature request into a repo-grounded implementation plan.",
-                "repo_fit": "Fits the existing API/client/view split and reuses the prompt-template workflow pattern.",
-                "architecture": "Use a dedicated planner service module, one authenticated endpoint, and a dedicated planner page in the shell.",
-                "recommended_approach": "Implement a staged prompt pipeline and dedicated planner page.",
-                "file_map": [
-                    {"path": "src/planner.py", "reason": "Contains staged planning orchestration and markdown rendering."},
-                    {"path": "src/api/endpoints.py", "reason": "Exposes the authenticated planner endpoint."},
-                    {"path": "ui/src/pages/SoftwarePlannerPage.tsx", "reason": "Hosts the planner request/result UX."},
-                ],
-                "data_api_ui_impacts": [
-                    "Adds a synchronous planner API route.",
-                    "Adds a new shell view and markdown download action.",
-                ],
-                "phases": [
-                    {
-                        "id": "phase-1",
-                        "title": "Backend planner contract",
-                        "objective": "Add planner models, orchestration, and API wiring.",
-                        "files": ["src/planner.py", "src/api/endpoints.py"],
-                        "deliverables": ["Planner service", "Authenticated endpoint"],
-                        "verification": ["pytest tests/test_planner.py tests/test_api.py -q"],
-                    },
-                    {
-                        "id": "phase-2",
-                        "title": "Frontend planner UX",
-                        "objective": "Add a planner page, API client call, and markdown download affordance.",
-                        "files": ["ui/src/pages/SoftwarePlannerPage.tsx", "ui/src/api/client.ts", "ui/src/components/shell/AppShell.tsx"],
-                        "deliverables": ["Planner page", "Planner navigation", "Download button"],
-                        "verification": ["npm run build"],
-                    },
-                ],
-                "validation": ["pytest tests/test_planner.py tests/test_api.py -q", "npm run build"],
-                "risks": ["Structured LLM output may require repair retries."],
-                "assumptions": ["A synchronous response is acceptable for v1."],
-                "open_questions": ["Whether to save plan history in a later iteration."],
-                "out_of_scope": ["Executing the implementation plan automatically."],
-            }
-        ),
-        _json_result(
-            {
-                "approved": True,
-                "reviewer_notes": ["Plan is grounded in repo files and includes validation."],
-                "revised_plan": {
-                    "title": "Software Development Planner",
-                    "summary": "Adds a staged implementation-planning workflow with a downloadable markdown artifact.",
-                    "goal": "Turn a feature request into a repo-grounded implementation plan.",
-                    "repo_fit": "Fits the existing API/client/view split and reuses the prompt-template workflow pattern.",
-                    "architecture": "Use a dedicated planner service module, one authenticated endpoint, and a dedicated planner page in the shell.",
-                    "recommended_approach": "Implement a staged prompt pipeline and dedicated planner page.",
-                    "file_map": [
-                        {"path": "src/planner.py", "reason": "Contains staged planning orchestration and markdown rendering."},
-                        {"path": "src/api/endpoints.py", "reason": "Exposes the authenticated planner endpoint."},
-                        {"path": "ui/src/pages/SoftwarePlannerPage.tsx", "reason": "Hosts the planner request/result UX."},
-                    ],
-                    "data_api_ui_impacts": [
-                        "Adds a synchronous planner API route.",
-                        "Adds a new shell view and markdown download action.",
-                    ],
-                    "phases": [
-                        {
-                            "id": "phase-1",
-                            "title": "Backend planner contract",
-                            "objective": "Add planner models, orchestration, and API wiring.",
-                            "files": ["src/planner.py", "src/api/endpoints.py"],
-                            "deliverables": ["Planner service", "Authenticated endpoint"],
-                            "verification": ["pytest tests/test_planner.py tests/test_api.py -q"],
-                        },
-                        {
-                            "id": "phase-2",
-                            "title": "Frontend planner UX",
-                            "objective": "Add a planner page, API client call, and markdown download affordance.",
-                            "files": ["ui/src/pages/SoftwarePlannerPage.tsx", "ui/src/api/client.ts", "ui/src/components/shell/AppShell.tsx"],
-                            "deliverables": ["Planner page", "Planner navigation", "Download button"],
-                            "verification": ["npm run build"],
-                        },
-                    ],
-                    "validation": ["pytest tests/test_planner.py tests/test_api.py -q", "npm run build"],
-                    "risks": ["Structured LLM output may require repair retries."],
-                    "assumptions": ["A synchronous response is acceptable for v1."],
-                    "open_questions": ["Whether to save plan history in a later iteration."],
-                    "out_of_scope": ["Executing the implementation plan automatically."],
-                },
-            }
-        ),
+        # intake
+        _json_result({
+            "problem_statement": "Users drop off during onboarding.",
+            "desired_outcome": "Increase activation rate.",
+            "constraints": ["Must ship in Q3"],
+            "assumptions": ["Users on latest version"],
+            "open_questions": [],
+        }),
+        # synthesis
+        _json_result(prd_plan),
+        # review
+        _json_result({
+            "approved": True,
+            "reviewer_notes": ["Plan looks solid."],
+            "revised_plan": prd_plan,
+        }),
     ]
 
     with patch("src.llm.factory.get_llm", return_value=mock_llm):
-        result = await generate_software_dev_plan("Build a software-dev implementation planner for this repo.")
+        result = await generate_prd("Build a mobile onboarding flow.")
 
-    assert isinstance(result, SoftwareDevPlanResponse)
-    assert result.plan.title == "Software Development Planner"
-    assert "## Implementation phases" in result.markdown
-    assert re.match(r"\d{4}-\d{2}-\d{2}-software-development-planner-implementation-plan\.md", result.suggested_filename)
-    assert mock_llm.invoke.call_count == 5
+    assert isinstance(result, PRDPlanResponse)
+    assert result.plan.title == "Mobile Onboarding PRD"
+    assert "## Goals" in result.markdown
+    assert result.suggested_filename.endswith("-prd.md")
+    assert mock_llm.invoke.call_count == 3
 
 
 @pytest.mark.asyncio
-async def test_generate_software_dev_plan_raises_validation_error_on_invalid_structured_output():
+async def test_generate_prd_raises_validation_error_on_invalid_structured_output():
     mock_llm = MagicMock()
     mock_llm.invoke.side_effect = [
-        _json_result(
-            {
-                "problem_statement": "Users need implementation plans for feature requests.",
-                "desired_outcome": "Return a reviewed downloadable plan.",
-                "constraints": ["Keep v1 synchronous."],
-                "assumptions": ["The current repo layout remains stable."],
-                "open_questions": [],
-            }
-        ),
-        _json_result(
-            {
-                "summary": "Existing backend endpoint and frontend shell patterns are the main extension points.",
-                "relevant_files": [{"path": "src/api/endpoints.py", "reason": "Authenticated API routes live here."}],
-                "existing_patterns": ["Prompt-template driven draft generation."],
-                "constraints": ["Need repo-grounded file references."],
-                "unknowns": [],
-            }
-        ),
-        _json_result(
-            {
-                "approaches": [
-                    {
-                        "name": "Dedicated planner module",
-                        "summary": "Add a new planner backend module and dedicated UI page.",
-                        "tradeoffs": ["More code than reusing RAG directly, but clearer ownership."],
-                        "file_impact": ["src/planner.py", "ui/src/pages/SoftwarePlannerPage.tsx"],
-                    }
-                ],
-                "recommended_approach": "Dedicated planner module",
-                "rationale": "Keeps software-planning orchestration separate from RAG chat concerns.",
-                "out_of_scope": ["Automated code execution from the generated plan."],
-            }
-        ),
+        # intake succeeds
+        _json_result({
+            "problem_statement": "Users drop off during onboarding.",
+            "desired_outcome": "Increase activation rate.",
+            "constraints": [],
+            "assumptions": [],
+            "open_questions": [],
+        }),
+        # synthesis returns invalid JSON (both attempts)
         _LLMResult("not valid json"),
         _LLMResult("still not valid json"),
     ]
 
     with patch("src.llm.factory.get_llm", return_value=mock_llm):
         with pytest.raises(PlannerValidationError) as exc_info:
-            await generate_software_dev_plan("Build a software-dev implementation planner for this repo.")
+            await generate_prd("Build a mobile onboarding flow.")
 
     assert exc_info.value.code == "planner_generation_failed"

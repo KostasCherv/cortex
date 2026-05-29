@@ -1985,7 +1985,7 @@ async def delete_prd_plan(
 ) -> dict:
     deleted = await delete_saved_prd(current_user.user_id, plan_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail=f"Saved plan '{plan_id}' not found.")
+        raise HTTPException(status_code=404, detail=f"Saved PRD '{plan_id}' not found.")
     return {"plan_id": plan_id, "deleted": True}
 
 

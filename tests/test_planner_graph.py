@@ -220,7 +220,7 @@ def test_generation_node_propagates_error_state_unchanged():
         "error": "clarification_parse_failed",
         "ready_to_generate": True,
     }
-    with patch("src.planner_graph.nodes._generate_software_dev_plan_sync") as mock_gen:
+    with patch("src.planner_graph.nodes._generate_prd_sync") as mock_gen:
         result = generation_node(state)
 
     mock_gen.assert_not_called()
@@ -229,7 +229,7 @@ def test_generation_node_propagates_error_state_unchanged():
 
 def test_generation_node_calls_planner_and_sets_final_plan():
     from src.planner_graph.nodes import generation_node
-    from src.planner import SoftwareDevPlanResponse
+    from src.planner import PRDPlanResponse
 
     state = {
         "conversation_history": [
@@ -239,8 +239,8 @@ def test_generation_node_calls_planner_and_sets_final_plan():
         ],
         "ready_to_generate": True,
     }
-    mock_response = MagicMock(spec=SoftwareDevPlanResponse)
-    with patch("src.planner_graph.nodes._generate_software_dev_plan_sync", return_value=mock_response):
+    mock_response = MagicMock(spec=PRDPlanResponse)
+    with patch("src.planner_graph.nodes._generate_prd_sync", return_value=mock_response):
         result = generation_node(state)
 
     assert result["final_plan"] is mock_response
@@ -255,7 +255,7 @@ def test_generation_node_sets_error_on_planner_validation_error():
         "ready_to_generate": True,
     }
     with patch(
-        "src.planner_graph.nodes._generate_software_dev_plan_sync",
+        "src.planner_graph.nodes._generate_prd_sync",
         side_effect=PlannerValidationError("planner_generation_failed", "LLM gave invalid output"),
     ):
         result = generation_node(state)

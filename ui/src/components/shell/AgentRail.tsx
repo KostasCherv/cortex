@@ -697,7 +697,7 @@ function WorkspaceChatSessionList({
   )
 }
 
-function SoftwarePlannerHistoryList({
+function PRDHistoryList({
   accessToken,
   activePlanId,
   refreshToken,
@@ -887,7 +887,7 @@ export function AgentRail({
 
   const isChat = activeView.type === 'chat'
   const isResearch = activeView.type === 'research'
-  const isSoftwarePlanner = activeView.type === 'software-planner'
+  const isPRDPlanner = activeView.type === 'software-planner'
   const isResources = activeView.type === 'resources'
 
   return (
@@ -988,7 +988,7 @@ export function AgentRail({
               onClick={() => onViewChange({ type: 'software-planner' })}
               className={cn(
                 'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
-                isSoftwarePlanner
+                isPRDPlanner
                   ? 'bg-background text-foreground font-medium shadow-sm'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
               )}
@@ -1007,10 +1007,10 @@ export function AgentRail({
               <Plus size={14} />
             </Button>
           </div>
-          {isSoftwarePlanner && authSession && (
+          {isPRDPlanner && authSession && (
             <ScrollArea className="max-h-44 shrink-0">
               <div className="ml-7 mt-0.5 mb-1 space-y-0.5 pr-4">
-                <SoftwarePlannerHistoryList
+                <PRDHistoryList
                   accessToken={authSession.access_token}
                   activePlanId={activeView.planId ?? null}
                   refreshToken={plannerRefreshToken}

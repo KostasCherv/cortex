@@ -8,7 +8,7 @@ import { AgentRail } from '@/components/shell/AgentRail'
 import { supabase } from '@/lib/supabase'
 import { ResearchPage } from '@/pages/ResearchPage'
 import { ResourcesPage } from '@/pages/ResourcesPage'
-import { SoftwarePlannerPage } from '@/pages/SoftwarePlannerPage'
+import { PRDPlannerPage } from '@/pages/PRDPlannerPage'
 import type { HealthResponse, RagAgent, RagResource } from '@/types'
 
 type HealthState = 'loading' | 'online' | 'offline'
@@ -235,7 +235,7 @@ export function AppShell() {
           />
         )}
         {activeView.type === 'software-planner' && (
-          <SoftwarePlannerPage
+          <PRDPlannerPage
             authSession={authSession}
             activePlanId={activeView.planId ?? null}
             onPlanActivated={(planId) => setActiveView({ type: 'software-planner', planId })}

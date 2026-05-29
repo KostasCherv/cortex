@@ -143,7 +143,7 @@ async def _stream_planner_turn(
         # Store a compact summary in history (not the full markdown) to keep
         # the context manageable for future clarification/refinement turns.
         ai_history_content = (
-            "I have generated a complete software development plan based on our discussion. "
+            "I have generated a complete PRD based on our discussion. "
             "If you'd like to refine it, describe what you'd like to change."
         )
 

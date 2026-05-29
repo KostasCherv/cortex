@@ -354,7 +354,7 @@ function PlannerInteractiveChat({
 
 type Mode = 'single-shot' | 'interactive'
 
-export function SoftwarePlannerPage({
+export function PRDPlannerPage({
   authSession,
   activePlanId,
   onPlanActivated,

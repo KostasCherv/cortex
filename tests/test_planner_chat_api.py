@@ -55,14 +55,12 @@ def _parse_sse(raw: bytes) -> list[dict]:
 
 
 def _make_final_plan_mock():
-    """Return a mock SoftwareDevPlanResponse that has the attributes planner_chat.py accesses."""
+    """Return a mock PRDPlanResponse with the attributes planner_chat.py accesses."""
     plan_mock = MagicMock()
     plan_mock.markdown = "# Plan\n\nSome plan content."
     plan_mock.suggested_filename = "plan.md"
-    plan_mock.plan.model_dump.return_value = {"phases": []}
+    plan_mock.plan.model_dump.return_value = {"title": "Plan"}
     plan_mock.planning_brief.model_dump.return_value = {}
-    plan_mock.repo_analysis.model_dump.return_value = {}
-    plan_mock.planning_options.model_dump.return_value = {}
     return plan_mock
 
 
@@ -92,7 +90,7 @@ class TestPlannerChatNewThread:
 
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = mock_state
             mock_graph.invoke.return_value = None
@@ -120,7 +118,7 @@ class TestPlannerChatNewThread:
 
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = mock_state
             mock_graph.invoke.return_value = None
@@ -149,7 +147,7 @@ class TestPlannerChatNewThread:
 
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = mock_state
             mock_graph.invoke.return_value = None
@@ -178,7 +176,7 @@ class TestPlannerChatNewThread:
 
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = mock_state
             mock_graph.invoke.return_value = None
@@ -194,7 +192,7 @@ class TestPlannerChatNewThread:
     def test_graph_invocation_exception_returns_error_event(self):
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = MagicMock(values={})
             mock_graph.invoke.side_effect = RuntimeError("LLM failure")
@@ -244,7 +242,7 @@ class TestPlannerChatExistingThread:
 
         with (
             patch("src.api.planner_chat.planner_graph") as mock_graph,
-            patch("src.api.planner_chat.save_software_dev_plan", new=AsyncMock()),
+            patch("src.api.planner_chat.save_prd", new=AsyncMock()),
         ):
             mock_graph.get_state.return_value = mock_state
             mock_graph.invoke.return_value = None

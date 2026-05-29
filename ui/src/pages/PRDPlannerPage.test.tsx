@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { SoftwarePlannerPage } from './SoftwarePlannerPage'
+import { PRDPlannerPage } from './PRDPlannerPage'
 import type { SavedPRD } from '@/types'
 
 const { generatePRDMock, getPRDMock } = vi.hoisted(() => ({
@@ -66,7 +66,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject }
 }
 
-describe('SoftwarePlannerPage', () => {
+describe('PRDPlannerPage', () => {
   beforeEach(() => {
     generatePRDMock.mockReset()
     getPRDMock.mockReset()
@@ -77,7 +77,7 @@ describe('SoftwarePlannerPage', () => {
   })
 
   it('keeps saved plans out of the planner page and relies on the sidebar for selection', () => {
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
+    render(<PRDPlannerPage authSession={{ access_token: 'token' } as never} />)
 
     expect(screen.queryByText('Saved plans')).not.toBeInTheDocument()
     expect(screen.getByText('Generate a new plan or choose one from the sidebar to view its details.')).toBeInTheDocument()
@@ -96,7 +96,7 @@ describe('SoftwarePlannerPage', () => {
     })
     getPRDMock.mockResolvedValue(detail)
 
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-sidebar" />)
+    render(<PRDPlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-sidebar" />)
 
     await waitFor(() => {
       expect(getPRDMock).toHaveBeenCalledWith('plan-sidebar', 'token')
@@ -126,14 +126,14 @@ describe('SoftwarePlannerPage', () => {
     )
 
     const { rerender } = render(
-      <SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-1" />,
+      <PRDPlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-1" />,
     )
 
     await waitFor(() => {
       expect(getPRDMock).toHaveBeenCalledWith('plan-1', 'token')
     })
 
-    rerender(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-2" />)
+    rerender(<PRDPlannerPage authSession={{ access_token: 'token' } as never} activePlanId="plan-2" />)
 
     await waitFor(() => {
       expect(getPRDMock).toHaveBeenCalledWith('plan-2', 'token')
@@ -163,7 +163,7 @@ describe('SoftwarePlannerPage', () => {
     generatePRDMock.mockResolvedValue(newPlan)
 
     render(
-      <SoftwarePlannerPage
+      <PRDPlannerPage
         authSession={{ access_token: 'token' } as never}
         onPlansChanged={onPlansChanged}
       />,
@@ -200,7 +200,7 @@ describe('SoftwarePlannerPage', () => {
       return document.createElementNS('http://www.w3.org/1999/xhtml', tagName) as HTMLElement
     })
 
-    render(<SoftwarePlannerPage authSession={{ access_token: 'token' } as never} />)
+    render(<PRDPlannerPage authSession={{ access_token: 'token' } as never} />)
 
     fireEvent.change(screen.getByLabelText(/what product idea should we document/i), {
       target: { value: 'Build a mobile onboarding flow.' },
