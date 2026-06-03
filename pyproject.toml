@@ -36,6 +36,7 @@ dependencies = [
     "neo4j>=5.26.0",
     "cohere>=5.0.0",
     "mcp>=1.12.4",
+    "composio-langchain>=0.6.0",
     "yfinance>=0.2.40",
 ]
 
