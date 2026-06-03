@@ -47,7 +47,11 @@ from src.sessions import (
 )
 from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.reranker import rerank_chunks
-from src.tools.composio_toolset import get_composio_toolset_manager
+from src.tools.composio_toolset import (
+    get_composio_toolset_manager,
+    initialize_composio_toolset,
+    shutdown_composio_toolset,
+)
 from src.tools.asset_price_provider import (
     get_asset_price_tool,
     validate_asset_price_provider_health,
@@ -233,11 +237,25 @@ async def validate_session_store_configuration() -> None:
 
     asyncio.ensure_future(_evict_planner_threads_periodically())
 
+    if settings.composio_enabled:
+        try:
+            composio_client = await initialize_composio_toolset()
+            logger.info(
+                "[startup] Composio toolset loaded with %d tools.",
+                len(composio_client.get_tools()),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[startup] Composio unavailable; tool-calling disabled for this run: %s",
+                exc,
+            )
+
 
 @app.on_event("shutdown")
 async def shutdown_background_clients() -> None:
     """Stop long-lived background clients gracefully."""
     await shutdown_alpha_vantage_mcp_client()
+    await shutdown_composio_toolset()
 
 
 # ---------------------------------------------------------------------------
