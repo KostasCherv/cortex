@@ -7,9 +7,8 @@ import re
 import secrets
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import AsyncGenerator, cast
+from typing import AsyncGenerator
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
@@ -52,28 +51,8 @@ from src.tools.composio_toolset import (
     initialize_composio_toolset,
     shutdown_composio_toolset,
 )
-from src.tools.asset_price_provider import (
-    get_asset_price_tool,
-    validate_asset_price_provider_health,
-)
-from src.tools.alpha_vantage_mcp_client import (
-    call_alpha_vantage_mcp_tool,
-    get_alpha_vantage_mcp_tool_definition,
-    initialize_alpha_vantage_mcp_client,
-    search_alpha_vantage_mcp_tools,
-    shutdown_alpha_vantage_mcp_client,
-)
-from src.tools.web_search import get_web_search_tool, validate_web_search_provider_health
-from src.tools.fetcher import fetch_url_content
 from src.llm.factory import get_llm
-from src.llm.output_parsers import (
-    build_validation_retry_prompt,
-    parse_chat_action_json,
-    parse_finance_tool_call_plan_json,
-    parse_finance_tool_selection_json,
-)
 from src.prompts.registry import prompt_registry
-from src.guards import claims_no_web_access
 from src import outbox
 from src.planner import (
     PlannerValidationError,
@@ -178,21 +157,6 @@ app.include_router(planner_chat_router)
 async def validate_session_store_configuration() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     _configure_application_logging()
-    validate_web_search_provider_health()
-    validate_asset_price_provider_health()
-    if (settings.asset_price_provider or "").strip().lower() == "alphavantage_mcp":
-        try:
-            client = await initialize_alpha_vantage_mcp_client()
-            logger.info(
-                "[startup] Alpha Vantage MCP catalog loaded with %s tools.",
-                len(client.list_available_tools()),
-            )
-        except Exception as exc:
-            logger.warning(
-                "[startup] Alpha Vantage MCP catalog initialization failed; "
-                "requests may fall back to yfinance: %s",
-                exc,
-            )
     if not settings.cohere_api_key:
         logger.warning("[startup] Cohere reranking is disabled (COHERE_API_KEY not set).")
 
@@ -254,7 +218,6 @@ async def validate_session_store_configuration() -> None:
 @app.on_event("shutdown")
 async def shutdown_background_clients() -> None:
     """Stop long-lived background clients gracefully."""
-    await shutdown_alpha_vantage_mcp_client()
     await shutdown_composio_toolset()
 
 
@@ -468,19 +431,6 @@ def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict
     return citations
 
 
-def _build_chat_citations(
-    *,
-    rag_chunks: list[dict] | None,
-    web_results: list[dict] | None,
-    web_provider: str,
-    prefer_web: bool = False,
-) -> list[dict]:
-    web_citations = _build_web_citations(web_results, web_provider)
-    if prefer_web and web_citations:
-        return web_citations
-    return _build_rag_citations(rag_chunks) + web_citations
-
-
 def _build_workspace_fallback_citations(
     rag_context_text: str,
     existing_citations: list[dict],
@@ -511,563 +461,6 @@ def _extract_llm_text(content: object) -> str:
         )
     return str(content)
 
-
-def _extract_urls(text: str) -> list[str]:
-    return re.findall(r"https?://\S+", text or "")
-
-
-@dataclass(frozen=True)
-class _ResolvedWebContext:
-    used: bool
-    provider: str
-    results: list[dict]
-    reason: str = "disabled"
-
-
-@dataclass(frozen=True)
-class _ChatActionDecision:
-    action: str
-    reason: str
-    query: str = ""
-    url: str = ""
-    symbols: list[str] | None = None
-    currency: str = ""
-
-
-def _is_rag_context_insufficient(
-    rag_context: str,
-    rag_chunks: list[dict] | None,
-    message: str,
-) -> bool:
-    del message
-    has_local_text = bool(rag_context.strip()) or any(
-        str(chunk.get("text") or "").strip() for chunk in (rag_chunks or [])
-    )
-    if not has_local_text:
-        return True
-
-    relevance_scores: list[float] = []
-    for chunk in rag_chunks or []:
-        raw_score = chunk.get("rerank_score")
-        if raw_score is None:
-            continue
-        try:
-            relevance_scores.append(float(raw_score))
-        except (TypeError, ValueError):
-            continue
-
-    if relevance_scores:
-        return max(relevance_scores) < settings.rerank_relevance_threshold
-
-    return False
-
-
-async def _search_web(query: str) -> tuple[str, list[dict]]:
-    tool = get_web_search_tool()
-    results = await asyncio.to_thread(tool.search, query, settings.max_search_results)
-    return tool.provider_name, results
-
-
-async def _quote_asset_prices(symbols: list[str], currency: str = "") -> tuple[str, list[dict]]:
-    tool = get_asset_price_tool()
-    results = await asyncio.to_thread(tool.quote, symbols, currency or None)
-    return tool.provider_name, results
-
-
-def _tool_match_to_context_row(match: object) -> dict[str, object]:
-    name = getattr(match, "name", "") if not isinstance(match, dict) else str(match.get("name") or "")
-    description = (
-        getattr(match, "description", "")
-        if not isinstance(match, dict)
-        else str(match.get("description") or "")
-    )
-    score = getattr(match, "score", None) if not isinstance(match, dict) else match.get("score")
-    why = getattr(match, "why", "") if not isinstance(match, dict) else str(match.get("why") or "")
-    return {
-        "tool_name": name,
-        "title": f"Alpha Vantage MCP Tool · {name}",
-        "url": "https://www.alphavantage.co/documentation/",
-        "content": (
-            f"Candidate tool: {name}\n"
-            f"Description: {description}\n"
-            f"Why matched: {why}\n"
-            f"Score: {score}"
-        ).strip(),
-        "source": "alphavantage_mcp_catalog",
-        "raw": {
-            "tool_name": name,
-            "description": description,
-            "score": score,
-            "why": why,
-        },
-    }
-
-
-def _tool_definition_to_context_row(
-    *,
-    tool_definition,
-    clarifying_question: str = "",
-    reason: str = "",
-) -> dict[str, object]:
-    parameters = tool_definition.parameters if hasattr(tool_definition, "parameters") else {}
-    return {
-        "tool_name": tool_definition.name,
-        "title": f"Alpha Vantage MCP Tool · {tool_definition.name}",
-        "url": "https://www.alphavantage.co/documentation/",
-        "content": (
-            f"Selected tool: {tool_definition.name}\n"
-            f"Description: {tool_definition.description}\n"
-            f"Schema: {json.dumps(parameters, ensure_ascii=True)}\n"
-            f"Reason: {reason}\n"
-            f"Clarifying question: {clarifying_question}"
-        ).strip(),
-        "source": "alphavantage_mcp_catalog",
-        "clarifying_question": clarifying_question,
-        "raw": {
-            "tool_name": tool_definition.name,
-            "description": tool_definition.description,
-            "parameters": parameters,
-        },
-    }
-
-
-def _tool_call_payload_to_context_row(
-    *,
-    tool_name: str,
-    arguments: dict[str, object],
-    payload: object,
-) -> dict[str, object]:
-    serialized_payload = json.dumps(payload, ensure_ascii=True, default=str)
-    compact_payload = serialized_payload[:6000]
-    return {
-        "tool_name": tool_name,
-        "title": f"Alpha Vantage MCP · {tool_name}",
-        "url": "https://www.alphavantage.co/documentation/",
-        "content": (
-            f"Source: Alpha Vantage MCP ({tool_name})\n"
-            f"Arguments: {json.dumps(arguments, ensure_ascii=True, default=str)}\n"
-            f"Payload: {compact_payload}"
-        ).strip(),
-        "raw_content": compact_payload,
-        "source": "alphavantage_mcp",
-        "raw": {
-            "tool_name": tool_name,
-            "arguments": arguments,
-            "payload": payload,
-        },
-    }
-
-
-async def _select_finance_tool_candidate(
-    *,
-    message: str,
-    matches: list[object],
-) -> str:
-    llm = get_llm(temperature=0.0)
-    shortlist = [
-        {
-            "name": getattr(match, "name", "") if not isinstance(match, dict) else str(match.get("name") or ""),
-            "description": (
-                getattr(match, "description", "")
-                if not isinstance(match, dict)
-                else str(match.get("description") or "")
-            ),
-            "why": getattr(match, "why", "") if not isinstance(match, dict) else str(match.get("why") or ""),
-            "score": getattr(match, "score", None) if not isinstance(match, dict) else match.get("score"),
-        }
-        for match in matches
-    ]
-    prompt, _ = prompt_registry.render(
-        "finance_tool_selection",
-        {
-            "message": message,
-            "candidate_tools_json": json.dumps(shortlist),
-        },
-    )
-    raw = ""
-    try:
-        result = await llm.ainvoke(prompt)
-        raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-        parsed = parse_finance_tool_selection_json(raw)
-    except Exception as exc:
-        repair_prompt = build_validation_retry_prompt(
-            schema_text='{"tool_name":"<tool name from shortlist>","reason":"<snake_case_reason>"}',
-            invalid_response=raw,
-            validation_error=exc,
-        )
-        repair_result = await llm.ainvoke(repair_prompt)
-        repair_raw = _extract_llm_text(
-            repair_result.content if hasattr(repair_result, "content") else repair_result
-        ).strip()
-        parsed = parse_finance_tool_selection_json(repair_raw)
-
-    valid_names = {item["name"] for item in shortlist if item["name"]}
-    if parsed.tool_name not in valid_names:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "finance_tool_selection_invalid",
-                "error": f"Selected finance tool '{parsed.tool_name}' was not in the shortlist.",
-            },
-        )
-    return parsed.tool_name
-
-
-async def _plan_finance_tool_call(
-    *,
-    message: str,
-    tool_definition,
-) -> dict[str, object]:
-    llm = get_llm(temperature=0.0)
-    prompt, _ = prompt_registry.render(
-        "finance_tool_call_plan",
-        {
-            "message": message,
-            "tool_name": tool_definition.name,
-            "tool_description": tool_definition.description,
-            "tool_parameters_json": json.dumps(tool_definition.parameters, ensure_ascii=True),
-        },
-    )
-    raw = ""
-    try:
-        result = await llm.ainvoke(prompt)
-        raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-        parsed = parse_finance_tool_call_plan_json(raw)
-    except Exception as exc:
-        repair_prompt = build_validation_retry_prompt(
-            schema_text=(
-                '{"should_call":true,"reason":"<snake_case_reason>",'
-                '"arguments":{"<arg>":"<value>"},"clarifying_question":"<empty when callable>"}'
-            ),
-            invalid_response=raw,
-            validation_error=exc,
-        )
-        repair_result = await llm.ainvoke(repair_prompt)
-        repair_raw = _extract_llm_text(
-            repair_result.content if hasattr(repair_result, "content") else repair_result
-        ).strip()
-        parsed = parse_finance_tool_call_plan_json(repair_raw)
-
-    return {
-        "should_call": parsed.should_call,
-        "reason": parsed.reason,
-        "arguments": parsed.arguments,
-        "clarifying_question": parsed.clarifying_question,
-    }
-
-
-async def _repair_url_access_refusal_if_needed(
-    *,
-    answer: str,
-    normalized_message: str,
-    rag_context: str,
-    web_results: list[dict],
-    llm,
-) -> str:
-    if not claims_no_web_access(answer):
-        return answer
-
-    if not web_results:
-        return answer
-
-    repair_prompt, _ = prompt_registry.render(
-        "web_search_repair",
-        {
-            "normalized_message": normalized_message,
-            "web_results_json": json.dumps(web_results),
-            "rag_context": rag_context,
-        },
-    )
-    repair = await llm.ainvoke(repair_prompt)
-    repaired_text = _extract_llm_text(
-        repair.content if hasattr(repair, "content") else repair
-    ).strip()
-    if repaired_text and not claims_no_web_access(repaired_text):
-        return repaired_text
-
-    first = web_results[0]
-    source = first.get("url") or "provided URL"
-    snippet = (first.get("raw_content") or first.get("content") or "").strip()
-    snippet = snippet[:1000]
-    return (
-        f"I fetched content from {source}. "
-        f"Here is a concise summary based on the retrieved page text:\n\n{snippet}"
-    ).strip()
-
-
-async def _decide_chat_action(
-    *,
-    message: str,
-    rag_context: str,
-    rag_chunks: list[dict] | None = None,
-    history_block: str,
-) -> _ChatActionDecision:
-    llm = get_llm(temperature=0.0)
-    rag_is_insufficient = _is_rag_context_insufficient(message=message, rag_context=rag_context, rag_chunks=rag_chunks)
-    message_urls = _extract_urls(message)
-    history_urls = _extract_urls(history_block)
-    decision_prompt, _ = prompt_registry.render(
-        "web_search_decision",
-        {
-            "history_block": history_block,
-            "rag_context": rag_context,
-            "rag_is_insufficient": rag_is_insufficient,
-            "message": message,
-            "message_urls": message_urls,
-            "history_urls": history_urls,
-        },
-    )
-    try:
-        result = await llm.ainvoke(decision_prompt)
-        raw = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-        parsed = parse_chat_action_json(raw)
-    except Exception as exc:
-        repair_prompt = build_validation_retry_prompt(
-            schema_text=(
-                '{"action":"answer_direct|answer_from_rag|web_search|asset_price|search_finance_tools|fetch_url|ask_clarifying",'
-                '"reason":"<why this action was chosen>","query":"<search query or empty>",'
-                '"url":"<url or empty>","symbols":["<asset symbols for asset_price>"],'
-                '"currency":"<quote currency or empty>"}'
-            ),
-            invalid_response=raw if "raw" in locals() else "",
-            validation_error=exc,
-        )
-        try:
-            repair_result = await llm.ainvoke(repair_prompt)
-            repair_raw = _extract_llm_text(
-                repair_result.content if hasattr(repair_result, "content") else repair_result
-            ).strip()
-            parsed = parse_chat_action_json(repair_raw)
-        except Exception:
-            return _ChatActionDecision(action="answer_direct", reason="router_parse_failed")
-
-    return _ChatActionDecision(
-        action=parsed.action,
-        reason=parsed.reason.strip(),
-        query=parsed.query.strip(),
-        url=parsed.url.strip(),
-        symbols=parsed.symbols,
-        currency=parsed.currency.strip(),
-    )
-
-
-async def _resolve_web_context(
-    *,
-    normalized_message: str,
-    rag_context: str,
-    rag_chunks: list[dict] | None = None,
-    history_block: str,
-    decision: _ChatActionDecision | None = None,
-) -> _ResolvedWebContext:
-    web_provider = settings.web_search_provider.lower()
-
-    decision = decision or await _decide_chat_action(
-        message=normalized_message,
-        rag_context=rag_context,
-        rag_chunks=rag_chunks,
-        history_block=history_block,
-    )
-
-    if decision.action in {"answer_direct", "answer_from_rag", "ask_clarifying"}:
-        return _ResolvedWebContext(False, web_provider, [], "not_needed")
-
-    if decision.action == "fetch_url":
-        direct_urls = (
-            ([decision.url] if decision.url else [])
-            or _extract_urls(normalized_message)
-            or _extract_urls(history_block)
-        )
-        if direct_urls:
-            url = direct_urls[0]
-            fetched = await fetch_url_content(url)
-            return _ResolvedWebContext(
-                used=True,
-                provider="direct_fetch",
-                results=[{"url": url, "title": url, "content": fetched, "raw_content": fetched}],
-                reason="direct_fetch",
-            )
-        return _ResolvedWebContext(False, web_provider, [], "not_needed")
-
-    if decision.action == "asset_price":
-        provider, results = await _quote_asset_prices(
-            decision.symbols or [],
-            decision.currency,
-        )
-        return _ResolvedWebContext(True, provider, results, "asset_price")
-
-    if decision.action == "search_finance_tools":
-        matches = await search_alpha_vantage_mcp_tools(decision.query or normalized_message, limit=5)
-        if not matches:
-            return _ResolvedWebContext(False, "alphavantage_mcp", [], "not_needed")
-
-        selected_tool_name = await _select_finance_tool_candidate(
-            message=normalized_message,
-            matches=matches,
-        )
-        tool_definition = await get_alpha_vantage_mcp_tool_definition(selected_tool_name)
-        call_plan = await _plan_finance_tool_call(
-            message=normalized_message,
-            tool_definition=tool_definition,
-        )
-
-        if call_plan["should_call"]:
-            payload = await call_alpha_vantage_mcp_tool(
-                selected_tool_name,
-                cast(dict[str, object], call_plan["arguments"]),
-            )
-            return _ResolvedWebContext(
-                True,
-                "alphavantage_mcp",
-                [
-                    _tool_call_payload_to_context_row(
-                        tool_name=selected_tool_name,
-                        arguments=cast(dict[str, object], call_plan["arguments"]),
-                        payload=payload,
-                    )
-                ],
-                "finance_tool_call",
-            )
-
-        shortlist_rows = [_tool_match_to_context_row(match) for match in matches[:3]]
-        shortlist_rows.insert(
-            0,
-            _tool_definition_to_context_row(
-                tool_definition=tool_definition,
-                clarifying_question=str(call_plan["clarifying_question"] or ""),
-                reason=str(call_plan["reason"] or ""),
-            ),
-        )
-        return _ResolvedWebContext(
-            True,
-            "alphavantage_mcp_catalog",
-            shortlist_rows,
-            "finance_tool_search",
-        )
-
-    if decision.action != "web_search":
-        return _ResolvedWebContext(False, web_provider, [], "not_needed")
-
-    web_query = decision.query or normalized_message
-    direct_urls = _extract_urls(decision.url) if decision.url else []
-    if direct_urls:
-        url = direct_urls[0]
-        fetched = await fetch_url_content(url)
-        return _ResolvedWebContext(
-            used=True,
-            provider="direct_fetch",
-            results=[{"url": url, "title": url, "content": fetched, "raw_content": fetched}],
-            reason="direct_fetch",
-        )
-
-    provider, results = await _search_web(web_query)
-    return _ResolvedWebContext(True, provider, results, "model_decision")
-
-
-def _prefer_web_citations(resolved_web: _ResolvedWebContext) -> bool:
-    return resolved_web.reason in {
-        "direct_fetch",
-        "model_decision",
-        "asset_price",
-        "finance_tool_call",
-        "finance_tool_search",
-    }
-
-
-def _rag_context_for_answer(rag_context: str, resolved_web: _ResolvedWebContext) -> str:
-    if resolved_web.reason == "direct_fetch":
-        return ""
-    return rag_context
-
-
-def _build_followup_report_context(run: SessionRun | None, run_id: str) -> str:
-    if run is None:
-        return (
-            f"No stored report context found for run '{run_id}'. "
-            "Use conversation history and retrieved sources."
-        )
-
-    sections: list[str] = []
-
-    report_text = (run.report or "").strip()
-    if report_text:
-        sections.append(f"Report findings:\n{report_text}")
-
-    query_text = (run.query or "").strip()
-    if query_text:
-        sections.append(f"Original research question:\n{query_text}")
-
-    source_urls = [url.strip() for url in (run.source_urls or []) if str(url).strip()]
-    if source_urls:
-        bullet_urls = "\n".join(f"- {url}" for url in source_urls)
-        sections.append(f"Report source URLs:\n{bullet_urls}")
-
-    if sections:
-        return "\n\n".join(sections)
-
-    return (
-        f"Run '{run_id}' has no stored report content, question, or source URLs. "
-        "Use conversation history and retrieved sources."
-    )
-
-
-def _build_chat_messages(
-    *,
-    system_instructions: str,
-    history: list,
-    rag_context: str,
-    web_results: list[dict],
-    normalized_message: str,
-    router_action: str | None = None,
-) -> list[BaseMessage]:
-    system_content, _ = prompt_registry.render(
-        "rag_chat_system",
-        {
-            "system_instructions": system_instructions,
-            "rag_context": rag_context,
-            "web_results_json": json.dumps(web_results) if web_results else "None",
-        },
-    )
-    messages: list[BaseMessage] = [SystemMessage(content=system_content)]
-    if router_action == "ask_clarifying":
-        messages.append(
-            SystemMessage(
-                content=(
-                    "The router determined the user request is underspecified. "
-                    "Ask one concise clarifying question and do not answer the original "
-                    "request yet."
-                )
-            )
-        )
-    elif router_action == "search_finance_tools":
-        clarifying_question = ""
-        for row in web_results:
-            if isinstance(row, dict) and str(row.get("clarifying_question") or "").strip():
-                clarifying_question = str(row.get("clarifying_question")).strip()
-                break
-        if clarifying_question:
-            messages.append(
-                SystemMessage(
-                    content=(
-                        "The finance tool workflow found a likely tool but it cannot be "
-                        "called confidently yet. Ask this concise clarifying question and do "
-                        "not guess missing parameters: "
-                        f"{clarifying_question}"
-                    )
-                )
-            )
-    for turn in history:
-        role = turn.role if hasattr(turn, "role") else turn.get("role", "")
-        content = turn.content if hasattr(turn, "content") else turn.get("content", "")
-        if role == "user":
-            messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            messages.append(AIMessage(content=content))
-    messages.append(HumanMessage(content=normalized_message))
-    return messages
-
-
-def _should_repair_fetched_url_answer(decision: _ChatActionDecision) -> bool:
-    return decision.action == "fetch_url"
 
 
 def _build_agent_messages(
@@ -1541,6 +934,37 @@ async def _generate_suggestions(query: str, answer: str, context: str) -> list[s
         return []
 
 
+def _build_followup_report_context(run: SessionRun | None, run_id: str) -> str:
+    if run is None:
+        return (
+            f"No stored report context found for run '{run_id}'. "
+            "Use conversation history and retrieved sources."
+        )
+
+    sections: list[str] = []
+
+    report_text = (run.report or "").strip()
+    if report_text:
+        sections.append(f"Report findings:\n{report_text}")
+
+    query_text = (run.query or "").strip()
+    if query_text:
+        sections.append(f"Original research question:\n{query_text}")
+
+    source_urls = [url.strip() for url in (run.source_urls or []) if str(url).strip()]
+    if source_urls:
+        bullet_urls = "\n".join(f"- {url}" for url in source_urls)
+        sections.append(f"Report source URLs:\n{bullet_urls}")
+
+    if sections:
+        return "\n\n".join(sections)
+
+    return (
+        f"Run '{run_id}' has no stored report content, question, or source URLs. "
+        "Use conversation history and retrieved sources."
+    )
+
+
 async def _stream_followup(
     session: Session,
     user_id: str,
@@ -1577,54 +1001,49 @@ async def _stream_followup(
     report = session.get_run(run_id)
     report_block = _build_followup_report_context(report, run_id)
 
-    history_block = "\n".join(
-        f"{t.role.upper()}: {t.content}" for t in session.conversation[-6:]
+    rag_combined = f"{context_block}\n\n{report_block}" if report_block else context_block
+    messages = _build_agent_messages(
+        system_instructions="You are a research assistant. Answer using the provided context and sources.",
+        history=list(session.conversation[-6:]),
+        rag_context=rag_combined,
+        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
+        normalized_message=question,
     )
-    try:
-        resolved_web = await _resolve_web_context(
-            normalized_message=question,
-            rag_context=context_block,
-            rag_chunks=chunks,
-            history_block=history_block,
+
+    event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_event(event: dict) -> None:
+        await event_queue.put(event)
+
+    loop_task = asyncio.create_task(
+        _run_agent_loop(
+            messages=messages,
+            metadata={"user_id": user_id, "run_id": run_id},
+            on_event=on_event,
         )
-    except Exception as exc:
-        yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
-        return
-
-    answer_context_block = _rag_context_for_answer(context_block, resolved_web)
-    prompt, _ = prompt_registry.render(
-        "followup_answer",
-        {
-            "history_block": history_block,
-            "answer_context_block": answer_context_block,
-            "web_results_json": json.dumps(resolved_web.results) if resolved_web.results else "None",
-            "question": question,
-            "report_block": report_block,
-        },
     )
-
-    llm = get_llm(temperature=0.2)
-    full_answer = ""
-
+    while not loop_task.done():
+        try:
+            event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+            yield f"data: {json.dumps(event)}\n\n"
+        except asyncio.TimeoutError:
+            pass
+    while not event_queue.empty():
+        event = event_queue.get_nowait()
+        yield f"data: {json.dumps(event)}\n\n"
     try:
-        async for chunk in llm.astream(prompt):
-            token = chunk.content if hasattr(chunk, "content") else str(chunk)
-            full_answer += token
-            yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
+        full_answer = loop_task.result()
     except Exception as exc:
         yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
         return
 
-    citations = _build_chat_citations(
-        rag_chunks=chunks,
-        web_results=resolved_web.results,
-        web_provider=resolved_web.provider,
-        prefer_web=_prefer_web_citations(resolved_web),
-    )
+    yield f"data: {json.dumps({'type': 'chunk', 'text': full_answer})}\n\n"
+
+    citations = _build_rag_citations(chunks)
     yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
 
     # Generate suggestions before persisting so they are stored with the turn
-    suggestions = await _generate_suggestions(question, full_answer, answer_context_block)
+    suggestions = await _generate_suggestions(question, full_answer, rag_combined)
 
     # Record turns in conversation history
     user_turn = ConversationTurn(role="user", content=question, run_id=run_id)
@@ -2352,75 +1771,28 @@ async def rag_chat_with_agent(
     )
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
 
-    history_block = "\n".join(
-        f"{m.role.upper()}: {m.content}"
-        for m in history[-10:]
+    messages = _build_agent_messages(
+        system_instructions=agent.system_instructions or "",
+        history=history,
+        rag_context=rag_context.context or "",
+        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
+        normalized_message=normalized_message,
     )
     try:
-        decision = await _decide_chat_action(
-            message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-        )
-        resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-            decision=decision,
+        answer = await _run_agent_loop(
+            messages=messages,
+            metadata={"agent_id": agent_id, "user_id": current_user.user_id},
         )
     except Exception as exc:
-        logger.exception(
-            "[rag_api] streaming agent chat external tool resolution failed "
-            "agent_id=%s user_id=%s action=%s",
-            agent_id,
-            current_user.user_id,
-            decision.action if "decision" in locals() and decision else "unknown",
-        )
+        logger.exception("[rag_api] agent chat loop failed agent_id=%s", agent_id)
         raise HTTPException(
             status_code=503,
-            detail={
-                "code": "web_search_unavailable",
-                "message": (
-                    "Web search is required for this request but the provider failed. "
-                    "Retry after the web provider recovers."
-                ),
-                "provider": settings.web_search_provider.lower(),
-                "error": str(exc),
-            },
+            detail={"code": "agent_loop_error", "error": str(exc)},
         ) from exc
-
-    answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    messages = _build_chat_messages(
-        system_instructions=agent.system_instructions or "None",
-        history=history,
-        rag_context=answer_rag_context,
-        web_results=resolved_web.results,
-        normalized_message=normalized_message,
-        router_action=decision.action,
-    )
-    llm = get_llm(temperature=0.2)
-    result = await llm.ainvoke(messages)
-    content = result.content
-    if not isinstance(content, str):
-        content = "".join(
-            part if isinstance(part, str) else part.get("text", "")
-            for part in content
-        )
-    answer = content.strip()
-    if resolved_web.used and _should_repair_fetched_url_answer(decision):
-        answer = await _repair_url_access_refusal_if_needed(
-            answer=answer,
-            normalized_message=normalized_message,
-            rag_context=answer_rag_context,
-            web_results=resolved_web.results,
-            llm=llm,
-        )
     suggestions = await _generate_suggestions(
         normalized_message,
         answer,
-        answer_rag_context,
+        rag_context.context or "",
     )
 
     user_msg = RagChatMessage(
@@ -2431,12 +1803,7 @@ async def rag_chat_with_agent(
         role="user",
         content=normalized_message,
     )
-    citations = _build_chat_citations(
-        rag_chunks=rag_context.chunks,
-        web_results=resolved_web.results,
-        web_provider=resolved_web.provider,
-        prefer_web=_prefer_web_citations(resolved_web),
-    )
+    citations = _build_rag_citations(rag_context.chunks)
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -2454,8 +1821,6 @@ async def rag_chat_with_agent(
     return {
         "session_id": chat_session_id,
         "agent_id": agent_id,
-        "web_used": resolved_web.used,
-        "web_provider": resolved_web.provider if resolved_web.used else None,
         "reply": assistant_msg.to_dict(),
         "messages": [m.to_dict() for m in updated_history],
     }
@@ -2505,99 +1870,44 @@ async def rag_chat_with_agent_stream(
         initial_message=normalized_message,
     )
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    try:
-        decision = await _decide_chat_action(
-            message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-        )
-        resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-            decision=decision,
-        )
-    except Exception as exc:
-        logger.exception(
-            "[rag_api] agent chat external tool resolution failed "
-            "agent_id=%s user_id=%s action=%s",
-            agent_id,
-            current_user.user_id,
-            decision.action if "decision" in locals() and decision else "unknown",
-        )
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "web_search_unavailable",
-                "message": (
-                    "Web search is required for this request but the provider failed. "
-                    "Retry after the web provider recovers."
-                ),
-                "provider": settings.web_search_provider.lower(),
-                "error": str(exc),
-            },
-        ) from exc
-    answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    messages = _build_chat_messages(
-        system_instructions=agent.system_instructions or "None",
+    messages = _build_agent_messages(
+        system_instructions=agent.system_instructions or "",
         history=history,
-        rag_context=answer_rag_context,
-        web_results=resolved_web.results,
+        rag_context=rag_context.context or "",
+        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
-        router_action=decision.action,
     )
-
-    citations = _build_chat_citations(
-        rag_chunks=rag_context.chunks,
-        web_results=resolved_web.results,
-        web_provider=resolved_web.provider,
-        prefer_web=_prefer_web_citations(resolved_web),
-    )
+    citations = _build_rag_citations(rag_context.chunks)
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
-        llm = get_llm(temperature=0.2)
-        answer_parts: list[str] = []
-        try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
-            if resolved_web.used and _should_repair_fetched_url_answer(decision):
-                result = await llm.ainvoke(messages)
-                answer = _extract_llm_text(
-                    result.content if hasattr(result, "content") else result
-                ).strip()
-                answer = await _repair_url_access_refusal_if_needed(
-                    answer=answer,
-                    normalized_message=normalized_message,
-                    rag_context=answer_rag_context,
-                    web_results=resolved_web.results,
-                    llm=llm,
-                )
-                if answer:
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
-            else:
-                async for chunk in llm.astream(messages):
-                    content = chunk.content if hasattr(chunk, "content") else chunk
-                    token = ""
-                    if isinstance(content, str):
-                        token = content
-                    elif isinstance(content, list):
-                        token = "".join(
-                            part if isinstance(part, str) else part.get("text", "")
-                            for part in content
-                        )
-                    elif content is not None:
-                        token = str(content)
+        event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
-                    if token:
-                        answer_parts.append(token)
-                        yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
-                answer = "".join(answer_parts).strip()
+        async def on_event(event: dict) -> None:
+            await event_queue.put(event)
+
+        try:
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
+            loop_task = asyncio.create_task(
+                _run_agent_loop(
+                    messages=messages,
+                    metadata={"agent_id": agent_id, "user_id": current_user.user_id},
+                    on_event=on_event,
+                )
+            )
+            while not loop_task.done():
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    pass
+            while not event_queue.empty():
+                event = event_queue.get_nowait()
+                yield f"data: {json.dumps(event)}\n\n"
+            answer = loop_task.result()
             suggestions = await _generate_suggestions(
                 normalized_message,
                 answer,
-                answer_rag_context,
+                rag_context.context or "",
             )
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -2619,6 +1929,7 @@ async def rag_chat_with_agent_stream(
             )
             await append_chat_message(user_msg)
             await append_chat_message(assistant_msg)
+            yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:
                 yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
@@ -2767,51 +2078,25 @@ async def rag_chat_workspace(
         initial_message=normalized_message,
     )
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    try:
-        decision = await _decide_chat_action(
-            message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-        )
-        resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-            decision=decision,
-        )
-    except Exception as exc:
-        logger.exception(
-            "[rag_api] workspace chat external tool resolution failed "
-            "user_id=%s action=%s",
-            current_user.user_id,
-            decision.action if "decision" in locals() and decision else "unknown",
-        )
-        raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
-
-    answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    messages = _build_chat_messages(
+    messages = _build_agent_messages(
         system_instructions="You are a generic workspace chat assistant.",
         history=history,
-        rag_context=answer_rag_context,
-        web_results=resolved_web.results,
+        rag_context=rag_context.context or "",
+        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
-        router_action=decision.action,
     )
-    llm = get_llm(temperature=0.2)
-    result = await llm.ainvoke(messages)
-    answer = _extract_llm_text(result.content if hasattr(result, "content") else result).strip()
-    if resolved_web.used and _should_repair_fetched_url_answer(decision):
-        answer = await _repair_url_access_refusal_if_needed(
-            answer=answer,
-            normalized_message=normalized_message,
-            rag_context=answer_rag_context,
-            web_results=resolved_web.results,
-            llm=llm,
+    try:
+        answer = await _run_agent_loop(
+            messages=messages,
+            metadata={"user_id": current_user.user_id},
         )
-    suggestions = await _generate_suggestions(normalized_message, answer, answer_rag_context)
+    except Exception as exc:
+        logger.exception("[rag_api] workspace chat loop failed user_id=%s", current_user.user_id)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "agent_loop_error", "error": str(exc)},
+        ) from exc
+    suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
     user_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
         session_id=chat_session_id,
@@ -2821,12 +2106,7 @@ async def rag_chat_workspace(
         content=normalized_message,
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
-    citations = _build_chat_citations(
-        rag_chunks=rag_context.chunks,
-        web_results=resolved_web.results,
-        web_provider=resolved_web.provider,
-        prefer_web=_prefer_web_citations(resolved_web),
-    )
+    citations = _build_rag_citations(rag_context.chunks)
     citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
     assistant_msg = RagChatMessage(
         message_id=str(uuid.uuid4()),
@@ -2845,8 +2125,6 @@ async def rag_chat_workspace(
     return {
         "session_id": chat_session_id,
         "agent_id": None,
-        "web_used": resolved_web.used,
-        "web_provider": resolved_web.provider if resolved_web.used else None,
         "reply": assistant_msg.to_dict(),
         "messages": [m.to_dict() for m in updated_history],
     }
@@ -2873,74 +2151,42 @@ async def rag_chat_workspace_stream(
         initial_message=normalized_message,
     )
     history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    history_block = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-10:])
-    try:
-        decision = await _decide_chat_action(
-            message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-        )
-        resolved_web = await _resolve_web_context(
-            normalized_message=normalized_message,
-            rag_context=rag_context.context or "",
-            rag_chunks=rag_context.chunks,
-            history_block=history_block,
-            decision=decision,
-        )
-    except Exception as exc:
-        logger.exception(
-            "[rag_api] streaming workspace chat external tool resolution failed "
-            "user_id=%s action=%s",
-            current_user.user_id,
-            decision.action if "decision" in locals() and decision else "unknown",
-        )
-        raise HTTPException(status_code=503, detail={"code": "web_search_unavailable", "error": str(exc)}) from exc
-    answer_rag_context = _rag_context_for_answer(rag_context.context or "", resolved_web)
-    messages = _build_chat_messages(
+    messages = _build_agent_messages(
         system_instructions="You are a generic workspace chat assistant.",
         history=history,
-        rag_context=answer_rag_context,
-        web_results=resolved_web.results,
+        rag_context=rag_context.context or "",
+        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
-        router_action=decision.action,
     )
-    citations = _build_chat_citations(
-        rag_chunks=rag_context.chunks,
-        web_results=resolved_web.results,
-        web_provider=resolved_web.provider,
-        prefer_web=_prefer_web_citations(resolved_web),
-    )
+    citations = _build_rag_citations(rag_context.chunks)
     citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
-        llm = get_llm(temperature=0.2)
-        answer_parts: list[str] = []
+        event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+        async def on_event(event: dict) -> None:
+            await event_queue.put(event)
+
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id, 'web_used': resolved_web.used, 'web_provider': resolved_web.provider if resolved_web.used else None})}\n\n"
-            if resolved_web.used and _should_repair_fetched_url_answer(decision):
-                result = await llm.ainvoke(messages)
-                answer = _extract_llm_text(
-                    result.content if hasattr(result, "content") else result
-                ).strip()
-                answer = await _repair_url_access_refusal_if_needed(
-                    answer=answer,
-                    normalized_message=normalized_message,
-                    rag_context=answer_rag_context,
-                    web_results=resolved_web.results,
-                    llm=llm,
+            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
+            loop_task = asyncio.create_task(
+                _run_agent_loop(
+                    messages=messages,
+                    metadata={"user_id": current_user.user_id},
+                    on_event=on_event,
                 )
-                if answer:
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
-            else:
-                async for chunk in llm.astream(messages):
-                    text = _extract_llm_text(chunk.content if hasattr(chunk, "content") else chunk)
-                    if not text:
-                        continue
-                    answer_parts.append(text)
-                    yield f"data: {json.dumps({'type': 'chunk', 'text': text})}\n\n"
-                answer = "".join(answer_parts).strip()
-            suggestions = await _generate_suggestions(normalized_message, answer, answer_rag_context)
+            )
+            while not loop_task.done():
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    pass
+            while not event_queue.empty():
+                event = event_queue.get_nowait()
+                yield f"data: {json.dumps(event)}\n\n"
+            answer = loop_task.result()
+            suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
             await append_chat_message(
                 RagChatMessage(
                     message_id=str(uuid.uuid4()),
@@ -2965,6 +2211,7 @@ async def rag_chat_workspace_stream(
                     chat_scope=CHAT_SCOPE_WORKSPACE,
                 )
             )
+            yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:
                 yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"

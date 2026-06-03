@@ -15,19 +15,10 @@ os.environ.setdefault("INNGEST_DEV", "1")
 # App / client setup
 # ---------------------------------------------------------------------------
 
-with (
-    patch("src.api.endpoints.validate_web_search_provider_health"),
-    patch("src.api.endpoints.validate_asset_price_provider_health"),
-    patch(
-        "src.api.endpoints.initialize_alpha_vantage_mcp_client",
-        new=AsyncMock(return_value=MagicMock(list_available_tools=MagicMock(return_value=[]))),
-    ),
-    patch("src.api.endpoints.shutdown_alpha_vantage_mcp_client", new=AsyncMock()),
-):
-    from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient
 
-    from src.api.endpoints import app
-    from src.auth import AuthenticatedUser, get_authenticated_user
+from src.api.endpoints import app
+from src.auth import AuthenticatedUser, get_authenticated_user
 
 client = TestClient(app)
 
