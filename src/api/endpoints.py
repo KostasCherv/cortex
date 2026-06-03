@@ -15,7 +15,7 @@ import inngest.fast_api as _inngest_fast_api
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel
 
 from src.graph.graph import build_graph
@@ -25,7 +25,7 @@ from src.observability.langfuse import (
     create_trace_id_for_workflow,
     submit_user_feedback_score,
 )
-from src.observability import end_workflow_run, start_workflow_run
+from src.observability import end_workflow_run, start_step_span, start_workflow_run
 from src.config import settings
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.cache.client import get_cache
@@ -47,6 +47,7 @@ from src.sessions import (
 )
 from src.tools.neo4j_graph_store import Neo4jGraphStore
 from src.tools.reranker import rerank_chunks
+from src.tools.composio_toolset import get_composio_toolset_manager
 from src.tools.asset_price_provider import (
     get_asset_price_tool,
     validate_asset_price_provider_health,
@@ -1049,6 +1050,111 @@ def _build_chat_messages(
 
 def _should_repair_fetched_url_answer(decision: _ChatActionDecision) -> bool:
     return decision.action == "fetch_url"
+
+
+def _build_agent_messages(
+    *,
+    system_instructions: str,
+    history: list,
+    rag_context: str,
+    composio_apps: list[str],
+    normalized_message: str,
+) -> list[BaseMessage]:
+    system_content, _ = prompt_registry.render(
+        "rag_chat_system",
+        {
+            "system_instructions": system_instructions,
+            "rag_context": rag_context,
+            "composio_apps": composio_apps,
+        },
+    )
+    messages: list[BaseMessage] = [SystemMessage(content=system_content)]
+    for turn in history:
+        role = turn.role if hasattr(turn, "role") else turn.get("role", "")
+        content = turn.content if hasattr(turn, "content") else turn.get("content", "")
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+    messages.append(HumanMessage(content=normalized_message))
+    return messages
+
+
+async def _run_agent_loop(
+    *,
+    messages: list[BaseMessage],
+    metadata: dict[str, object],
+    on_event=None,
+) -> str:
+    """Run an agentic tool-calling loop and return the final answer text.
+
+    on_event: optional async callable(dict) called for tool_start / tool_end events.
+    """
+    manager = get_composio_toolset_manager()
+    tools = manager.get_tools()
+    llm = get_llm(temperature=0.0)
+    llm_with_tools = llm.bind_tools(tools) if tools else llm
+
+    max_turns = settings.composio_max_agent_turns
+    loop_messages = list(messages)
+    last_response_text = ""
+
+    for turn in range(max_turns):
+        with start_step_span(
+            name=f"agent_loop.turn_{turn}",
+            run_type="llm",
+            node_name="agent_loop",
+            inputs={"turn": turn},
+            metadata=metadata,
+            tags=["llm", "agent_loop"],
+        ):
+            response = await llm_with_tools.ainvoke(loop_messages)
+
+        last_response_text = _extract_llm_text(response.content if hasattr(response, "content") else response)
+        tool_calls = getattr(response, "tool_calls", None) or []
+
+        if not tool_calls:
+            break
+
+        tool_map = {t.name: t for t in tools}
+        loop_messages.append(response)
+
+        for tc in tool_calls:
+            tool_name = tc["name"]
+            tool_id = tc.get("id", tool_name)
+            tool_args = tc.get("args", {})
+            input_summary = str(tool_args)[:120]
+
+            if on_event:
+                await on_event({"type": "tool_start", "tool": tool_name, "input_summary": input_summary})
+
+            tool_result = ""
+            tool_status = "ok"
+            try:
+                with start_step_span(
+                    name=f"agent_loop.tool.{tool_name}",
+                    run_type="tool",
+                    node_name="agent_loop",
+                    inputs={"tool": tool_name, "args": tool_args},
+                    metadata=metadata,
+                    tags=["external", "composio"],
+                ):
+                    matched_tool = tool_map.get(tool_name)
+                    if matched_tool is None:
+                        raise ValueError(f"Tool '{tool_name}' not found in catalog.")
+                    raw_result = await matched_tool.arun(tool_args)
+                    tool_result = str(raw_result)[:6000]
+            except Exception as exc:
+                tool_result = f"Tool '{tool_name}' returned an error: {exc}"
+                tool_status = "error"
+                logger.warning("[agent_loop] tool %s failed: %s", tool_name, exc)
+
+            if on_event:
+                await on_event({"type": "tool_end", "tool": tool_name, "status": tool_status})
+
+            loop_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_id))
+
+    return last_response_text
 
 
 # ---------------------------------------------------------------------------
