@@ -66,6 +66,35 @@ class Settings(BaseSettings):
         description="Seconds between background Alpha Vantage MCP tool-catalog refreshes.",
     )
 
+    # Composio
+    composio_api_key: str = Field(
+        default="",
+        description="Composio API key for the service account.",
+    )
+    composio_enabled: bool = Field(
+        default=True,
+        description="Enable Composio tool integration.",
+    )
+    composio_apps: list[str] | str = Field(
+        default=[],
+        description="Comma-separated allowlist of Composio app names to expose. Empty = all connected apps.",
+    )
+    composio_tool_refresh_seconds: int = Field(
+        default=3600,
+        description="Seconds between background Composio tool-catalog refreshes.",
+    )
+    composio_max_agent_turns: int = Field(
+        default=5,
+        description="Maximum agent loop turns before returning the last response.",
+    )
+
+    @field_validator("composio_apps", mode="before")
+    @classmethod
+    def parse_composio_apps(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [app.strip() for app in v.split(",") if app.strip()]
+        return v
+
     # Graph store (Neo4j)
     neo4j_uri: str = Field(
         default="",

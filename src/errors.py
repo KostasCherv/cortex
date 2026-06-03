@@ -51,3 +51,7 @@ class CacheError(CortexError):
 
 class McpClientError(CortexError):
     """Raised when an MCP client operation fails."""
+
+
+class ComposioError(CortexError):
+    """Raised when a Composio toolset operation fails."""
