@@ -18,7 +18,7 @@ class PromptRegistry:
     _cache: dict[str, Template] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._environment = Environment(
+        self._environment = Environment(  # nosec B701 — templates are LLM prompt text, not HTML; autoescape not applicable
             loader=FileSystemLoader(str(self.template_dir)),
             autoescape=False,
             keep_trailing_newline=True,
@@ -33,7 +33,7 @@ class PromptRegistry:
 
         template_path = self.template_dir / template_name
         template_source = template_path.read_text(encoding="utf-8")
-        prompt_version = md5(template_source.encode("utf-8")).hexdigest()
+        prompt_version = md5(template_source.encode("utf-8")).hexdigest()  # nosec B324 — content fingerprint for versioning, not security
         rendered = template.render(**context)
         return rendered, prompt_version
 

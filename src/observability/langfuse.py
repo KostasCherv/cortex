@@ -55,7 +55,7 @@ class ObservedGeneration:
             return
         try:
             self.generation.update(output=output)
-        except Exception:
+        except Exception:  # nosec B110 — best-effort observability update; silencing intentional
             pass
 
     def mark_error(self, exc: Exception) -> None:
@@ -66,7 +66,7 @@ class ObservedGeneration:
         except Exception:
             try:
                 self.generation.update(output=str(exc))
-            except Exception:
+            except Exception:  # nosec B110 — best-effort observability update; silencing intentional
                 pass
 
     def end(self) -> None:

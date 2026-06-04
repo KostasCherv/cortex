@@ -161,7 +161,7 @@ class Neo4jGraphStore:
         entities: list[dict[str, Any]] = []
         for name in unique_names[:12]:
             normalized = name.lower()
-            entity_id = hashlib.sha1(normalized.encode("utf-8")).hexdigest()
+            entity_id = hashlib.sha1(normalized.encode("utf-8")).hexdigest()  # nosec B324 — graph node ID, not a security hash
             entities.append(
                 {
                     "id": entity_id,
@@ -245,7 +245,7 @@ class Neo4jGraphStore:
                 if normalized in entities_by_name:
                     continue
                 entities_by_name[normalized] = {
-                    "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),
+                    "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),  # nosec B324 — graph node ID, not a security hash
                     "name": name,
                     "normalized_name": normalized,
                     "entity_type": row.entity_type,
@@ -321,9 +321,9 @@ class Neo4jGraphStore:
         relation_rows: list[dict[str, Any]] = []
 
         for idx, chunk_text in enumerate(chunks):
-            chunk_id = hashlib.sha1(f"{document_id}:{idx}".encode("utf-8")).hexdigest()
+            chunk_id = hashlib.sha1(f"{document_id}:{idx}".encode("utf-8")).hexdigest()  # nosec B324 — chunk ID for graph linking, not a security hash
             if idx > 0:
-                prev_chunk_id = hashlib.sha1(
+                prev_chunk_id = hashlib.sha1(  # nosec B324 — chunk ID for graph linking, not a security hash
                     f"{document_id}:{idx - 1}".encode("utf-8")
                 ).hexdigest()
                 next_rows.append({"from": prev_chunk_id, "to": chunk_id})

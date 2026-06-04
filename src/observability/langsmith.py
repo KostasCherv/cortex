@@ -166,7 +166,7 @@ def end_workflow_run(
     if callable(flush):
         try:
             flush()
-        except Exception:
+        except Exception:  # nosec B110 — best-effort flush; existing comment explains intent
             # Best effort flush; run has already been ended above.
             pass
     ctx.ended = True

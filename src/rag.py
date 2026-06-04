@@ -583,14 +583,14 @@ async def delete_resource(resource_id: str, user_id: str) -> bool:
             owner_id=resource.owner_id,
             workspace_id=resource.workspace_id,
         )
-    except Exception:
+    except Exception:  # nosec B110 — sidecar cleanup is best-effort; existing comment explains intent
         # Sidecar cleanup is best-effort; resource deletion still proceeds.
         pass
 
     if resource.storage_uri:
         try:
             await _get_storage().delete_object(storage_uri=resource.storage_uri)
-        except Exception:
+        except Exception:  # nosec B110 — object cleanup is best-effort; existing comment explains intent
             # Object cleanup is best-effort; DB deletion should still proceed.
             pass
 
