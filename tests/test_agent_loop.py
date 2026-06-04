@@ -1,4 +1,5 @@
 """Tests for _run_agent_loop and _build_agent_messages in endpoints.py."""
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +20,14 @@ def _ai_message_with_tool_call(tool_name: str, tool_id: str, args: dict) -> AIMe
     )
 
 
+def _patch_router_tools(mock_mgr: MagicMock, tools: list) -> None:
+    @asynccontextmanager
+    async def _router_context(_user_id: str):
+        yield tools
+
+    mock_mgr.return_value.router_tools_context = _router_context
+
+
 @pytest.mark.asyncio
 async def test_run_agent_loop_no_tool_calls_returns_answer():
     from src.api.endpoints import _run_agent_loop
@@ -29,7 +38,7 @@ async def test_run_agent_loop_no_tool_calls_returns_answer():
     mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
-        mock_mgr.return_value.get_tools.return_value = []
+        _patch_router_tools(mock_mgr, [])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             answer = await _run_agent_loop(
                 messages=[HumanMessage(content="What is 6 times 7?")],
@@ -53,7 +62,7 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
     fake_tool = _make_tool("TAVILY_SEARCH", '{"price": 200}')
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
-        mock_mgr.return_value.get_tools.return_value = [fake_tool]
+        _patch_router_tools(mock_mgr, [fake_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             answer = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
@@ -62,6 +71,45 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
 
     assert answer == "AAPL is trading at $200."
     fake_tool.arun.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_router_search_then_execute():
+    from src.api.endpoints import _run_agent_loop
+
+    search_response = _ai_message_with_tool_call(
+        "COMPOSIO_SEARCH_TOOLS",
+        "call_search",
+        {"use_case": "search the web for latest AAPL price"},
+    )
+    execute_response = _ai_message_with_tool_call(
+        "COMPOSIO_MULTI_EXECUTE_TOOL",
+        "call_exec",
+        {"tools": [{"tool_slug": "TAVILY_SEARCH", "arguments": {"query": "AAPL price"}}]},
+    )
+    final_response = AIMessage(content="AAPL is trading at $200.")
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[search_response, execute_response, final_response]
+    )
+
+    search_tool = _make_tool("COMPOSIO_SEARCH_TOOLS", '{"tools": ["TAVILY_SEARCH"]}')
+    execute_tool = _make_tool("COMPOSIO_MULTI_EXECUTE_TOOL", '{"price": 200}')
+
+    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [search_tool, execute_tool])
+        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+            answer = await _run_agent_loop(
+                messages=[HumanMessage(content="What is AAPL price?")],
+                metadata={},
+            )
+
+    assert answer == "AAPL is trading at $200."
+    search_tool.arun.assert_awaited_once()
+    execute_tool.arun.assert_awaited_once()
+    assert mock_llm.ainvoke.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -83,7 +131,7 @@ async def test_run_agent_loop_emits_tool_events_via_on_event():
     fake_tool = _make_tool("GITHUB_CREATE_ISSUE", '{"id": 42}')
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
-        mock_mgr.return_value.get_tools.return_value = [fake_tool]
+        _patch_router_tools(mock_mgr, [fake_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
@@ -120,7 +168,7 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
     broken_tool.arun = AsyncMock(side_effect=Exception("Unauthorized"))
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
-        mock_mgr.return_value.get_tools.return_value = [broken_tool]
+        _patch_router_tools(mock_mgr, [broken_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             answer = await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
@@ -146,7 +194,7 @@ async def test_run_agent_loop_respects_max_turns():
     fake_tool = _make_tool("TAVILY_SEARCH", "result")
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
-        mock_mgr.return_value.get_tools.return_value = [fake_tool]
+        _patch_router_tools(mock_mgr, [fake_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             with patch("src.api.endpoints.settings") as mock_settings:
                 mock_settings.composio_max_agent_turns = 3
@@ -179,6 +227,8 @@ def test_build_agent_messages_constructs_correct_structure():
 
     assert isinstance(messages[0], SystemMessage)
     assert "github" in messages[0].content
+    assert "COMPOSIO_SEARCH_TOOLS" in messages[0].content
+    assert "COMPOSIO_MULTI_EXECUTE_TOOL" in messages[0].content
     assert "Some doc text" in messages[0].content
     assert "Prefers concise answers" in messages[0].content
     assert isinstance(messages[1], HumanMessage)

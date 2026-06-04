@@ -536,7 +536,7 @@ async def _run_agent_loop(
     manager = get_composio_toolset_manager()
     user_id = settings.composio_user_id
 
-    async with manager.mcp_tools_context(user_id) as tools:
+    async with manager.router_tools_context(user_id) as tools:
         llm = get_llm(temperature=0.0)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
 

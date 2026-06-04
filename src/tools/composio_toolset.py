@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 import warnings
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
 from composio import Composio
@@ -23,20 +25,27 @@ warnings.filterwarnings(
 )
 
 
+@dataclass
+class _RouterSessionCache:
+    session_id: str
+    tools: list[Any]
+    slugs: list[str]
+    fetched_at: float
+
+
 class ComposioToolsetManager:
-    """Manages Composio connected apps and vends LangChain tools per user."""
+    """Manages Composio connected apps and vends Tool Router meta tools per user."""
 
     def __init__(self, *, api_key: str) -> None:
         self._api_key = api_key
         self._app_names: list[str] = []
+        self._router_cache: dict[str, _RouterSessionCache] = {}
 
-    def _build_client(self, *, wrap_for_langchain: bool = False) -> Composio:
-        if wrap_for_langchain:
-            return Composio(
-                api_key=self._api_key,
-                provider=LangchainProvider(),
-            )
-        return Composio(api_key=self._api_key)
+    def _build_client(self) -> Composio:
+        return Composio(
+            api_key=self._api_key,
+            provider=LangchainProvider(),
+        )
 
     def _normalize_connected_slugs(self, items: list[object]) -> list[str]:
         allowlist = {app.lower() for app in settings.composio_apps}
@@ -59,6 +68,40 @@ class ComposioToolsetManager:
         items = list(getattr(connected, "items", []) or [])
         return self._normalize_connected_slugs(items)
 
+    def _cache_is_valid(self, entry: _RouterSessionCache, slugs: list[str]) -> bool:
+        if entry.slugs != slugs:
+            return False
+        age = time.monotonic() - entry.fetched_at
+        return age < settings.composio_tool_refresh_seconds
+
+    def _get_router_tools(self, user_id: str, slugs: list[str]) -> list[Any]:
+        cached = self._router_cache.get(user_id)
+        if cached is not None and self._cache_is_valid(cached, slugs):
+            logger.debug(
+                "[composio] Reusing router session %s (%d meta tools) for user %s.",
+                cached.session_id,
+                len(cached.tools),
+                user_id,
+            )
+            return cached.tools
+
+        client = self._build_client()
+        session = client.create(user_id=user_id, toolkits={"enable": slugs})
+        tools = list(session.tools())
+        self._router_cache[user_id] = _RouterSessionCache(
+            session_id=session.session_id,
+            tools=tools,
+            slugs=list(slugs),
+            fetched_at=time.monotonic(),
+        )
+        logger.info(
+            "[composio] Router session ready for %s: %d meta tools, toolkits=%s.",
+            user_id,
+            len(tools),
+            ", ".join(slugs),
+        )
+        return tools
+
     async def initialize(self) -> None:
         try:
             self._app_names = self._get_connected_slugs_for_user(settings.composio_user_id)
@@ -75,34 +118,32 @@ class ComposioToolsetManager:
 
     async def shutdown(self) -> None:
         self._app_names = []
+        self._router_cache.clear()
 
     @asynccontextmanager
-    async def mcp_tools_context(
+    async def router_tools_context(
         self, user_id: str
     ) -> AsyncGenerator[list[Any], None]:
-        """Yield LangChain tools for *user_id* based on connected Composio apps."""
+        """Yield Tool Router meta tools for *user_id* (search/execute flow)."""
         try:
             slugs = self._get_connected_slugs_for_user(user_id)
             if not slugs:
                 yield []
                 return
 
-            client = self._build_client(wrap_for_langchain=True)
-            tools: list[Any] = []
-            seen_tool_names: set[str] = set()
-            for slug in slugs:
-                toolkit_tools = client.tools.get(user_id=user_id, toolkits=[slug], limit=999)
-                for tool in toolkit_tools:
-                    tool_name = getattr(tool, "name", None)
-                    if not isinstance(tool_name, str) or tool_name in seen_tool_names:
-                        continue
-                    seen_tool_names.add(tool_name)
-                    tools.append(tool)
-            logger.info("[composio] Loaded %d tools for user %s.", len(tools), user_id)
+            tools = self._get_router_tools(user_id, slugs)
             yield tools
         except Exception as exc:
-            logger.warning("[composio] Tool loading error: %s", exc)
+            logger.warning("[composio] Router tool loading error: %s", exc)
             yield []
+
+    @asynccontextmanager
+    async def mcp_tools_context(
+        self, user_id: str
+    ) -> AsyncGenerator[list[Any], None]:
+        """Deprecated alias for :meth:`router_tools_context`."""
+        async with self.router_tools_context(user_id) as tools:
+            yield tools
 
     def get_connected_app_names(self) -> list[str]:
         return list(self._app_names)

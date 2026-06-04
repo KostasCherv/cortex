@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     )
     composio_tool_refresh_seconds: int = Field(
         default=3600,
-        description="Seconds between background Composio tool-catalog refreshes.",
+        description="Seconds to cache Composio Tool Router sessions per user before refresh.",
     )
     composio_max_agent_turns: int = Field(
         default=5,
