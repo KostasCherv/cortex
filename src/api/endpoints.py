@@ -781,7 +781,7 @@ async def _execute_research_run(
                     if not chunk:
                         continue
                     content = chunk.content if hasattr(chunk, "content") else ""
-                    token = ""
+                    token = ""  # nosec B105 — local accumulator variable, not a password
                     if isinstance(content, str):
                         token = content
                     elif isinstance(content, list):

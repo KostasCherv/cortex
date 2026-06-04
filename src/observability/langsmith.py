@@ -40,7 +40,7 @@ class WorkflowTraceContext:
 
 def _sampling_allows_trace() -> bool:
     rate = max(0.0, min(1.0, settings.langsmith_sampling_rate))
-    return random.random() <= rate
+    return random.random() <= rate  # nosec B311 — sampling rate decision, not a security/cryptographic use
 
 
 def _langsmith_ready() -> bool:
@@ -140,13 +140,13 @@ def end_workflow_run(
     if callable(patch):
         try:
             patch()
-        except Exception:
+        except Exception:  # nosec B110 — best-effort LangSmith run patch; silencing intentional
             pass
     wait = getattr(ctx.run, "wait", None)
     if callable(wait):
         try:
             wait()
-        except Exception:
+        except Exception:  # nosec B110 — best-effort LangSmith run wait; silencing intentional
             pass
 
     client = getattr(ctx.run, "ls_client", None) or _get_langsmith_client()
@@ -159,7 +159,7 @@ def end_workflow_run(
                 outputs=payload,
                 error=redacted_error,
             )
-        except Exception:
+        except Exception:  # nosec B110 — best-effort run update; existing comment explains intent
             # Best effort update; end() + patch()/wait() above are primary path.
             pass
     flush = getattr(client, "flush", None)

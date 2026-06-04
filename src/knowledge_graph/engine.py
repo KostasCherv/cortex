@@ -99,7 +99,7 @@ class KnowledgeGraphEngine:
         return self._graph_store._execute(query, params or {})
 
     def _hash_id(self, prefix: str, raw: str) -> str:
-        return hashlib.sha1(f"{prefix}:{raw}".encode("utf-8")).hexdigest()
+        return hashlib.sha1(f"{prefix}:{raw}".encode("utf-8")).hexdigest()  # nosec B324 — non-security ID generation, not used for auth/crypto
 
     def _row_to_object(self, row: dict[str, Any]) -> KnowledgeObject:
         """Convert a Neo4j record row to a ``KnowledgeObject``."""
