@@ -23,3 +23,6 @@ supabase/.temp
 ui/.impeccable-live.json
 ui/index.html
 node-compile-cache
+.codex
+.claude
+.opencode
