@@ -54,6 +54,10 @@ class Settings(BaseSettings):
         default="",
         description="Composio API key for the service account.",
     )
+    composio_user_id: str = Field(
+        default="default",
+        description="Composio user ID whose connected accounts are used for tool calls.",
+    )
     composio_enabled: bool = Field(
         default=True,
         description="Enable Composio tool integration.",

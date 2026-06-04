@@ -205,8 +205,8 @@ async def validate_session_store_configuration() -> None:
         try:
             composio_client = await initialize_composio_toolset()
             logger.info(
-                "[startup] Composio toolset loaded with %d tools.",
-                len(composio_client.get_tools()),
+                "[startup] Composio MCP ready. Connected apps: %s",
+                composio_client.get_connected_app_names(),
             )
         except Exception as exc:
             logger.warning(
@@ -454,11 +454,20 @@ def _extract_llm_text(content: object) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "".join(
-            part if isinstance(part, str) else str(part.get("text", ""))
-            for part in content
-            if isinstance(part, (str, dict))
-        )
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                chunks.append(part)
+                continue
+            text = getattr(part, "text", None)
+            if isinstance(text, str):
+                chunks.append(text)
+                continue
+            if isinstance(part, dict):
+                dict_text = part.get("text")
+                if isinstance(dict_text, str):
+                    chunks.append(dict_text)
+        return "".join(chunks)
     return str(content)
 
 
@@ -502,70 +511,72 @@ async def _run_agent_loop(
     on_event: optional async callable(dict) called for tool_start / tool_end events.
     """
     manager = get_composio_toolset_manager()
-    tools = manager.get_tools()
-    llm = get_llm(temperature=0.0)
-    llm_with_tools = llm.bind_tools(tools) if tools else llm
+    user_id = settings.composio_user_id
 
-    max_turns = settings.composio_max_agent_turns
-    loop_messages = list(messages)
-    last_response_text = ""
+    async with manager.mcp_tools_context(user_id) as tools:
+        llm = get_llm(temperature=0.0)
+        llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-    for turn in range(max_turns):
-        with start_step_span(
-            name=f"agent_loop.turn_{turn}",
-            run_type="llm",
-            node_name="agent_loop",
-            inputs={"turn": turn},
-            metadata=metadata,
-            tags=["llm", "agent_loop"],
-        ):
-            response = await llm_with_tools.ainvoke(loop_messages)
+        max_turns = settings.composio_max_agent_turns
+        loop_messages = list(messages)
+        last_response_text = ""
 
-        last_response_text = _extract_llm_text(response.content if hasattr(response, "content") else response)
-        tool_calls = getattr(response, "tool_calls", None) or []
+        for turn in range(max_turns):
+            with start_step_span(
+                name=f"agent_loop.turn_{turn}",
+                run_type="llm",
+                node_name="agent_loop",
+                inputs={"turn": turn},
+                metadata=metadata,
+                tags=["llm", "agent_loop"],
+            ):
+                response = await llm_with_tools.ainvoke(loop_messages)
 
-        if not tool_calls:
-            break
+            last_response_text = _extract_llm_text(response.content if hasattr(response, "content") else response)
+            tool_calls = getattr(response, "tool_calls", None) or []
 
-        tool_map = {t.name: t for t in tools}
-        loop_messages.append(response)
+            if not tool_calls:
+                break
 
-        for tc in tool_calls:
-            tool_name = tc["name"]
-            tool_id = tc.get("id", tool_name)
-            tool_args = tc.get("args", {})
-            input_summary = str(tool_args)[:120]
+            tool_map = {t.name: t for t in tools}
+            loop_messages.append(response)
 
-            if on_event:
-                await on_event({"type": "tool_start", "tool": tool_name, "input_summary": input_summary})
+            for tc in tool_calls:
+                tool_name = tc["name"]
+                tool_id = tc.get("id", tool_name)
+                tool_args = tc.get("args", {})
+                input_summary = str(tool_args)[:120]
 
-            tool_result = ""
-            tool_status = "ok"
-            try:
-                with start_step_span(
-                    name=f"agent_loop.tool.{tool_name}",
-                    run_type="tool",
-                    node_name="agent_loop",
-                    inputs={"tool": tool_name, "args": tool_args},
-                    metadata=metadata,
-                    tags=["external", "composio"],
-                ):
-                    matched_tool = tool_map.get(tool_name)
-                    if matched_tool is None:
-                        raise ValueError(f"Tool '{tool_name}' not found in catalog.")
-                    raw_result = await matched_tool.arun(tool_args)
-                    tool_result = str(raw_result)[:6000]
-            except Exception as exc:
-                tool_result = f"Tool '{tool_name}' returned an error: {exc}"
-                tool_status = "error"
-                logger.warning("[agent_loop] tool %s failed: %s", tool_name, exc)
+                if on_event:
+                    await on_event({"type": "tool_start", "tool": tool_name, "input_summary": input_summary})
 
-            if on_event:
-                await on_event({"type": "tool_end", "tool": tool_name, "status": tool_status})
+                tool_result = ""
+                tool_status = "ok"
+                try:
+                    with start_step_span(
+                        name=f"agent_loop.tool.{tool_name}",
+                        run_type="tool",
+                        node_name="agent_loop",
+                        inputs={"tool": tool_name, "args": tool_args},
+                        metadata=metadata,
+                        tags=["external", "composio"],
+                    ):
+                        matched_tool = tool_map.get(tool_name)
+                        if matched_tool is None:
+                            raise ValueError(f"Tool '{tool_name}' not found in catalog.")
+                        raw_result = await matched_tool.arun(tool_args)
+                        tool_result = str(raw_result)[:6000]
+                except Exception as exc:
+                    tool_result = f"Tool '{tool_name}' returned an error: {exc}"
+                    tool_status = "error"
+                    logger.warning("[agent_loop] tool %s failed: %s", tool_name, exc)
 
-            loop_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_id))
+                if on_event:
+                    await on_event({"type": "tool_end", "tool": tool_name, "status": tool_status})
 
-    return last_response_text
+                loop_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_id))
+
+        return last_response_text
 
 
 # ---------------------------------------------------------------------------
@@ -913,12 +924,7 @@ async def _generate_suggestions(query: str, answer: str, context: str) -> list[s
             f"Context topics: {context[:500]}"
         )
         result = await llm.ainvoke(prompt)
-        content = result.content
-        if not isinstance(content, str):
-            content = "".join(
-                part if isinstance(part, str) else part.get("text", "")
-                for part in content
-            )
+        content = _extract_llm_text(result.content)
         lines = content.strip().split("\n")
         suggestions = []
         for line in lines:

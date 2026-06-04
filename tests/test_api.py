@@ -3,8 +3,9 @@
 import asyncio
 import json
 import time
-from datetime import UTC, datetime
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 
@@ -736,6 +737,32 @@ def test_generate_suggestions_returns_empty_on_error():
         )
 
     assert suggestions == []
+
+
+def test_generate_suggestions_handles_non_dict_content_blocks():
+    """_generate_suggestions tolerates structured content blocks with .text attributes."""
+    from src.api.endpoints import _generate_suggestions
+
+    mock_result = MagicMock()
+    mock_result.content = [
+        SimpleNamespace(text="1. First follow-up?\n"),
+        SimpleNamespace(text="2. Second follow-up?\n"),
+        SimpleNamespace(text="3. Third follow-up?"),
+    ]
+
+    mock_llm = AsyncMock()
+    mock_llm.ainvoke = AsyncMock(return_value=mock_result)
+
+    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        suggestions = asyncio.run(
+            _generate_suggestions("What is LangGraph?", "Some answer", "context")
+        )
+
+    assert suggestions == [
+        "First follow-up?",
+        "Second follow-up?",
+        "Third follow-up?",
+    ]
 
 
 def test_followup_stream_includes_suggestions_event():

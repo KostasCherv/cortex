@@ -1,87 +1,99 @@
 """Tests for src/tools/composio_toolset.py."""
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.tools.composio_toolset import (
-    ComposioToolsetManager,
-    get_composio_toolset_manager,
-    initialize_composio_toolset,
-    shutdown_composio_toolset,
-)
+from src.errors import ComposioError
+from src.tools.composio_toolset import ComposioToolsetManager
 
 
-def _make_fake_tool(name: str):
-    tool = MagicMock()
-    tool.name = name
-    tool.description = f"Tool {name}"
-    return tool
+def _connected_toolkit(slug: str) -> SimpleNamespace:
+    return SimpleNamespace(slug=slug, name=slug)
 
 
 @pytest.mark.asyncio
-async def test_get_tools_returns_cached_tools():
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=3600)
-    fake_tools = [_make_fake_tool("GITHUB_CREATE_ISSUE"), _make_fake_tool("TAVILY_SEARCH")]
-    manager._tools = fake_tools
-    assert manager.get_tools() == fake_tools
+async def test_initialize_collects_connected_app_names():
+    manager = ComposioToolsetManager(api_key="test-key")
 
-
-@pytest.mark.asyncio
-async def test_get_connected_app_names_returns_unique_prefixes():
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=3600)
-    manager._tools = [
-        _make_fake_tool("GITHUB_CREATE_ISSUE"),
-        _make_fake_tool("GITHUB_LIST_REPOS"),
-        _make_fake_tool("TAVILY_SEARCH"),
-    ]
-    names = manager.get_connected_app_names()
-    assert set(names) == {"github", "tavily"}
-
-
-@pytest.mark.asyncio
-async def test_refresh_loads_tools_from_composio():
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=3600)
-    fake_tools = [_make_fake_tool("GITHUB_CREATE_ISSUE")]
-
-    mock_composio = MagicMock()
-    mock_composio.tools.get.return_value = fake_tools
-
-    with patch("src.tools.composio_toolset.Composio", return_value=mock_composio):
-        await manager.refresh()
-
-    assert manager.get_tools() == fake_tools
-
-
-@pytest.mark.asyncio
-async def test_refresh_raises_composio_error_on_failure():
-    from src.errors import ComposioError
-
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=3600)
-
-    with patch("src.tools.composio_toolset.Composio", side_effect=Exception("connection refused")):
-        with pytest.raises(ComposioError):
-            await manager.refresh()
-
-
-@pytest.mark.asyncio
-async def test_initialize_starts_refresh_loop_and_shutdown_stops_it():
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=0.05)
-    fake_tools = [_make_fake_tool("GITHUB_CREATE_ISSUE")]
-
-    mock_composio = MagicMock()
-    mock_composio.tools.get.return_value = fake_tools
-
-    with patch("src.tools.composio_toolset.Composio", return_value=mock_composio):
+    with patch.object(
+        manager,
+        "_get_connected_slugs_for_user",
+        return_value=["alpha_vantage", "firecrawl"],
+    ):
         await manager.initialize()
-        assert manager.get_tools() == fake_tools
-        await asyncio.sleep(0.1)
-        await manager.shutdown()
 
-    assert manager._refresh_task is None or manager._refresh_task.done()
+    assert manager.get_connected_app_names() == ["alpha_vantage", "firecrawl"]
+
+
+def test_normalize_connected_slugs_filters_duplicates_and_allowlist():
+    manager = ComposioToolsetManager(api_key="test-key")
+
+    with patch("src.tools.composio_toolset.settings.composio_apps", ["firecrawl"]):
+        slugs = manager._normalize_connected_slugs(
+            [
+                _connected_toolkit("alpha_vantage"),
+                _connected_toolkit("firecrawl"),
+                _connected_toolkit("firecrawl"),
+            ]
+        )
+
+    assert slugs == ["firecrawl"]
 
 
 @pytest.mark.asyncio
-async def test_get_tools_returns_empty_when_not_initialized():
-    manager = ComposioToolsetManager(api_key="test-key", refresh_seconds=3600)
-    assert manager.get_tools() == []
+async def test_initialize_raises_composio_error_on_failure():
+    manager = ComposioToolsetManager(api_key="test-key")
+
+    with patch.object(
+        manager,
+        "_get_connected_slugs_for_user",
+        side_effect=RuntimeError("connection refused"),
+    ):
+        with pytest.raises(ComposioError):
+            await manager.initialize()
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_context_returns_langchain_tools():
+    manager = ComposioToolsetManager(api_key="test-key")
+    fake_tool = MagicMock()
+    fake_tool.name = "ALPHA_VANTAGE_OVERVIEW"
+    fake_tools = [fake_tool]
+    mock_client = MagicMock()
+    mock_client.tools.get.return_value = fake_tools
+
+    with (
+        patch.object(
+            manager,
+            "_get_connected_slugs_for_user",
+            return_value=["alpha_vantage"],
+        ),
+        patch.object(
+            manager,
+            "_build_client",
+            return_value=mock_client,
+        ),
+    ):
+        async with manager.mcp_tools_context("user-123") as tools:
+            assert tools == fake_tools
+
+    mock_client.tools.get.assert_called_once_with(
+        user_id="user-123",
+        toolkits=["alpha_vantage"],
+        limit=999,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_context_returns_empty_list_on_error():
+    manager = ComposioToolsetManager(api_key="test-key")
+
+    with patch.object(
+        manager,
+        "_get_connected_slugs_for_user",
+        side_effect=RuntimeError("boom"),
+    ):
+        async with manager.mcp_tools_context("user-123") as tools:
+            assert tools == []
