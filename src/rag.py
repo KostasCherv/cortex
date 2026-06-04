@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from src.rag_engine import (
 )
 from src.storage import SupabaseStorageAdapter
 
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 ALLOWED_MIME_TYPES = {
@@ -346,8 +348,54 @@ def _suggest_agent_definition_sync(prompt: str) -> AgentDefinitionDraft:
 
 
 async def suggest_chat_session_title(message: str | None) -> str:
-    # LLM calls can block; keep title generation off the event loop.
+    if settings.rag_chat_title_llm_background:
+        return _fallback_chat_title(message)
     return await asyncio.to_thread(_suggest_chat_session_title_sync, message)
+
+
+def schedule_chat_session_title_upgrade(
+    *,
+    session_id: str,
+    owner_id: str,
+    agent_id: str | None,
+    initial_message: str | None,
+    chat_scope: str = CHAT_SCOPE_AGENT,
+) -> None:
+    if not settings.rag_chat_title_llm_background:
+        return
+    if not initial_message or not initial_message.strip():
+        return
+
+    async def _run() -> None:
+        try:
+            title = await asyncio.to_thread(_suggest_chat_session_title_sync, initial_message)
+            await update_chat_session_title(
+                session_id=session_id,
+                agent_id=agent_id,
+                user_id=owner_id,
+                title=title,
+                chat_scope=chat_scope,
+            )
+        except Exception as exc:
+            logger.warning("[rag] background session title upgrade failed: %s", exc)
+
+    asyncio.create_task(_run())
+
+
+async def update_chat_message_suggestions(
+    *,
+    message_id: str,
+    session_id: str,
+    owner_id: str,
+    agent_id: str | None,
+    suggestions: list[str],
+) -> bool:
+    return await _get_store().update_rag_chat_message_suggestions(
+        message_id=message_id,
+        session_id=session_id,
+        owner_id=owner_id,
+        suggestions=suggestions,
+    )
 
 
 async def suggest_agent_definition(prompt: str) -> AgentDefinitionDraft:
@@ -853,6 +901,12 @@ async def create_or_get_chat_session(
             "title": await suggest_chat_session_title(initial_message),
         }
     )
+    schedule_chat_session_title_upgrade(
+        session_id=new_session,
+        owner_id=user_id,
+        agent_id=agent_id,
+        initial_message=initial_message,
+    )
     return new_session
 
 
@@ -882,6 +936,13 @@ async def create_or_get_workspace_chat_session(
             "title": await suggest_chat_session_title(initial_message),
             "chat_scope": CHAT_SCOPE_WORKSPACE,
         }
+    )
+    schedule_chat_session_title_upgrade(
+        session_id=new_session,
+        owner_id=user_id,
+        agent_id=None,
+        initial_message=initial_message,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     return new_session
 

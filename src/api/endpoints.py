@@ -502,25 +502,16 @@ def _build_agent_messages(
     composio_apps: list[str],
     normalized_message: str,
 ) -> list[BaseMessage]:
-    system_content, _ = prompt_registry.render(
-        "rag_chat_system",
-        {
-            "system_instructions": system_instructions,
-            "rag_context": rag_context,
-            "user_memory_context": user_memory_context,
-            "composio_apps": composio_apps,
-        },
+    from src.api.rag_chat_helpers import build_agent_messages
+
+    return build_agent_messages(
+        system_instructions=system_instructions,
+        history=history,
+        rag_context=rag_context,
+        user_memory_context=user_memory_context,
+        composio_apps=composio_apps,
+        normalized_message=normalized_message,
     )
-    messages: list[BaseMessage] = [SystemMessage(content=system_content)]
-    for turn in history:
-        role = turn.role if hasattr(turn, "role") else turn.get("role", "")
-        content = turn.content if hasattr(turn, "content") else turn.get("content", "")
-        if role == "user":
-            messages.append(HumanMessage(content=content))
-        elif role == "assistant":
-            messages.append(AIMessage(content=content))
-    messages.append(HumanMessage(content=normalized_message))
-    return messages
 
 
 async def _run_agent_loop(
@@ -528,34 +519,51 @@ async def _run_agent_loop(
     messages: list[BaseMessage],
     metadata: dict[str, object],
     on_event=None,
+    bind_tools: bool = True,
 ) -> str:
     """Run an agentic tool-calling loop and return the final answer text.
 
     on_event: optional async callable(dict) called for tool_start / tool_end events.
+    bind_tools: when False, skip Composio router session and tool schema binding.
     """
+    llm = get_llm(temperature=0.0)
+    max_turns = settings.composio_max_agent_turns
+    loop_messages = list(messages)
+    last_response_text = ""
+
+    async def _invoke_turn(llm_target: BaseMessage | object, turn: int) -> object:
+        with start_step_span(
+            name=f"agent_loop.turn_{turn}",
+            run_type="llm",
+            node_name="agent_loop",
+            inputs={"turn": turn, "bind_tools": bind_tools},
+            metadata=metadata,
+            tags=["llm", "agent_loop"],
+        ):
+            return await llm_target.ainvoke(loop_messages)  # type: ignore[union-attr]
+
+    if not bind_tools or not settings.composio_enabled:
+        for turn in range(max_turns):
+            response = await _invoke_turn(llm, turn)
+            last_response_text = _extract_llm_text(
+                response.content if hasattr(response, "content") else response
+            )
+            if not getattr(response, "tool_calls", None):
+                break
+        return last_response_text
+
     manager = get_composio_toolset_manager()
     user_id = settings.composio_user_id
 
     async with manager.router_tools_context(user_id) as tools:
-        llm = get_llm(temperature=0.0)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
 
-        max_turns = settings.composio_max_agent_turns
-        loop_messages = list(messages)
-        last_response_text = ""
-
         for turn in range(max_turns):
-            with start_step_span(
-                name=f"agent_loop.turn_{turn}",
-                run_type="llm",
-                node_name="agent_loop",
-                inputs={"turn": turn},
-                metadata=metadata,
-                tags=["llm", "agent_loop"],
-            ):
-                response = await llm_with_tools.ainvoke(loop_messages)
+            response = await _invoke_turn(llm_with_tools, turn)
 
-            last_response_text = _extract_llm_text(response.content if hasattr(response, "content") else response)
+            last_response_text = _extract_llm_text(
+                response.content if hasattr(response, "content") else response
+            )
             tool_calls = getattr(response, "tool_calls", None) or []
 
             if not tool_calls:
@@ -1797,6 +1805,14 @@ async def rag_chat_with_agent(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    from src.api.rag_chat_helpers import (
+        prepare_agent_rag_chat,
+        rag_json_response,
+        resolve_suggestions,
+        schedule_deferred_suggestions,
+    )
+    from src.api.rag_chat_timing import RagChatTimings
+
     await _consume_usage_or_429(
         current_user.user_id,
         UsageIncrement(total_questions=1),
@@ -1806,100 +1822,109 @@ async def rag_chat_with_agent(
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
-    if agent_bundle is None:
-        logger.warning(
-            "[rag_api] agent chat request failed because agent was not found agent_id=%s user_id=%s",
-            agent_id,
-            current_user.user_id,
+    timings = RagChatTimings()
+    wall_start = time.perf_counter()
+
+    with start_workflow_run(entrypoint="rag_chat", query=normalized_message):
+        prepared = await prepare_agent_rag_chat(
+            agent_id=agent_id,
+            user_id=current_user.user_id,
+            normalized_message=normalized_message,
+            session_id=body.session_id,
+            timings=timings,
         )
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
-    agent, resource_ids = agent_bundle
-    if not resource_ids:
-        logger.info(
-            "[rag_api] agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
-            agent_id,
-            current_user.user_id,
+        if prepared is None:
+            logger.warning(
+                "[rag_api] agent chat request failed because agent was not found agent_id=%s user_id=%s",
+                agent_id,
+                current_user.user_id,
+            )
+            raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+        if not prepared.resource_ids:
+            logger.info(
+                "[rag_api] agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
+                agent_id,
+                current_user.user_id,
+            )
+
+        try:
+            t_loop = time.perf_counter()
+            answer = await _run_agent_loop(
+                messages=prepared.messages,
+                metadata={"agent_id": agent_id, "user_id": current_user.user_id},
+                bind_tools=prepared.bind_tools,
+            )
+            timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
+        except Exception as exc:
+            logger.exception("[rag_api] agent chat loop failed agent_id=%s", agent_id)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "agent_loop_error", "error": str(exc)},
+            ) from exc
+
+        suggestions = await resolve_suggestions(
+            query=normalized_message,
+            answer=answer,
+            context=prepared.rag_context.context or "",
+            timings=timings,
         )
 
-    rag_context = await retrieve_context_for_query(
-        user_id=current_user.user_id,
-        resource_ids=resource_ids,
-        question=normalized_message,
-    )
-
-    chat_session_id = await create_or_get_chat_session(
-        user_id=current_user.user_id,
-        agent_id=agent_id,
-        session_id=body.session_id,
-        initial_message=normalized_message,
-    )
-    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-
-    messages = _build_agent_messages(
-        system_instructions=agent.system_instructions or "",
-        history=history,
-        rag_context=rag_context.context or "",
-        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
-        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
-        normalized_message=normalized_message,
-    )
-    try:
-        answer = await _run_agent_loop(
-            messages=messages,
-            metadata={"agent_id": agent_id, "user_id": current_user.user_id},
+        t_persist = time.perf_counter()
+        user_msg = RagChatMessage(
+            message_id=str(uuid.uuid4()),
+            session_id=prepared.chat_session_id,
+            agent_id=agent_id,
+            owner_id=current_user.user_id,
+            role="user",
+            content=normalized_message,
         )
-    except Exception as exc:
-        logger.exception("[rag_api] agent chat loop failed agent_id=%s", agent_id)
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "agent_loop_error", "error": str(exc)},
-        ) from exc
-    suggestions = await _generate_suggestions(
-        normalized_message,
-        answer,
-        rag_context.context or "",
-    )
+        citations = _build_rag_citations(prepared.rag_context.chunks)
+        assistant_msg = RagChatMessage(
+            message_id=str(uuid.uuid4()),
+            session_id=prepared.chat_session_id,
+            agent_id=agent_id,
+            owner_id=current_user.user_id,
+            role="assistant",
+            content=answer,
+            citations=citations,
+            suggestions=suggestions,
+        )
+        await append_chat_message(user_msg)
+        await append_chat_message(assistant_msg)
+        await enqueue_memory_refresh(
+            user_id=current_user.user_id,
+            source_mode="agent_chat",
+            source_session_id=prepared.chat_session_id,
+            user_message=normalized_message,
+            assistant_message=answer,
+            source_user_message_id=user_msg.message_id,
+            source_assistant_message_id=assistant_msg.message_id,
+        )
+        asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
+        schedule_deferred_suggestions(
+            query=normalized_message,
+            answer=answer,
+            context=prepared.rag_context.context or "",
+            assistant_message_id=assistant_msg.message_id,
+            session_id=prepared.chat_session_id,
+            owner_id=current_user.user_id,
+            agent_id=agent_id,
+        )
+        timings.persist_ms = (time.perf_counter() - t_persist) * 1000
 
-    user_msg = RagChatMessage(
-        message_id=str(uuid.uuid4()),
-        session_id=chat_session_id,
-        agent_id=agent_id,
-        owner_id=current_user.user_id,
-        role="user",
-        content=normalized_message,
-    )
-    citations = _build_rag_citations(rag_context.chunks)
-    assistant_msg = RagChatMessage(
-        message_id=str(uuid.uuid4()),
-        session_id=chat_session_id,
-        agent_id=agent_id,
-        owner_id=current_user.user_id,
-        role="assistant",
-        content=answer,
-        citations=citations,
-        suggestions=suggestions,
-    )
-    await append_chat_message(user_msg)
-    await append_chat_message(assistant_msg)
-    await enqueue_memory_refresh(
-        user_id=current_user.user_id,
-        source_mode="agent_chat",
-        source_session_id=chat_session_id,
-        user_message=normalized_message,
-        assistant_message=answer,
-        source_user_message_id=user_msg.message_id,
-        source_assistant_message_id=assistant_msg.message_id,
-    )
-    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
-
-    updated_history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    return {
-        "session_id": chat_session_id,
-        "agent_id": agent_id,
-        "reply": assistant_msg.to_dict(),
-        "messages": [m.to_dict() for m in updated_history],
-    }
+        updated_history = await list_rag_chat_messages(
+            prepared.chat_session_id, current_user.user_id
+        )
+        timings.total_ms = (time.perf_counter() - wall_start) * 1000
+        return rag_json_response(
+            {
+                "session_id": prepared.chat_session_id,
+                "agent_id": agent_id,
+                "reply": assistant_msg.to_dict(),
+                "messages": [m.to_dict() for m in updated_history],
+            },
+            timings,
+        )
 
 
 @app.post("/api/rag/agents/{agent_id}/chat/stream", tags=["RAG"])
@@ -1908,6 +1933,13 @@ async def rag_chat_with_agent_stream(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    from src.api.rag_chat_helpers import (
+        prepare_agent_rag_chat,
+        resolve_suggestions,
+        schedule_deferred_suggestions,
+    )
+    from src.api.rag_chat_timing import RagChatTimings
+
     await _consume_usage_or_429(
         current_user.user_id,
         UsageIncrement(total_questions=1),
@@ -1917,44 +1949,22 @@ async def rag_chat_with_agent_stream(
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
-    if agent_bundle is None:
-        logger.warning(
-            "[rag_api] streaming agent chat request failed because agent was not found agent_id=%s user_id=%s",
-            agent_id,
-            current_user.user_id,
+    timings = RagChatTimings()
+    with start_workflow_run(entrypoint="rag_chat_stream", query=normalized_message):
+        prepared = await prepare_agent_rag_chat(
+            agent_id=agent_id,
+            user_id=current_user.user_id,
+            normalized_message=normalized_message,
+            session_id=body.session_id,
+            timings=timings,
         )
+    if prepared is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
-    agent, resource_ids = agent_bundle
-    if not resource_ids:
-        logger.info(
-            "[rag_api] streaming agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
-            agent_id,
-            current_user.user_id,
-        )
 
-    rag_context = await retrieve_context_for_query(
-        user_id=current_user.user_id,
-        resource_ids=resource_ids,
-        question=normalized_message,
-    )
-
-    chat_session_id = await create_or_get_chat_session(
-        user_id=current_user.user_id,
-        agent_id=agent_id,
-        session_id=body.session_id,
-        initial_message=normalized_message,
-    )
-    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    messages = _build_agent_messages(
-        system_instructions=agent.system_instructions or "",
-        history=history,
-        rag_context=rag_context.context or "",
-        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
-        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
-        normalized_message=normalized_message,
-    )
-    citations = _build_rag_citations(rag_context.chunks)
+    citations = _build_rag_citations(prepared.rag_context.chunks)
+    stream_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    if settings.rag_perf_headers:
+        stream_headers["X-Rag-Perf-Prepare"] = timings.to_header_value()
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
         event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -1963,12 +1973,13 @@ async def rag_chat_with_agent_stream(
             await event_queue.put(event)
 
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
             loop_task = asyncio.create_task(
                 _run_agent_loop(
-                    messages=messages,
+                    messages=prepared.messages,
                     metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                     on_event=on_event,
+                    bind_tools=prepared.bind_tools,
                 )
             )
             while not loop_task.done():
@@ -1981,14 +1992,15 @@ async def rag_chat_with_agent_stream(
                 event = event_queue.get_nowait()
                 yield f"data: {json.dumps(event)}\n\n"
             answer = loop_task.result()
-            suggestions = await _generate_suggestions(
-                normalized_message,
-                answer,
-                rag_context.context or "",
+            suggestions = await resolve_suggestions(
+                query=normalized_message,
+                answer=answer,
+                context=prepared.rag_context.context or "",
+                timings=timings,
             )
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
-                session_id=chat_session_id,
+                session_id=prepared.chat_session_id,
                 agent_id=agent_id,
                 owner_id=current_user.user_id,
                 role="user",
@@ -1996,7 +2008,7 @@ async def rag_chat_with_agent_stream(
             )
             assistant_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
-                session_id=chat_session_id,
+                session_id=prepared.chat_session_id,
                 agent_id=agent_id,
                 owner_id=current_user.user_id,
                 role="assistant",
@@ -2009,13 +2021,22 @@ async def rag_chat_with_agent_stream(
             await enqueue_memory_refresh(
                 user_id=current_user.user_id,
                 source_mode="agent_chat",
-                source_session_id=chat_session_id,
+                source_session_id=prepared.chat_session_id,
                 user_message=normalized_message,
                 assistant_message=answer,
                 source_user_message_id=user_msg.message_id,
                 source_assistant_message_id=assistant_msg.message_id,
             )
             asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
+            schedule_deferred_suggestions(
+                query=normalized_message,
+                answer=answer,
+                context=prepared.rag_context.context or "",
+                assistant_message_id=assistant_msg.message_id,
+                session_id=prepared.chat_session_id,
+                owner_id=current_user.user_id,
+                agent_id=agent_id,
+            )
             yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:
@@ -2027,7 +2048,7 @@ async def rag_chat_with_agent_stream(
     return StreamingResponse(
         _stream_chat(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=stream_headers,
     )
 
 
@@ -2148,84 +2169,107 @@ async def rag_chat_workspace(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    from src.api.rag_chat_helpers import (
+        prepare_workspace_rag_chat,
+        rag_json_response,
+        resolve_suggestions,
+        schedule_deferred_suggestions,
+    )
+    from src.api.rag_chat_timing import RagChatTimings
+
     await _consume_usage_or_429(current_user.user_id, UsageIncrement(total_questions=1))
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
-    rag_context = await retrieve_context_for_query(
-        user_id=current_user.user_id,
-        resource_ids=resource_ids,
-        question=normalized_message,
-    )
-    chat_session_id = await create_or_get_workspace_chat_session(
-        user_id=current_user.user_id,
-        session_id=body.session_id,
-        initial_message=normalized_message,
-    )
-    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    messages = _build_agent_messages(
-        system_instructions="You are a generic workspace chat assistant.",
-        history=history,
-        rag_context=rag_context.context or "",
-        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
-        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
-        normalized_message=normalized_message,
-    )
-    try:
-        answer = await _run_agent_loop(
-            messages=messages,
-            metadata={"user_id": current_user.user_id},
+    timings = RagChatTimings()
+    wall_start = time.perf_counter()
+    with start_workflow_run(entrypoint="rag_chat_workspace", query=normalized_message):
+        prepared = await prepare_workspace_rag_chat(
+            user_id=current_user.user_id,
+            normalized_message=normalized_message,
+            session_id=body.session_id,
+            timings=timings,
         )
-    except Exception as exc:
-        logger.exception("[rag_api] workspace chat loop failed user_id=%s", current_user.user_id)
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "agent_loop_error", "error": str(exc)},
-        ) from exc
-    suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
-    user_msg = RagChatMessage(
-        message_id=str(uuid.uuid4()),
-        session_id=chat_session_id,
-        agent_id=None,
-        owner_id=current_user.user_id,
-        role="user",
-        content=normalized_message,
-        chat_scope=CHAT_SCOPE_WORKSPACE,
-    )
-    citations = _build_rag_citations(rag_context.chunks)
-    citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
-    assistant_msg = RagChatMessage(
-        message_id=str(uuid.uuid4()),
-        session_id=chat_session_id,
-        agent_id=None,
-        owner_id=current_user.user_id,
-        role="assistant",
-        content=answer,
-        citations=citations,
-        suggestions=suggestions,
-        chat_scope=CHAT_SCOPE_WORKSPACE,
-    )
-    await append_chat_message(user_msg)
-    await append_chat_message(assistant_msg)
-    await enqueue_memory_refresh(
-        user_id=current_user.user_id,
-        source_mode="workspace_chat",
-        source_session_id=chat_session_id,
-        user_message=normalized_message,
-        assistant_message=answer,
-        source_user_message_id=user_msg.message_id,
-        source_assistant_message_id=assistant_msg.message_id,
-    )
-    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
-    updated_history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    return {
-        "session_id": chat_session_id,
-        "agent_id": None,
-        "reply": assistant_msg.to_dict(),
-        "messages": [m.to_dict() for m in updated_history],
-    }
+        try:
+            t_loop = time.perf_counter()
+            answer = await _run_agent_loop(
+                messages=prepared.messages,
+                metadata={"user_id": current_user.user_id},
+                bind_tools=prepared.bind_tools,
+            )
+            timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
+        except Exception as exc:
+            logger.exception("[rag_api] workspace chat loop failed user_id=%s", current_user.user_id)
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "agent_loop_error", "error": str(exc)},
+            ) from exc
+
+        suggestions = await resolve_suggestions(
+            query=normalized_message,
+            answer=answer,
+            context=prepared.rag_context.context or "",
+            timings=timings,
+        )
+        user_msg = RagChatMessage(
+            message_id=str(uuid.uuid4()),
+            session_id=prepared.chat_session_id,
+            agent_id=None,
+            owner_id=current_user.user_id,
+            role="user",
+            content=normalized_message,
+            chat_scope=CHAT_SCOPE_WORKSPACE,
+        )
+        citations = _build_rag_citations(prepared.rag_context.chunks)
+        citations = _build_workspace_fallback_citations(
+            prepared.rag_context.context or "", citations
+        )
+        assistant_msg = RagChatMessage(
+            message_id=str(uuid.uuid4()),
+            session_id=prepared.chat_session_id,
+            agent_id=None,
+            owner_id=current_user.user_id,
+            role="assistant",
+            content=answer,
+            citations=citations,
+            suggestions=suggestions,
+            chat_scope=CHAT_SCOPE_WORKSPACE,
+        )
+        await append_chat_message(user_msg)
+        await append_chat_message(assistant_msg)
+        await enqueue_memory_refresh(
+            user_id=current_user.user_id,
+            source_mode="workspace_chat",
+            source_session_id=prepared.chat_session_id,
+            user_message=normalized_message,
+            assistant_message=answer,
+            source_user_message_id=user_msg.message_id,
+            source_assistant_message_id=assistant_msg.message_id,
+        )
+        asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
+        schedule_deferred_suggestions(
+            query=normalized_message,
+            answer=answer,
+            context=prepared.rag_context.context or "",
+            assistant_message_id=assistant_msg.message_id,
+            session_id=prepared.chat_session_id,
+            owner_id=current_user.user_id,
+            agent_id=None,
+        )
+        updated_history = await list_rag_chat_messages(
+            prepared.chat_session_id, current_user.user_id
+        )
+        timings.total_ms = (time.perf_counter() - wall_start) * 1000
+        return rag_json_response(
+            {
+                "session_id": prepared.chat_session_id,
+                "agent_id": None,
+                "reply": assistant_msg.to_dict(),
+                "messages": [m.to_dict() for m in updated_history],
+            },
+            timings,
+        )
 
 
 @app.post("/api/rag/chat/stream", tags=["RAG"])
@@ -2233,32 +2277,33 @@ async def rag_chat_workspace_stream(
     body: RagChatRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
+    from src.api.rag_chat_helpers import (
+        prepare_workspace_rag_chat,
+        resolve_suggestions,
+        schedule_deferred_suggestions,
+    )
+    from src.api.rag_chat_timing import RagChatTimings
+
     await _consume_usage_or_429(current_user.user_id, UsageIncrement(total_questions=1))
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    resource_ids = await list_workspace_ready_resource_ids(current_user.user_id)
-    rag_context = await retrieve_context_for_query(
-        user_id=current_user.user_id,
-        resource_ids=resource_ids,
-        question=normalized_message,
+
+    timings = RagChatTimings()
+    with start_workflow_run(entrypoint="rag_chat_workspace_stream", query=normalized_message):
+        prepared = await prepare_workspace_rag_chat(
+            user_id=current_user.user_id,
+            normalized_message=normalized_message,
+            session_id=body.session_id,
+            timings=timings,
+        )
+    citations = _build_rag_citations(prepared.rag_context.chunks)
+    citations = _build_workspace_fallback_citations(
+        prepared.rag_context.context or "", citations
     )
-    chat_session_id = await create_or_get_workspace_chat_session(
-        user_id=current_user.user_id,
-        session_id=body.session_id,
-        initial_message=normalized_message,
-    )
-    history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
-    messages = _build_agent_messages(
-        system_instructions="You are a generic workspace chat assistant.",
-        history=history,
-        rag_context=rag_context.context or "",
-        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
-        composio_apps=get_composio_toolset_manager().get_connected_app_names(),
-        normalized_message=normalized_message,
-    )
-    citations = _build_rag_citations(rag_context.chunks)
-    citations = _build_workspace_fallback_citations(rag_context.context or "", citations)
+    stream_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    if settings.rag_perf_headers:
+        stream_headers["X-Rag-Perf-Prepare"] = timings.to_header_value()
 
     async def _stream_chat() -> AsyncGenerator[str, None]:
         event_queue: asyncio.Queue[dict | None] = asyncio.Queue()
@@ -2267,12 +2312,13 @@ async def rag_chat_workspace_stream(
             await event_queue.put(event)
 
         try:
-            yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
             loop_task = asyncio.create_task(
                 _run_agent_loop(
-                    messages=messages,
+                    messages=prepared.messages,
                     metadata={"user_id": current_user.user_id},
                     on_event=on_event,
+                    bind_tools=prepared.bind_tools,
                 )
             )
             while not loop_task.done():
@@ -2285,10 +2331,15 @@ async def rag_chat_workspace_stream(
                 event = event_queue.get_nowait()
                 yield f"data: {json.dumps(event)}\n\n"
             answer = loop_task.result()
-            suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
+            suggestions = await resolve_suggestions(
+                query=normalized_message,
+                answer=answer,
+                context=prepared.rag_context.context or "",
+                timings=timings,
+            )
             user_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
-                session_id=chat_session_id,
+                session_id=prepared.chat_session_id,
                 agent_id=None,
                 owner_id=current_user.user_id,
                 role="user",
@@ -2297,7 +2348,7 @@ async def rag_chat_workspace_stream(
             )
             assistant_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
-                session_id=chat_session_id,
+                session_id=prepared.chat_session_id,
                 agent_id=None,
                 owner_id=current_user.user_id,
                 role="assistant",
@@ -2311,13 +2362,22 @@ async def rag_chat_workspace_stream(
             await enqueue_memory_refresh(
                 user_id=current_user.user_id,
                 source_mode="workspace_chat",
-                source_session_id=chat_session_id,
+                source_session_id=prepared.chat_session_id,
                 user_message=normalized_message,
                 assistant_message=answer,
                 source_user_message_id=user_msg.message_id,
                 source_assistant_message_id=assistant_msg.message_id,
             )
             asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
+            schedule_deferred_suggestions(
+                query=normalized_message,
+                answer=answer,
+                context=prepared.rag_context.context or "",
+                assistant_message_id=assistant_msg.message_id,
+                session_id=prepared.chat_session_id,
+                owner_id=current_user.user_id,
+                agent_id=None,
+            )
             yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:
@@ -2329,7 +2389,7 @@ async def rag_chat_workspace_stream(
     return StreamingResponse(
         _stream_chat(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=stream_headers,
     )
 
 

@@ -1756,6 +1756,30 @@ class SupabaseSessionStore:
             await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
         return bool(rows)
 
+    async def update_rag_chat_message_suggestions(
+        self,
+        *,
+        message_id: str,
+        session_id: str,
+        owner_id: str,
+        suggestions: list[str],
+    ) -> bool:
+        response = await self._request(
+            "PATCH",
+            "rag_chat_messages",
+            params={
+                "id": f"eq.{message_id}",
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+            },
+            json_body={"suggestions": suggestions},
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
+        return bool(rows)
+
     async def create_rag_chat_message(self, payload: dict[str, Any]) -> None:
         body = {
             "id": payload["message_id"],

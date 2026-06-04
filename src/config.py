@@ -74,6 +74,26 @@ class Settings(BaseSettings):
         default=5,
         description="Maximum agent loop turns before returning the last response.",
     )
+    rag_chat_max_history_messages: int = Field(
+        default=20,
+        description="Maximum prior chat messages included in the agent prompt.",
+    )
+    rag_chat_conditional_tools: bool = Field(
+        default=True,
+        description="When true, still binds tools for all messages if apps are connected (linked docs never disable Composio).",
+    )
+    rag_suggestions_deferred: bool = Field(
+        default=False,
+        description="Generate follow-up suggestions in the background instead of blocking the response.",
+    )
+    rag_chat_title_llm_background: bool = Field(
+        default=True,
+        description="Use a fast fallback session title immediately; optional LLM title upgrade runs in background.",
+    )
+    rag_perf_headers: bool = Field(
+        default=False,
+        description="Include X-Rag-Perf JSON timing header on RAG chat responses.",
+    )
 
     @field_validator("composio_apps", mode="before")
     @classmethod

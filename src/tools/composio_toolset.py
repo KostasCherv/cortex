@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import warnings
@@ -125,13 +126,16 @@ class ComposioToolsetManager:
         self, user_id: str
     ) -> AsyncGenerator[list[Any], None]:
         """Yield Tool Router meta tools for *user_id* (search/execute flow)."""
+        if not settings.composio_enabled:
+            yield []
+            return
         try:
-            slugs = self._get_connected_slugs_for_user(user_id)
+            slugs = await asyncio.to_thread(self._get_connected_slugs_for_user, user_id)
             if not slugs:
                 yield []
                 return
 
-            tools = self._get_router_tools(user_id, slugs)
+            tools = await asyncio.to_thread(self._get_router_tools, user_id, slugs)
             yield tools
         except Exception as exc:
             logger.warning("[composio] Router tool loading error: %s", exc)
