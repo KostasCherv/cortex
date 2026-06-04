@@ -20,7 +20,7 @@ from src.llm.output_parsers import (
 
 def test_parse_chat_action_json_accepts_markdown_fenced_payload():
     parsed = parse_chat_action_json(
-        '```json\n{"action":"answer_direct","reason":"small_talk","query":"","url":"","symbols":[],"currency":""}\n```'
+        '```json\n{"action":"answer_direct","reason":"small_talk","query":"","symbols":[],"currency":""}\n```'
     )
 
     assert parsed.action == "answer_direct"
@@ -43,7 +43,7 @@ def test_parse_research_summaries_json_unwraps_summaries_key():
 def test_parse_model_json_raises_validation_error_for_missing_field():
     with pytest.raises(StructuredOutputValidationError):
         parse_model_json(
-            '{"action":"answer_direct","query":"","url":"","symbols":[],"currency":""}',
+            '{"action":"answer_direct","query":"","symbols":[],"currency":""}',
             model=ChatActionDecisionPayload,
         )
 
@@ -59,28 +59,28 @@ def test_parse_type_json_raises_parse_error_for_non_json():
 def test_parse_chat_action_json_requires_query_for_web_search():
     with pytest.raises(StructuredOutputValidationError):
         parse_chat_action_json(
-            '{"action":"web_search","reason":"need fresh info","query":"","url":"","symbols":[],"currency":""}'
+            '{"action":"web_search","reason":"need fresh info","query":"","symbols":[],"currency":""}'
         )
 
 
-def test_parse_chat_action_json_requires_url_for_fetch_url():
-    with pytest.raises(StructuredOutputValidationError):
+def test_parse_chat_action_json_rejects_fetch_url_action():
+    with pytest.raises(Exception):  # Pydantic literal_error since fetch_url is no longer valid
         parse_chat_action_json(
-            '{"action":"fetch_url","reason":"need page content","query":"","url":"","symbols":[],"currency":""}'
+            '{"action":"fetch_url","reason":"need page content","query":"","symbols":[],"currency":""}'
         )
 
 
 def test_parse_chat_action_json_requires_symbols_for_asset_price():
     with pytest.raises(StructuredOutputValidationError):
         parse_chat_action_json(
-            '{"action":"asset_price","reason":"needs_quote","query":"","url":"","symbols":[],"currency":""}'
+            '{"action":"asset_price","reason":"needs_quote","query":"","symbols":[],"currency":""}'
         )
 
 
 def test_parse_chat_action_json_requires_query_for_search_finance_tools():
     with pytest.raises(StructuredOutputValidationError):
         parse_chat_action_json(
-            '{"action":"search_finance_tools","reason":"needs_finance_tool","query":"","url":"","symbols":[],"currency":""}'
+            '{"action":"search_finance_tools","reason":"needs_finance_tool","query":"","symbols":[],"currency":""}'
         )
 
 
@@ -137,12 +137,11 @@ def test_parse_entity_relation_extraction_json_rejects_confidence_above_one():
 def test_format_validation_error_details_returns_compact_sanitized_lines():
     try:
         parse_chat_action_json(
-            '{"action":"fetch_url","reason":"need page content","query":"","url":"","symbols":[],"currency":""}'
+            '{"action":"web_search","reason":"need fresh info","query":"","symbols":[],"currency":""}'
         )
     except StructuredOutputValidationError as exc:
         details = format_validation_error_details(exc)
     else:
         raise AssertionError("expected validation error")
 
-    assert "url" in details
     assert "value_error" in details

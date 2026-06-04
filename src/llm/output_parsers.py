@@ -94,12 +94,10 @@ class ChatActionDecisionPayload(BaseModel):
         "web_search",
         "asset_price",
         "search_finance_tools",
-        "fetch_url",
         "ask_clarifying",
     ]
     reason: str
     query: str = ""
-    url: str = ""
     symbols: list[str] = Field(default_factory=list)
     currency: str = ""
 
@@ -108,7 +106,7 @@ class ChatActionDecisionPayload(BaseModel):
     def validate_reason(cls, value: str) -> str:
         return _trim_required_text(value, field_name="reason")
 
-    @field_validator("query", "url", "currency")
+    @field_validator("query", "currency")
     @classmethod
     def normalize_optional_text(cls, value: str) -> str:
         return _trim_optional_text(value)
@@ -132,8 +130,6 @@ class ChatActionDecisionPayload(BaseModel):
             raise ValueError("query is required when action is search_finance_tools")
         if self.action == "asset_price" and not self.symbols:
             raise ValueError("symbols are required when action is asset_price")
-        if self.action == "fetch_url" and not self.url:
-            raise ValueError("url is required when action is fetch_url")
         return self
 
 
