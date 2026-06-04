@@ -293,6 +293,51 @@ On first connection, the backend automatically creates:
 - Vector index `chunk_embedding_index` on `Chunk.embedding`
 - B-tree indexes on `Chunk.run_id`, `Document.resource_id`, `Entity.normalized_name`
 
+## Graphify (codebase knowledge graph)
+
+This repo includes a [Graphify](https://github.com/safishamsi/graphify) map at `graphify-out/` — nodes, edges, and communities across code and docs. Cursor, Claude Code, and Codex are configured to prefer `graphify query` over large greps when `graph.json` exists.
+
+### Prerequisites
+
+```bash
+uv tool install graphifyy
+ollama pull gemma4:31b-cloud   # semantic extraction (Ollama cloud model)
+```
+
+For graphify’s OpenAI-compatible API, set (do **not** reuse embedding URL without `/v1`):
+
+```bash
+export OLLAMA_BASE_URL=http://localhost:11434/v1
+export OLLAMA_API_KEY=ollama
+export GRAPHIFY_OLLAMA_MODEL=gemma4:31b-cloud
+```
+
+### Commands
+
+| Task | Command |
+|------|---------|
+| Full rebuild | `./scripts/graphify-rebuild.sh` |
+| Incremental (docs changed) | `./scripts/graphify-rebuild.sh --incremental` |
+| Local 8B model | `./scripts/graphify-rebuild.sh --local` |
+| Code-only refresh (no LLM) | `graphify update .` |
+| Ask the graph | `graphify query "How does billing work?"` |
+| Path between concepts | `graphify path "endpoints" "outbox"` |
+| Explain a node | `graphify explain "ResearchState"` |
+| Report + HTML | `graphify cluster-only .` |
+
+Outputs: `graphify-out/graph.json`, `GRAPH_REPORT.md`, `graph.html`.
+
+### Git hooks
+
+```bash
+graphify hook install                      # AST rebuild on code commits (upstream)
+./scripts/install-graphify-post-commit.sh  # + incremental semantic on .md/.mdx commits
+```
+
+After a commit that touches markdown, the post-commit hook runs **incremental** `graphify extract` with `gemma4:31b-cloud` in the background. Log: `tail -f ~/.cache/graphify-rebuild.log`. Skip once: `GRAPHIFY_SKIP_HOOK=1 git commit`.
+
+Re-run `./scripts/install-graphify-post-commit.sh` if you reinstall graphify hooks.
+
 ## Observability
 
 ### LangSmith
