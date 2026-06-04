@@ -44,6 +44,17 @@ async def handle_research_run(ctx: inngest.Context) -> dict:
 
 
 @inngest_client.create_function(
+    fn_id="user-memory-refresh",
+    trigger=inngest.TriggerEvent(event="memory/refresh.requested"),
+)
+async def handle_user_memory_refresh(ctx: inngest.Context) -> dict:
+    from src.user_memory import refresh_user_memory
+
+    result = await refresh_user_memory(**ctx.event.data)
+    return {"done": True, "result": result, "event_key": ctx.event.data.get("event_key")}
+
+
+@inngest_client.create_function(
     fn_id="outbox-dispatcher",
     trigger=inngest.TriggerCron(cron="*/2 * * * *"),
 )

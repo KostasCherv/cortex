@@ -377,6 +377,7 @@ async def report_node(state: ResearchState) -> ResearchState:
     query = state.get("query", "")
     summaries = state.get("summaries", [])
     memory_context = state.get("memory_context", "")
+    user_memory_context = state.get("user_memory_context", "")
     with start_step_span(
         name="report_node",
         run_type="chain",
@@ -398,6 +399,7 @@ async def report_node(state: ResearchState) -> ResearchState:
                 "query": query,
                 "summaries_text": summaries_text,
                 "memory_context": memory_context,
+                "user_memory_context": user_memory_context,
                 "domain": state.get("domain", ""),
             },
         )

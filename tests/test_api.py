@@ -112,6 +112,56 @@ def test_billing_usage_endpoint():
     assert data["subscription"]["cancel_at_period_end"] is True
 
 
+def test_get_memory_returns_single_memory_document():
+    with patch(
+        "src.api.endpoints.get_user_memory",
+        new=AsyncMock(
+            return_value={
+                "content": "Prefers concise answers.\nWorks in fintech.",
+                "updated_at": "2026-06-04T10:00:00+00:00",
+                "last_refreshed_at": "2026-06-04T10:05:00+00:00",
+            }
+        ),
+    ):
+        response = client.get("/api/memory")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["content"] == "Prefers concise answers.\nWorks in fintech."
+
+def test_put_memory_updates_content():
+    with patch(
+        "src.api.endpoints.update_user_memory",
+        new=AsyncMock(
+            return_value={
+                "content": "Works in fintech.",
+                "updated_at": "2026-06-04T10:00:00+00:00",
+                "last_refreshed_at": None,
+            }
+        ),
+    ) as update_memory:
+        response = client.put("/api/memory", json={"content": "Works in fintech."})
+    assert response.status_code == 200
+    assert response.json()["content"] == "Works in fintech."
+    update_memory.assert_awaited_once_with("test-user", "Works in fintech.")
+
+
+def test_put_memory_rejects_blank_content():
+    response = client.put("/api/memory", json={"content": "   "})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Memory content cannot be empty."
+
+
+def test_delete_memory_clears_saved_memory():
+    with patch(
+        "src.api.endpoints.delete_user_memory",
+        new=AsyncMock(return_value={"deleted": True}),
+    ) as delete_memory:
+        response = client.delete("/api/memory")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+    delete_memory.assert_awaited_once_with("test-user")
+
+
 # ---------------------------------------------------------------------------
 # Session endpoint tests
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { AgentRail } from '@/components/shell/AgentRail'
 import { supabase } from '@/lib/supabase'
 import { ItineraryPlannerPage } from '@/pages/ItineraryPlannerPage'
+import { MemoryPage } from '@/pages/MemoryPage'
 import { ResearchPage } from '@/pages/ResearchPage'
 import { ResourcesPage } from '@/pages/ResourcesPage'
 import { PRDPlannerPage } from '@/pages/PRDPlannerPage'
@@ -21,6 +22,7 @@ export type ActiveView =
   | { type: 'itinerary-planner'; sessionId?: string | null }
   | { type: 'prd-planner'; planId?: string | null }
   | { type: 'rag-agent'; agent: RagAgent }
+  | { type: 'memory' }
   | { type: 'resources' }
 
 export function AppShell() {
@@ -267,6 +269,7 @@ export function AppShell() {
             onSessionsChanged={handleSessionsChanged}
           />
         )}
+        {activeView.type === 'memory' && <MemoryPage authSession={authSession} />}
         {activeView.type === 'resources' && (
           <ResourcesPage
             authSession={authSession}

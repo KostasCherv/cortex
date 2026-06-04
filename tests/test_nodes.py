@@ -411,6 +411,33 @@ def test_report_node_omits_memory_context_section_when_empty():
     assert captured["config"]["metadata"]["prompt_version"]
 
 
+def test_report_node_includes_user_memory_context_when_present():
+    captured = {}
+
+    async def _fake_astream(prompt, **kwargs):
+        captured["prompt"] = prompt
+        yield MagicMock(content="# My Report\nContent here.")
+
+    mock_llm = MagicMock()
+    mock_llm.astream = _fake_astream
+
+    with patch("src.graph.nodes.get_llm", return_value=mock_llm):
+        from src.graph.nodes import report_node
+
+        asyncio.run(
+            report_node(
+                {
+                    "query": "LangGraph",
+                    "summaries": [{"url": "https://a.com", "title": "A", "summary": "x"}],
+                    "memory_context": "",
+                    "user_memory_context": "The user prefers concise answers.",
+                }
+            )
+        )
+
+    assert "prefers concise answers" in captured["prompt"].lower()
+
+
 def test_report_node_includes_domain_section_when_present():
     captured = {}
 

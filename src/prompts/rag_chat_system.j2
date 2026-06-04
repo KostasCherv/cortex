@@ -21,3 +21,7 @@ Additional instructions: {{ system_instructions }}
 Retrieved context from the user's documents:
 {{ rag_context }}
 {% endif %}
+{% if user_memory_context %}
+
+{{ user_memory_context }}
+{% endif %}

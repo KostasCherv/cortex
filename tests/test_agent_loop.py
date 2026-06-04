@@ -172,6 +172,7 @@ def test_build_agent_messages_constructs_correct_structure():
         system_instructions="Be concise",
         history=history,
         rag_context="Some doc text",
+        user_memory_context="Prefers concise answers and works in fintech.",
         composio_apps=["github", "tavily"],
         normalized_message="What is the price?",
     )
@@ -179,6 +180,7 @@ def test_build_agent_messages_constructs_correct_structure():
     assert isinstance(messages[0], SystemMessage)
     assert "github" in messages[0].content
     assert "Some doc text" in messages[0].content
+    assert "Prefers concise answers" in messages[0].content
     assert isinstance(messages[1], HumanMessage)
     assert messages[1].content == "Hello"
     assert isinstance(messages[2], AIMessage)

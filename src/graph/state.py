@@ -43,6 +43,7 @@ class ResearchState(TypedDict, total=False):
     error: str | None               # Set on unrecoverable errors
 
     memory_context: str | None      # Memory context for the LLM
+    user_memory_context: str | None # Cross-session user memory for personalization
     graph_context: str | None       # Graph-aware context block for prompting
     graph_chunks: list[dict]        # Structured graph chunk hits for citations/debug
     graph_entities: list[str]       # Expanded entity set used during retrieval

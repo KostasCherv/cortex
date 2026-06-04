@@ -10,6 +10,10 @@ Query: {{ query }}
 
 {% endif %}Source summaries:
 {{ summaries_text }}
+{% if user_memory_context %}
+
+{{ user_memory_context }}
+{% endif %}
 {% if memory_context %}
 
 Prior context from past internal reports (may be stale):

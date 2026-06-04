@@ -105,13 +105,26 @@ from src.rag import (
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
 )
-from src.inngest_client import handle_rag_ingestion, handle_research_run, dispatch_outbox_cron, inngest_client
+from src.inngest_client import (
+    dispatch_outbox_cron,
+    handle_rag_ingestion,
+    handle_research_run,
+    handle_user_memory_refresh,
+    inngest_client,
+)
 from src.storage import ensure_rag_storage_ready
 from src.billing.application import BillingService, UsageIncrement
 from src.billing.domain import BillingSyncError, QuotaExceededError
 from src.billing.interfaces.http import build_billing_service, usage_summary_to_response
 from src.api.planner_chat import router as planner_chat_router
 from src.planner_graph.thread_store import planner_thread_store
+from src.user_memory import (
+    delete_user_memory,
+    enqueue_memory_refresh,
+    get_user_memory,
+    get_user_memory_prompt_block,
+    update_user_memory,
+)
 
 logger = logging.getLogger(__name__)
 _LIVE_REPORT_FLUSH_SECONDS = 0.3
@@ -149,7 +162,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_inngest_fast_api.serve(app, inngest_client, [handle_rag_ingestion, handle_research_run, dispatch_outbox_cron])
+_inngest_fast_api.serve(
+    app,
+    inngest_client,
+    [handle_rag_ingestion, handle_research_run, handle_user_memory_refresh, dispatch_outbox_cron],
+)
 app.include_router(planner_chat_router)
 
 
@@ -302,6 +319,10 @@ class BillingCheckoutRequest(BaseModel):
 class PlannerChatRequest(BaseModel):
     message: str
     thread_id: str | None = None
+
+
+class MemoryUpdateRequest(BaseModel):
+    content: str
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +498,7 @@ def _build_agent_messages(
     system_instructions: str,
     history: list,
     rag_context: str,
+    user_memory_context: str,
     composio_apps: list[str],
     normalized_message: str,
 ) -> list[BaseMessage]:
@@ -485,6 +507,7 @@ def _build_agent_messages(
         {
             "system_instructions": system_instructions,
             "rag_context": rag_context,
+            "user_memory_context": user_memory_context,
             "composio_apps": composio_apps,
         },
     )
@@ -717,6 +740,7 @@ async def _execute_research_run(
         "run_id": run_id,
         "user_id": user_id,
         "conversation_history": [t.to_dict() for t in session.conversation],
+        "user_memory_context": await get_user_memory_prompt_block(user_id, query),
     }
 
     graph_nodes = {
@@ -1006,12 +1030,14 @@ async def _stream_followup(
 
     report = session.get_run(run_id)
     report_block = _build_followup_report_context(report, run_id)
+    user_memory_context = await get_user_memory_prompt_block(user_id, question)
 
     rag_combined = f"{context_block}\n\n{report_block}" if report_block else context_block
     messages = _build_agent_messages(
         system_instructions="You are a research assistant. Answer using the provided context and sources.",
         history=list(session.conversation[-6:]),
         rag_context=rag_combined,
+        user_memory_context=user_memory_context,
         composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=question,
     )
@@ -1064,6 +1090,14 @@ async def _stream_followup(
     session.conversation.append(assistant_turn)
     await append_turn(user_id=user_id, session_id=session.session_id, turn=user_turn)
     await append_turn(user_id=user_id, session_id=session.session_id, turn=assistant_turn)
+    await enqueue_memory_refresh(
+        user_id=user_id,
+        source_mode="research",
+        source_session_id=session.session_id,
+        user_message=question,
+        assistant_message=full_answer,
+    )
+    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
 
     if suggestions:
         yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
@@ -1107,6 +1141,31 @@ async def billing_usage(
 ):
     summary = await _get_billing_service().get_usage_summary(current_user.user_id)
     return usage_summary_to_response(summary)
+
+
+@app.get("/api/memory", tags=["Memory"])
+async def get_memory_endpoint(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    return await get_user_memory(current_user.user_id)
+
+
+@app.put("/api/memory", tags=["Memory"])
+async def update_memory_endpoint(
+    body: MemoryUpdateRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
+    return await update_user_memory(current_user.user_id, content)
+
+
+@app.delete("/api/memory", tags=["Memory"])
+async def delete_memory_endpoint(
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    return await delete_user_memory(current_user.user_id)
 
 
 @app.post("/api/billing/checkout-session", tags=["Billing"])
@@ -1781,6 +1840,7 @@ async def rag_chat_with_agent(
         system_instructions=agent.system_instructions or "",
         history=history,
         rag_context=rag_context.context or "",
+        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
         composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
     )
@@ -1822,6 +1882,16 @@ async def rag_chat_with_agent(
     )
     await append_chat_message(user_msg)
     await append_chat_message(assistant_msg)
+    await enqueue_memory_refresh(
+        user_id=current_user.user_id,
+        source_mode="agent_chat",
+        source_session_id=chat_session_id,
+        user_message=normalized_message,
+        assistant_message=answer,
+        source_user_message_id=user_msg.message_id,
+        source_assistant_message_id=assistant_msg.message_id,
+    )
+    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
 
     updated_history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     return {
@@ -1880,6 +1950,7 @@ async def rag_chat_with_agent_stream(
         system_instructions=agent.system_instructions or "",
         history=history,
         rag_context=rag_context.context or "",
+        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
         composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
     )
@@ -1935,6 +2006,16 @@ async def rag_chat_with_agent_stream(
             )
             await append_chat_message(user_msg)
             await append_chat_message(assistant_msg)
+            await enqueue_memory_refresh(
+                user_id=current_user.user_id,
+                source_mode="agent_chat",
+                source_session_id=chat_session_id,
+                user_message=normalized_message,
+                assistant_message=answer,
+                source_user_message_id=user_msg.message_id,
+                source_assistant_message_id=assistant_msg.message_id,
+            )
+            asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
             yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:
@@ -2088,6 +2169,7 @@ async def rag_chat_workspace(
         system_instructions="You are a generic workspace chat assistant.",
         history=history,
         rag_context=rag_context.context or "",
+        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
         composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
     )
@@ -2127,6 +2209,16 @@ async def rag_chat_workspace(
     )
     await append_chat_message(user_msg)
     await append_chat_message(assistant_msg)
+    await enqueue_memory_refresh(
+        user_id=current_user.user_id,
+        source_mode="workspace_chat",
+        source_session_id=chat_session_id,
+        user_message=normalized_message,
+        assistant_message=answer,
+        source_user_message_id=user_msg.message_id,
+        source_assistant_message_id=assistant_msg.message_id,
+    )
+    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
     updated_history = await list_rag_chat_messages(chat_session_id, current_user.user_id)
     return {
         "session_id": chat_session_id,
@@ -2161,6 +2253,7 @@ async def rag_chat_workspace_stream(
         system_instructions="You are a generic workspace chat assistant.",
         history=history,
         rag_context=rag_context.context or "",
+        user_memory_context=await get_user_memory_prompt_block(current_user.user_id, normalized_message),
         composio_apps=get_composio_toolset_manager().get_connected_app_names(),
         normalized_message=normalized_message,
     )
@@ -2193,30 +2286,38 @@ async def rag_chat_workspace_stream(
                 yield f"data: {json.dumps(event)}\n\n"
             answer = loop_task.result()
             suggestions = await _generate_suggestions(normalized_message, answer, rag_context.context or "")
-            await append_chat_message(
-                RagChatMessage(
-                    message_id=str(uuid.uuid4()),
-                    session_id=chat_session_id,
-                    agent_id=None,
-                    owner_id=current_user.user_id,
-                    role="user",
-                    content=normalized_message,
-                    chat_scope=CHAT_SCOPE_WORKSPACE,
-                )
+            user_msg = RagChatMessage(
+                message_id=str(uuid.uuid4()),
+                session_id=chat_session_id,
+                agent_id=None,
+                owner_id=current_user.user_id,
+                role="user",
+                content=normalized_message,
+                chat_scope=CHAT_SCOPE_WORKSPACE,
             )
-            await append_chat_message(
-                RagChatMessage(
-                    message_id=str(uuid.uuid4()),
-                    session_id=chat_session_id,
-                    agent_id=None,
-                    owner_id=current_user.user_id,
-                    role="assistant",
-                    content=answer,
-                    citations=citations,
-                    suggestions=suggestions,
-                    chat_scope=CHAT_SCOPE_WORKSPACE,
-                )
+            assistant_msg = RagChatMessage(
+                message_id=str(uuid.uuid4()),
+                session_id=chat_session_id,
+                agent_id=None,
+                owner_id=current_user.user_id,
+                role="assistant",
+                content=answer,
+                citations=citations,
+                suggestions=suggestions,
+                chat_scope=CHAT_SCOPE_WORKSPACE,
             )
+            await append_chat_message(user_msg)
+            await append_chat_message(assistant_msg)
+            await enqueue_memory_refresh(
+                user_id=current_user.user_id,
+                source_mode="workspace_chat",
+                source_session_id=chat_session_id,
+                user_message=normalized_message,
+                assistant_message=answer,
+                source_user_message_id=user_msg.message_id,
+                source_assistant_message_id=assistant_msg.message_id,
+            )
+            asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
             yield f"data: {json.dumps({'type': 'chunk', 'text': answer})}\n\n"
             yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
             if suggestions:

@@ -16,6 +16,8 @@ from src.llm.output_parsers import build_validation_retry_prompt, parse_model_js
 from src.prompts.registry import prompt_registry
 from src.tools.fetcher import fetch_url_content
 from src.tools.web_search import get_web_search_tool
+from src import outbox
+from src.user_memory import enqueue_memory_refresh, get_user_memory_prompt_block
 
 _ITINERARY_LIST_LIMIT = 20
 _MAX_CONTEXT_RESULTS = 3
@@ -619,7 +621,9 @@ async def _extract_requirements(
     current_requirements: PlannerTravelRequirements,
     conversation_text: str,
     message: str,
+    user_id: str,
 ) -> PlannerTravelRequirements:
+    user_memory_context = await get_user_memory_prompt_block(user_id, message)
     parsed = await asyncio.to_thread(
         _invoke_structured_stage,
         prompt_name="itinerary_requirements_extract",
@@ -627,6 +631,7 @@ async def _extract_requirements(
             "current_requirements_json": current_requirements.model_dump_json(indent=2),
             "conversation_text": conversation_text,
             "user_message": message,
+            "user_memory_context": user_memory_context,
             "requirements_schema_json": json.dumps(
                 PlannerTravelRequirementsUpdate.model_json_schema(), indent=2
             ),
@@ -644,15 +649,21 @@ async def _generate_followup_question(
     requirements: PlannerTravelRequirements,
     missing_fields: list[str],
     conversation_text: str,
+    user_id: str,
 ) -> str:
     from src.llm.factory import get_llm
 
+    user_memory_context = await get_user_memory_prompt_block(
+        user_id,
+        f"{conversation_text}\nMissing fields: {', '.join(missing_fields)}",
+    )
     prompt_text, _ = prompt_registry.render(
         "itinerary_followup_question",
         {
             "requirements_json": requirements.model_dump_json(indent=2),
             "missing_fields_json": json.dumps(missing_fields, indent=2),
             "conversation_text": conversation_text,
+            "user_memory_context": user_memory_context,
         },
     )
     llm = get_llm(temperature=0.2)
@@ -667,14 +678,20 @@ async def _generate_itinerary(
     conversation_text: str,
     failure_code: str,
     failure_message: str,
+    user_id: str,
 ) -> GeneratedItinerary:
     grounding_context = await search_destination_context(requirements.destination or "")
+    user_memory_context = await get_user_memory_prompt_block(
+        user_id,
+        f"{requirements.destination or ''} {conversation_text}",
+    )
     parsed = await asyncio.to_thread(
         _invoke_structured_stage,
         prompt_name="itinerary_generate",
         context={
             "requirements_json": requirements.model_dump_json(indent=2),
             "conversation_text": conversation_text,
+            "user_memory_context": user_memory_context,
             "grounding_context": grounding_context,
             "itinerary_schema_json": json.dumps(GeneratedItinerary.model_json_schema(), indent=2),
         },
@@ -692,8 +709,10 @@ async def _revise_itinerary(
     current_itinerary: GeneratedItinerary,
     conversation_text: str,
     user_message: str,
+    user_id: str,
 ) -> GeneratedItinerary:
     grounding_context = await search_destination_context(requirements.destination or current_itinerary.destination)
+    user_memory_context = await get_user_memory_prompt_block(user_id, user_message)
     parsed = await asyncio.to_thread(
         _invoke_structured_stage,
         prompt_name="itinerary_revise",
@@ -702,6 +721,7 @@ async def _revise_itinerary(
             "current_itinerary_json": current_itinerary.model_dump_json(indent=2),
             "conversation_text": conversation_text,
             "user_message": user_message,
+            "user_memory_context": user_memory_context,
             "grounding_context": grounding_context,
             "itinerary_schema_json": json.dumps(GeneratedItinerary.model_json_schema(), indent=2),
         },
@@ -776,6 +796,7 @@ async def process_itinerary_message(
             current_itinerary=working_session.current_version.structured_itinerary,
             conversation_text=conversation_text,
             user_message=normalized_message,
+            user_id=user_id,
         )
         revision_summary = revised.revision_summary or "Updated the itinerary based on your latest request."
         new_version = await create_itinerary_version(
@@ -796,6 +817,16 @@ async def process_itinerary_message(
                 revision_summary=revision_summary,
             ).model_dump(mode="json"),
         )
+        await enqueue_memory_refresh(
+            user_id=user_id,
+            source_mode="itinerary",
+            source_session_id=working_session.session_id,
+            user_message=normalized_message,
+            assistant_message=assistant_message.content,
+            source_user_message_id=user_message.message_id,
+            source_assistant_message_id=assistant_message.message_id,
+        )
+        asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
         title = _suggest_session_title(
             working_session.requirements,
             fallback_text=normalized_message,
@@ -833,6 +864,7 @@ async def process_itinerary_message(
         current_requirements=working_session.requirements,
         conversation_text=conversation_text,
         message=normalized_message,
+        user_id=user_id,
     )
     missing_fields = updated_requirements.missing_fields()
 
@@ -841,6 +873,7 @@ async def process_itinerary_message(
             requirements=updated_requirements,
             missing_fields=missing_fields,
             conversation_text=conversation_text,
+            user_id=user_id,
         )
         assistant_message = await append_itinerary_message(
             user_id=user_id,
@@ -852,6 +885,16 @@ async def process_itinerary_message(
                 missing_fields=missing_fields,
             ).model_dump(mode="json"),
         )
+        await enqueue_memory_refresh(
+            user_id=user_id,
+            source_mode="itinerary",
+            source_session_id=working_session.session_id,
+            user_message=normalized_message,
+            assistant_message=assistant_message.content,
+            source_user_message_id=user_message.message_id,
+            source_assistant_message_id=assistant_message.message_id,
+        )
+        asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
         title = _suggest_session_title(updated_requirements, fallback_text=normalized_message)
         await update_itinerary_session(
             user_id=user_id,
@@ -888,6 +931,7 @@ async def process_itinerary_message(
         conversation_text=conversation_text,
         failure_code="itinerary_generation_failed",
         failure_message="Generated itinerary output could not be validated.",
+        user_id=user_id,
     )
     revision_summary = generated.revision_summary or "Generated the first itinerary draft."
     new_version = await create_itinerary_version(
@@ -908,6 +952,16 @@ async def process_itinerary_message(
             revision_summary=revision_summary,
         ).model_dump(mode="json"),
     )
+    await enqueue_memory_refresh(
+        user_id=user_id,
+        source_mode="itinerary",
+        source_session_id=working_session.session_id,
+        user_message=normalized_message,
+        assistant_message=assistant_message.content,
+        source_user_message_id=user_message.message_id,
+        source_assistant_message_id=assistant_message.message_id,
+    )
+    asyncio.create_task(outbox.dispatch_outbox_events(limit=10))
     title = _suggest_session_title(updated_requirements, fallback_text=normalized_message, itinerary=generated)
     await update_itinerary_session(
         user_id=user_id,

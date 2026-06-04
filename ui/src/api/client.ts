@@ -21,6 +21,7 @@ import type {
   ItinerarySessionDetail,
   ItinerarySessionListResponse,
   ItinerarySessionSummary,
+  UserMemory,
 } from '../types'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
@@ -1130,6 +1131,47 @@ export async function deleteRagWorkspaceChatLastExchange(
       await parseApiError(response, `Failed to delete last exchange: ${response.status}`),
     )
   }
+}
+
+export async function getUserMemory(accessToken: string | null): Promise<UserMemory> {
+  const response = await fetch(`${API_BASE}/api/memory`, {
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to load memory: ${response.status}`))
+  }
+  return (await response.json()) as UserMemory
+}
+
+export async function updateUserMemory(
+  content: string,
+  accessToken: string | null,
+): Promise<UserMemory> {
+  const response = await fetch(`${API_BASE}/api/memory`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken),
+    },
+    body: JSON.stringify({ content }),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to update memory: ${response.status}`))
+  }
+  return (await response.json()) as UserMemory
+}
+
+export async function deleteUserMemory(
+  accessToken: string | null,
+): Promise<{ deleted: boolean }> {
+  const response = await fetch(`${API_BASE}/api/memory`, {
+    method: 'DELETE',
+    headers: authHeaders(accessToken),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to delete memory: ${response.status}`))
+  }
+  return (await response.json()) as { deleted: boolean }
 }
 
 export async function deleteRagAgentChatLastExchange(

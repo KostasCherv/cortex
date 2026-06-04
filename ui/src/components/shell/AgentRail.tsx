@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ClipboardList, FolderOpen, Loader2, LogOut, Map, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
+import { Bot, Brain, ClipboardList, FolderOpen, Loader2, LogOut, Map, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
@@ -1018,6 +1018,7 @@ export function AgentRail({
   const isResearch = activeView.type === 'research'
   const isPRDPlanner = activeView.type === 'prd-planner'
   const isItineraryPlanner = activeView.type === 'itinerary-planner'
+  const isMemory = activeView.type === 'memory'
   const isResources = activeView.type === 'resources'
 
   return (
@@ -1291,6 +1292,20 @@ export function AgentRail({
 
       {/* Footer */}
       <div className="shrink-0 space-y-0.5 border-t border-border px-2 py-2 max-md:flex max-md:items-center max-md:gap-1 max-md:border-t-0 max-md:pt-0">
+        <button
+          type="button"
+          onClick={() => onViewChange({ type: 'memory' })}
+          className={cn(
+            'w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
+            isMemory
+              ? 'bg-background text-foreground font-medium shadow-sm'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
+          )}
+        >
+          <Brain size={15} className="shrink-0" />
+          Memory
+        </button>
+
         <button
           type="button"
           onClick={() => onViewChange({ type: 'resources' })}

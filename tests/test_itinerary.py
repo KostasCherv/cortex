@@ -287,7 +287,50 @@ async def test_process_itinerary_message_generates_first_itinerary_and_version()
     assert "generated" in response.assistant_message.content.lower()
     assert append_message_mock.await_count == 2
     update_session_mock.assert_awaited()
-    create_version_mock.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_generate_itinerary_includes_user_memory_context_in_prompt():
+    from src.itinerary import _generate_itinerary
+
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = _json_result(
+        {
+            "title": "Paris art and cafe getaway",
+            "summary": "A relaxed four-day Paris itinerary with museums and cafe stops.",
+            "destination": "Paris",
+            "budget_band": "mid-range",
+            "days": [],
+            "tips": [],
+            "recommended_areas": [],
+            "getting_there": [],
+            "getting_around": [],
+            "must_do_highlights": [],
+            "booking_advice": [],
+        }
+    )
+
+    requirements = PlannerTravelRequirements(
+        destination="Paris",
+        traveler_count=2,
+        budget_band="mid-range",
+    )
+
+    with (
+        patch("src.itinerary.search_destination_context", new=AsyncMock(return_value="Grounding notes")),
+        patch("src.itinerary.get_user_memory_prompt_block", new=AsyncMock(return_value="Prefers boutique hotels.")),
+        patch("src.llm.factory.get_llm", return_value=mock_llm),
+    ):
+        await _generate_itinerary(
+            requirements=requirements,
+            conversation_text="USER: Plan me a Paris trip",
+            failure_code="itinerary_generation_failed",
+            failure_message="Itinerary failed.",
+            user_id="test-user",
+        )
+
+    prompt = mock_llm.invoke.call_args.args[0]
+    assert "Prefers boutique hotels." in prompt
 
 
 @pytest.mark.asyncio

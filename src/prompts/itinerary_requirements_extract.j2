@@ -12,6 +12,11 @@ Conversation:
 
 Latest user message:
 {{ user_message }}
+{% if user_memory_context %}
+
+User memory:
+{{ user_memory_context }}
+{% endif %}
 
 Return JSON matching this schema:
 {{ requirements_schema_json }}

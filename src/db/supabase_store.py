@@ -68,6 +68,7 @@ class SupabaseSessionStore:
     _CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST = "rag:chat:messages:list"
     _CACHE_PREFIX_PRD_PLANS_LIST = "planner:prd:list"
     _CACHE_PREFIX_ITINERARY_SESSIONS_LIST = "planner:itinerary:list"
+    _CACHE_PREFIX_USER_MEMORY = "user:memory"
 
     async def _request(
         self,
@@ -200,6 +201,13 @@ class SupabaseSessionStore:
     async def _invalidate_itinerary_sessions_list_cache(self, owner_id: str, workspace_id: str) -> None:
         key = self._cache_key(
             self._CACHE_PREFIX_ITINERARY_SESSIONS_LIST,
+            f"{owner_id}:{workspace_id}",
+        )
+        await self._cache_delete(key)
+
+    async def _invalidate_user_memory_cache(self, owner_id: str, workspace_id: str) -> None:
+        key = self._cache_key(
+            self._CACHE_PREFIX_USER_MEMORY,
             f"{owner_id}:{workspace_id}",
         )
         await self._cache_delete(key)
@@ -952,6 +960,69 @@ class SupabaseSessionStore:
             params={"id": f"eq.{event_id}"},
             json_body=patch,
         )
+
+    # ------------------------------------------------------------------
+    # User memory
+    # ------------------------------------------------------------------
+
+    async def get_user_memory(
+        self,
+        *,
+        owner_id: str,
+        workspace_id: str,
+    ) -> dict[str, Any] | None:
+        response = await self._request(
+            "GET",
+            "user_memory",
+            params={
+                "select": "owner_id,workspace_id,content,updated_at,last_refreshed_at",
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+                "limit": "1",
+            },
+        )
+        rows = response.json()
+        return rows[0] if rows else None
+
+    async def upsert_user_memory(self, *, payload: dict[str, Any]) -> None:
+        await self._request(
+            "POST",
+            "user_memory",
+            params={"on_conflict": "owner_id,workspace_id"},
+            json_body=payload,
+            extra_headers={"Prefer": "resolution=merge-duplicates"},
+        )
+        await self._invalidate_user_memory_cache(payload["owner_id"], payload["workspace_id"])
+
+    async def delete_user_memory(
+        self,
+        *,
+        owner_id: str,
+        workspace_id: str,
+    ) -> bool:
+        response = await self._request(
+            "DELETE",
+            "user_memory",
+            params={
+                "owner_id": f"eq.{owner_id}",
+                "workspace_id": f"eq.{workspace_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        rows = response.json()
+        if rows:
+            await self._invalidate_user_memory_cache(owner_id, workspace_id)
+        return bool(rows)
+
+    async def claim_user_memory_refresh_event(self, payload: dict[str, Any]) -> bool:
+        response = await self._request(
+            "POST",
+            "user_memory_refresh_events",
+            params={"on_conflict": "event_key"},
+            json_body=payload,
+            extra_headers={"Prefer": "resolution=ignore-duplicates,return=representation"},
+        )
+        return bool(response.json())
 
     async def upsert_rag_sidecar_artifact(
         self,

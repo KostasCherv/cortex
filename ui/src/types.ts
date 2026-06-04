@@ -145,6 +145,12 @@ export type RagChatSessionSummary = {
   last_message_preview: string
 }
 
+export type UserMemory = {
+  content: string
+  updated_at: string | null
+  last_refreshed_at: string | null
+}
+
 export type RagChatStreamEvent =
   | {
       type: 'session'
