@@ -2136,11 +2136,11 @@ def test_run_agent_loop_returns_tuple():
     mock_response.tool_calls = []
 
     with patch("src.api.endpoints.get_llm") as mock_get_llm, \
-         patch("src.api.endpoints.settings") as mock_settings:
+         patch("src.api.endpoints.settings") as mock_settings, \
+         patch("src.api.endpoints.build_general_tools", return_value=[]):
         mock_settings.composio_max_agent_turns = 1
         mock_settings.composio_enabled = False
-        mock_settings.tavily_api_key = None  # disable web search
-        llm = AsyncMock()
+        llm = MagicMock()
         llm.ainvoke = AsyncMock(return_value=mock_response)
         mock_get_llm.return_value = llm
 

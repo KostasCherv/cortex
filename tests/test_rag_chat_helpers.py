@@ -159,7 +159,9 @@ async def test_run_agent_loop_skips_router_when_bind_tools_false():
 
     from unittest.mock import patch
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+    with patch("src.api.endpoints.get_llm", return_value=mock_llm), patch(
+        "src.api.endpoints.build_general_tools", return_value=[]
+    ):
         answer, web_used = await _run_agent_loop(
             messages=[HumanMessage(content="Hi")],
             metadata={},

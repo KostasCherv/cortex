@@ -50,6 +50,69 @@ async def test_run_agent_loop_no_tool_calls_returns_answer():
 
 
 @pytest.mark.asyncio
+async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
+    from src.api.endpoints import _run_agent_loop
+
+    tool_call_response = _ai_message_with_tool_call(
+        "tavily_extract", "call_extract", {"urls": ["https://example.com"]}
+    )
+    final_response = AIMessage(content="Could not fetch that URL.")
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
+
+    fake_tool = _make_tool("tavily_extract", {"error": "invalid api key"})
+
+    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [])
+        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+            with patch(
+                "src.api.endpoints.build_general_tools",
+                return_value=[fake_tool],
+            ):
+                answer, web_used = await _run_agent_loop(
+                    messages=[HumanMessage(content="Read https://example.com")],
+                    metadata={},
+                )
+
+    assert answer == "Could not fetch that URL."
+    assert web_used is False
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_marks_web_used_for_tavily_search():
+    from src.api.endpoints import _run_agent_loop
+
+    tool_call_response = _ai_message_with_tool_call(
+        "tavily_search", "call_web", {"query": "latest news"}
+    )
+    final_response = AIMessage(content="Here is the news.")
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
+
+    fake_tool = _make_tool("tavily_search", '{"results": []}')
+
+    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [])
+        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+            with patch(
+                "src.api.endpoints.build_general_tools",
+                return_value=[fake_tool],
+            ):
+                answer, web_used = await _run_agent_loop(
+                    messages=[HumanMessage(content="What's the latest news?")],
+                    metadata={},
+                )
+
+    assert answer == "Here is the news."
+    assert web_used is True
+    fake_tool.arun.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_run_agent_loop_executes_tool_and_returns_final_answer():
     from src.api.endpoints import _run_agent_loop
 

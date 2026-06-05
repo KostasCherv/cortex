@@ -16,10 +16,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, BaseModel as _PydanticBase, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from src.tools.search import perform_search_cached
+from src.tools.general import build_general_tools, should_mark_web_used
 
 from src.graph.graph import build_graph
 from src.errors import CortexError
@@ -526,32 +525,6 @@ def _build_agent_messages(
     )
 
 
-class _WebSearchInput(_PydanticBase):
-    query: str
-
-
-def _make_web_search_tool(web_used_flag: list[bool]) -> StructuredTool:
-    """Return a LangChain StructuredTool that sets web_used_flag[0] = True on first call."""
-
-    async def _search(query: str) -> str:
-        results = await perform_search_cached(query, max_results=5)
-        web_used_flag[0] = True
-        lines = []
-        for r in results:
-            title = r.get("title", "")
-            url = r.get("url", "")
-            content = (r.get("content") or "")[:400]
-            lines.append(f"[{title}]({url})\n{content}")
-        return "\n\n".join(lines) if lines else "No results found."
-
-    return StructuredTool.from_function(
-        coroutine=_search,
-        name="web_search",
-        description="Search the web for up-to-date information. Use when the answer requires current data.",
-        args_schema=_WebSearchInput,
-    )
-
-
 async def _run_agent_loop(
     *,
     messages: list[BaseMessage],
@@ -564,7 +537,7 @@ async def _run_agent_loop(
 
     on_event: optional async callable(dict) called for tool_start / tool_end events.
     bind_tools: when False, skip Composio router session and tool schema binding.
-    allow_web_search: when True and settings.tavily_api_key is set, wire Tavily as a native tool.
+    allow_web_search: when True, bind Tavily search + URL extract if TAVILY_API_KEY is set.
     """
     llm = get_llm(temperature=0.0)
     max_turns = settings.composio_max_agent_turns
@@ -572,9 +545,7 @@ async def _run_agent_loop(
     last_response_text = ""
     web_used_flag: list[bool] = [False]
 
-    web_tools: list[StructuredTool] = []
-    if allow_web_search and settings.tavily_api_key:
-        web_tools = [_make_web_search_tool(web_used_flag)]
+    web_tools = build_general_tools(allow_web=allow_web_search)
 
     async def _invoke_turn(llm_target: Runnable, turn: int) -> BaseMessage:
         with start_step_span(
@@ -609,6 +580,8 @@ async def _run_agent_loop(
                     try:
                         raw = await matched.arun(tool_args)
                         result_text = str(raw)[:6000]
+                        if should_mark_web_used(tool_name, raw):
+                            web_used_flag[0] = True
                     except Exception as exc:
                         result_text = f"Error: {exc}"
                 else:
@@ -664,6 +637,8 @@ async def _run_agent_loop(
                             raise ValueError(f"Tool '{tool_name}' not found in catalog.")
                         raw_result = await matched_tool.arun(tool_args)
                         tool_result = str(raw_result)[:6000]
+                        if should_mark_web_used(tool_name, raw_result):
+                            web_used_flag[0] = True
                 except Exception as exc:
                     tool_result = f"Tool '{tool_name}' returned an error: {exc}"
                     tool_status = "error"
