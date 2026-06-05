@@ -1,0 +1,44 @@
+{
+  "generate.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `query`, `summaries_text`, `memory_context`, `domain`, produce the fields `report`.",
+      "fields": [
+        {
+          "prefix": "Query:",
+          "description": "${query}"
+        },
+        {
+          "prefix": "Summaries Text:",
+          "description": "${summaries_text}"
+        },
+        {
+          "prefix": "Memory Context:",
+          "description": "${memory_context}"
+        },
+        {
+          "prefix": "Domain:",
+          "description": "${domain}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Report:",
+          "description": "${report}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

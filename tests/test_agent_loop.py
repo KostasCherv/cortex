@@ -40,12 +40,13 @@ async def test_run_agent_loop_no_tool_calls_returns_answer():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer = await _run_agent_loop(
+            answer, web_used = await _run_agent_loop(
                 messages=[HumanMessage(content="What is 6 times 7?")],
                 metadata={},
             )
 
     assert answer == "The answer is 42."
+    assert web_used is False
 
 
 @pytest.mark.asyncio
@@ -64,12 +65,13 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [fake_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer = await _run_agent_loop(
+            answer, web_used = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
             )
 
     assert answer == "AAPL is trading at $200."
+    assert web_used is False
     fake_tool.arun.assert_awaited_once()
 
 
@@ -101,12 +103,13 @@ async def test_run_agent_loop_router_search_then_execute():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [search_tool, execute_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer = await _run_agent_loop(
+            answer, web_used = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
             )
 
     assert answer == "AAPL is trading at $200."
+    assert web_used is False
     search_tool.arun.assert_awaited_once()
     execute_tool.arun.assert_awaited_once()
     assert mock_llm.ainvoke.call_count == 3
@@ -170,7 +173,7 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [broken_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer = await _run_agent_loop(
+            answer, web_used = await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
                 metadata={},
                 on_event=capture_event,
@@ -179,6 +182,7 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
     error_events = [e for e in events if e["type"] == "tool_end" and e["status"] == "error"]
     assert len(error_events) == 1
     assert "could not create" in answer
+    assert web_used is False
 
 
 @pytest.mark.asyncio
