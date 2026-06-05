@@ -829,7 +829,7 @@ def test_followup_stream_includes_suggestions_event():
         patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.endpoints.rerank_chunks", return_value=[]),
         patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Here is the answer.")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Here is the answer.", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=["Q1?", "Q2?", "Q3?"])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -881,7 +881,7 @@ def test_followup_stream_citations_match_reranked_chunks():
         patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.endpoints.rerank_chunks", return_value=reranked_chunks),
         patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -923,9 +923,9 @@ def test_followup_prompt_includes_originating_report_context_fields():
     )
     captured_messages: list = []
 
-    async def capture_loop(messages, metadata, on_event=None):
+    async def capture_loop(messages, metadata, on_event=None, **kwargs):
         captured_messages.extend(messages)
-        return "Answer"
+        return "Answer", False
 
     with (
         patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
@@ -964,9 +964,9 @@ def test_followup_report_context_fallback_is_safe_for_missing_run():
     )
     captured_messages: list = []
 
-    async def capture_loop(messages, metadata, on_event=None):
+    async def capture_loop(messages, metadata, on_event=None, **kwargs):
         captured_messages.extend(messages)
-        return "Answer"
+        return "Answer", False
 
     with (
         patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
@@ -1012,7 +1012,7 @@ def test_followup_stream_returns_answer_from_agent_loop():
         patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.endpoints.rerank_chunks", return_value=[]),
         patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Online follow-up answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Online follow-up answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1049,7 +1049,7 @@ def test_followup_stream_calls_agent_loop_with_normalized_message():
         ],
         created_at="2026",
     )
-    mock_loop = AsyncMock(return_value="Follow-up answer")
+    mock_loop = AsyncMock(return_value=("Follow-up answer", False))
 
     with (
         patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
@@ -1092,7 +1092,7 @@ def test_rag_chat_calls_agent_loop():
     mock_context = MagicMock()
     mock_context.context = "Relevant context."
     mock_context.chunks = []
-    mock_loop = AsyncMock(return_value="Answer")
+    mock_loop = AsyncMock(return_value=("Answer", False))
 
     with (
         patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
@@ -1122,7 +1122,7 @@ def test_rag_chat_stream_calls_agent_loop():
     mock_context = MagicMock()
     mock_context.context = "Relevant context."
     mock_context.chunks = []
-    mock_loop = AsyncMock(return_value="Answer")
+    mock_loop = AsyncMock(return_value=("Answer", False))
 
     with (
         patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
@@ -1150,7 +1150,7 @@ def test_workspace_rag_chat_calls_agent_loop():
     mock_context = MagicMock()
     mock_context.context = "Workspace context."
     mock_context.chunks = []
-    mock_loop = AsyncMock(return_value="Answer")
+    mock_loop = AsyncMock(return_value=("Answer", False))
 
     with (
         patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
@@ -1178,7 +1178,7 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
     mock_context = MagicMock()
     mock_context.context = "Workspace context."
     mock_context.chunks = []
-    mock_loop = AsyncMock(return_value="Answer")
+    mock_loop = AsyncMock(return_value=("Answer", False))
 
     with (
         patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
@@ -1279,7 +1279,7 @@ def test_rag_chat_returns_agent_reply():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1325,7 +1325,7 @@ def test_rag_chat_stream_returns_rich_citations():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1370,7 +1370,7 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch(
             "src.api.endpoints._generate_suggestions",
             new=AsyncMock(return_value=["Follow-up one?", "Follow-up two?", "Follow-up three?"]),
@@ -1407,7 +1407,7 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1443,7 +1443,7 @@ def test_workspace_rag_chat_allows_no_ready_resources():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="General answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("General answer", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1477,7 +1477,7 @@ def test_rag_chat_persists_suggestions_on_assistant_message():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=append_chat),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Answer")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch(
             "src.api.endpoints._generate_suggestions",
             new=AsyncMock(return_value=["Next question?", "Another question?"]),
@@ -1515,7 +1515,7 @@ def test_rag_chat_keeps_attached_document_queries_grounded_in_linked_resources()
 
     async def capture_loop(*, messages, **kwargs):
         captured_messages.extend(messages)
-        return "Your strongest themes are machine learning and Python."
+        return "Your strongest themes are machine learning and Python.", False
 
     with (
         patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
@@ -1553,7 +1553,7 @@ def test_workspace_rag_chat_stream_returns_valid_sse_response():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Workspace answer.")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Workspace answer.", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1585,7 +1585,7 @@ def test_rag_chat_stream_agent_loop_returns_chunks():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value="Archon is a coding assistant platform.")),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Archon is a coding assistant platform.", False))),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2123,3 +2123,36 @@ def test_rag_chat_tools_explicit():
     req = RagChatRequest(message="hello", tools={"web_search": False, "composio": True})
     assert req.tools.web_search is False
     assert req.tools.composio is True
+
+
+def test_run_agent_loop_returns_tuple():
+    """_run_agent_loop must return (answer: str, web_used: bool)."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from langchain_core.messages import HumanMessage
+
+    mock_response = MagicMock()
+    mock_response.content = "test answer"
+    mock_response.tool_calls = []
+
+    with patch("src.api.endpoints.get_llm") as mock_get_llm, \
+         patch("src.api.endpoints.settings") as mock_settings:
+        mock_settings.composio_max_agent_turns = 1
+        mock_settings.composio_enabled = False
+        mock_settings.tavily_api_key = None  # disable web search
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=mock_response)
+        mock_get_llm.return_value = llm
+
+        from src.api.endpoints import _run_agent_loop
+        result = asyncio.run(_run_agent_loop(
+            messages=[HumanMessage(content="hi")],
+            metadata={},
+            bind_tools=False,
+            allow_web_search=False,
+        ))
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        answer, web_used = result
+        assert isinstance(answer, str)
+        assert web_used is False

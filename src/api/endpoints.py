@@ -15,7 +15,10 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.tools.search import perform_search_cached
 
 from src.graph.graph import build_graph
 from src.errors import CortexError
@@ -522,22 +525,55 @@ def _build_agent_messages(
     )
 
 
+class _WebSearchInput(BaseModel):
+    query: str
+
+
+def _make_web_search_tool(web_used_flag: list[bool]) -> StructuredTool:
+    """Return a LangChain StructuredTool that sets web_used_flag[0] = True on first call."""
+
+    async def _search(query: str) -> str:
+        web_used_flag[0] = True
+        results = await perform_search_cached(query, max_results=5)
+        lines = []
+        for r in results:
+            title = r.get("title", "")
+            url = r.get("url", "")
+            content = (r.get("content") or "")[:400]
+            lines.append(f"[{title}]({url})\n{content}")
+        return "\n\n".join(lines) if lines else "No results found."
+
+    return StructuredTool.from_function(
+        coroutine=_search,
+        name="web_search",
+        description="Search the web for up-to-date information. Use when the answer requires current data.",
+        args_schema=_WebSearchInput,
+    )
+
+
 async def _run_agent_loop(
     *,
     messages: list[BaseMessage],
     metadata: dict[str, object],
     on_event=None,
     bind_tools: bool = True,
-) -> str:
-    """Run an agentic tool-calling loop and return the final answer text.
+    allow_web_search: bool = True,
+) -> tuple[str, bool]:
+    """Run an agentic tool-calling loop and return (answer, web_used).
 
     on_event: optional async callable(dict) called for tool_start / tool_end events.
     bind_tools: when False, skip Composio router session and tool schema binding.
+    allow_web_search: when True and settings.tavily_api_key is set, wire Tavily as a native tool.
     """
     llm = get_llm(temperature=0.0)
     max_turns = settings.composio_max_agent_turns
     loop_messages = list(messages)
     last_response_text = ""
+    web_used_flag: list[bool] = [False]
+
+    web_tools: list = []
+    if allow_web_search and settings.tavily_api_key:
+        web_tools = [_make_web_search_tool(web_used_flag)]
 
     async def _invoke_turn(llm_target: BaseMessage | object, turn: int) -> object:
         with start_step_span(
@@ -551,20 +587,43 @@ async def _run_agent_loop(
             return await llm_target.ainvoke(loop_messages)  # type: ignore[union-attr]
 
     if not bind_tools or not settings.composio_enabled:
+        base_llm = llm.bind_tools(web_tools) if web_tools else llm
         for turn in range(max_turns):
-            response = await _invoke_turn(llm, turn)
+            response = await _invoke_turn(base_llm, turn)
             last_response_text = _extract_llm_text(
                 response.content if hasattr(response, "content") else response
             )
-            if not getattr(response, "tool_calls", None):
+            tool_calls = getattr(response, "tool_calls", None) or []
+            if not tool_calls:
                 break
-        return last_response_text
+            loop_messages.append(response)
+            web_tool_map = {t.name: t for t in web_tools}
+            for tc in tool_calls:
+                tool_name = tc["name"]
+                tool_id = tc.get("id", tool_name)
+                tool_args = tc.get("args", {})
+                matched = web_tool_map.get(tool_name)
+                result_text = ""
+                if matched:
+                    try:
+                        raw = await matched.arun(tool_args)
+                        result_text = str(raw)[:6000]
+                    except Exception as exc:
+                        result_text = f"Error: {exc}"
+                else:
+                    result_text = f"Tool '{tool_name}' not available."
+                loop_messages.append(
+                    ToolMessage(content=result_text, tool_call_id=tool_id)
+                )
+        return last_response_text, web_used_flag[0]
 
     manager = get_composio_toolset_manager()
     user_id = settings.composio_user_id
 
-    async with manager.router_tools_context(user_id) as tools:
-        llm_with_tools = llm.bind_tools(tools) if tools else llm
+    async with manager.router_tools_context(user_id) as composio_tools:
+        all_tools = list(composio_tools) + web_tools
+        llm_with_tools = llm.bind_tools(all_tools) if all_tools else llm
+        tool_map = {t.name: t for t in all_tools}
 
         for turn in range(max_turns):
             response = await _invoke_turn(llm_with_tools, turn)
@@ -577,7 +636,6 @@ async def _run_agent_loop(
             if not tool_calls:
                 break
 
-            tool_map = {t.name: t for t in tools}
             loop_messages.append(response)
 
             for tc in tool_calls:
@@ -615,7 +673,7 @@ async def _run_agent_loop(
 
                 loop_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_id))
 
-        return last_response_text
+    return last_response_text, web_used_flag[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1080,11 +1138,13 @@ async def _stream_followup(
         event = event_queue.get_nowait()
         yield f"data: {json.dumps(event)}\n\n"
     try:
-        full_answer = loop_task.result()
+        full_answer, web_used = loop_task.result()
     except Exception as exc:
         yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
         return
 
+    if web_used:
+        yield f"data: {json.dumps({'type': 'web_used', 'provider': settings.web_search_provider})}\n\n"
     yield f"data: {json.dumps({'type': 'chunk', 'text': full_answer})}\n\n"
 
     citations = _build_rag_citations(chunks)
@@ -1857,10 +1917,11 @@ async def rag_chat_with_agent(
 
         try:
             t_loop = time.perf_counter()
-            answer = await _run_agent_loop(
+            answer, _ = await _run_agent_loop(
                 messages=prepared.messages,
                 metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
+                allow_web_search=body.tools.web_search,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -1988,6 +2049,7 @@ async def rag_chat_with_agent_stream(
                     metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
+                    allow_web_search=body.tools.web_search,
                 )
             )
             while not loop_task.done():
@@ -1999,7 +2061,9 @@ async def rag_chat_with_agent_stream(
             while not event_queue.empty():
                 event = event_queue.get_nowait()
                 yield f"data: {json.dumps(event)}\n\n"
-            answer = loop_task.result()
+            answer, web_used = loop_task.result()
+            if web_used:
+                yield f"data: {json.dumps({'type': 'web_used', 'provider': settings.web_search_provider})}\n\n"
             suggestions = await resolve_suggestions(
                 query=normalized_message,
                 answer=answer,
@@ -2201,10 +2265,11 @@ async def rag_chat_workspace(
         )
         try:
             t_loop = time.perf_counter()
-            answer = await _run_agent_loop(
+            answer, _ = await _run_agent_loop(
                 messages=prepared.messages,
                 metadata={"user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
+                allow_web_search=body.tools.web_search,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -2327,6 +2392,7 @@ async def rag_chat_workspace_stream(
                     metadata={"user_id": current_user.user_id},
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
+                    allow_web_search=body.tools.web_search,
                 )
             )
             while not loop_task.done():
@@ -2338,7 +2404,9 @@ async def rag_chat_workspace_stream(
             while not event_queue.empty():
                 event = event_queue.get_nowait()
                 yield f"data: {json.dumps(event)}\n\n"
-            answer = loop_task.result()
+            answer, web_used = loop_task.result()
+            if web_used:
+                yield f"data: {json.dumps({'type': 'web_used', 'provider': settings.web_search_provider})}\n\n"
             suggestions = await resolve_suggestions(
                 query=normalized_message,
                 answer=answer,
