@@ -95,15 +95,19 @@ def build_agent_messages(
     bind_tools: bool = True,
 ) -> list[BaseMessage]:
     template_name = (
-        "rag_chat_system" if bind_tools else "rag_chat_system_no_tools"
+        "rag_chat_system" if settings.composio_enabled else "rag_chat_system_no_tools"
     )
+    # When Composio is not bound for this request, hide connected apps so the
+    # template's {% if composio_apps %} block doesn't instruct the LLM to call
+    # Composio tools that were never bound.
+    effective_composio_apps = composio_apps if bind_tools else []
     system_content, _ = prompt_registry.render(
         template_name,
         {
             "system_instructions": system_instructions,
             "rag_context": rag_context,
             "user_memory_context": user_memory_context,
-            "composio_apps": composio_apps,
+            "composio_apps": effective_composio_apps,
         },
     )
     messages: list[BaseMessage] = [SystemMessage(content=system_content)]
