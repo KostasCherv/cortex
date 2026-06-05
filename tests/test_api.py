@@ -2109,3 +2109,17 @@ def test_delete_agent_last_exchange_requires_auth():
         app.dependency_overrides[get_authenticated_user] = _auth_override
 
     assert response.status_code == 401
+
+
+def test_rag_chat_request_default_tools():
+    from src.api.endpoints import RagChatRequest, RagChatTools
+    req = RagChatRequest(message="hello")
+    assert req.tools.web_search is True
+    assert req.tools.composio is False
+
+
+def test_rag_chat_tools_explicit():
+    from src.api.endpoints import RagChatRequest
+    req = RagChatRequest(message="hello", tools={"web_search": False, "composio": True})
+    assert req.tools.web_search is False
+    assert req.tools.composio is True

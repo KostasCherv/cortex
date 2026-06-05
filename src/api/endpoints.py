@@ -15,7 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.graph.graph import build_graph
 from src.errors import CortexError
@@ -307,9 +307,15 @@ class RagAgentLinkRequest(BaseModel):
     resource_ids: list[str]
 
 
+class RagChatTools(BaseModel):
+    web_search: bool = True
+    composio: bool = False
+
+
 class RagChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    tools: RagChatTools = Field(default_factory=RagChatTools)
 
 
 class BillingCheckoutRequest(BaseModel):
