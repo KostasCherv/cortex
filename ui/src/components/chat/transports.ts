@@ -13,7 +13,7 @@ import type { ToolConfig } from './toolConfig'
 
 export type StreamCallbacks = {
   signal?: AbortSignal
-  onSession: (sessionId: string, webUsed?: boolean, webProvider?: string | null) => void
+  onSession: (sessionId: string) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagChatMessage['citations']) => void
   onSuggestions?: (suggestions: string[]) => void

@@ -133,7 +133,7 @@ export function ChatThreadContainer({
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
-  const [toolConfig, setToolConfig] = useState<ToolConfig>(defaultToolConfig)
+  const [toolConfig, setToolConfig] = useState<ToolConfig>(() => defaultToolConfig())
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
