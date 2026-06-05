@@ -164,6 +164,7 @@ type FollowupOptions = {
   onChunk: (text: string) => void
   onCitations: (citations: Citation[]) => void
   onSuggestions?: (suggestions: string[]) => void
+  onWebUsed?: () => void
   onDone: () => void
   onError?: (error: string) => void
 }
@@ -208,6 +209,10 @@ export async function streamFollowup(
     }
     if (parsed.type === 'suggestions') {
       options.onSuggestions?.(parsed.suggestions)
+      return false
+    }
+    if (parsed.type === 'web_used') {
+      options.onWebUsed?.()
       return false
     }
     if (parsed.type === 'done') {

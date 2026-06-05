@@ -80,6 +80,7 @@ export type FollowupStreamEvent =
   | { type: 'chunk'; text: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'suggestions'; suggestions: string[] }
+  | { type: 'web_used'; provider: string }
   | { type: 'done' }
   | { type: 'error'; error: string }
 

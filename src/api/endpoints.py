@@ -312,7 +312,7 @@ class RagAgentLinkRequest(BaseModel):
 
 
 class RagChatTools(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     web_search: bool = True
     composio: bool = False
@@ -534,8 +534,8 @@ def _make_web_search_tool(web_used_flag: list[bool]) -> StructuredTool:
     """Return a LangChain StructuredTool that sets web_used_flag[0] = True on first call."""
 
     async def _search(query: str) -> str:
-        web_used_flag[0] = True
         results = await perform_search_cached(query, max_results=5)
+        web_used_flag[0] = True
         lines = []
         for r in results:
             title = r.get("title", "")
