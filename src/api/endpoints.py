@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BaseModel as _PydanticBase, ConfigDict, Field
 
 from src.tools.search import perform_search_cached
 
@@ -525,7 +525,7 @@ def _build_agent_messages(
     )
 
 
-class _WebSearchInput(BaseModel):
+class _WebSearchInput(_PydanticBase):
     query: str
 
 
