@@ -182,7 +182,12 @@ async def prepare_agent_rag_chat(
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
         bind_tools = tools.composio and settings.composio_enabled
-        tool_skip_reason = None if bind_tools else "user_disabled"
+        if not tools.composio:
+            tool_skip_reason = "user_disabled"
+        elif not settings.composio_enabled:
+            tool_skip_reason = "server_disabled"
+        else:
+            tool_skip_reason = None
         allow_web_search = tools.web_search
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
@@ -251,7 +256,12 @@ async def prepare_workspace_rag_chat(
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
         bind_tools = tools.composio and settings.composio_enabled
-        tool_skip_reason = None if bind_tools else "user_disabled"
+        if not tools.composio:
+            tool_skip_reason = "user_disabled"
+        elif not settings.composio_enabled:
+            tool_skip_reason = "server_disabled"
+        else:
+            tool_skip_reason = None
         allow_web_search = tools.web_search
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(

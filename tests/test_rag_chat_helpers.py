@@ -143,3 +143,34 @@ async def test_prepare_workspace_respects_composio_false():
         )
         assert result.bind_tools is False
         assert result.allow_web_search is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_respects_composio_true():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.api.endpoints import RagChatTools
+    from unittest.mock import AsyncMock, patch
+
+    tools = RagChatTools(web_search=True, composio=True)
+
+    with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
+         patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
+         patch("src.api.rag_chat_helpers.settings") as mock_settings, \
+         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
+        mock_mgr.return_value.get_connected_app_names.return_value = ["slack"]
+        mock_settings.composio_enabled = True
+        mock_settings.rag_chat_max_history_messages = 10
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="send slack message",
+            session_id=None,
+            timings=RagChatTimings(),
+            tools=tools,
+        )
+        assert result.bind_tools is True
+        assert result.allow_web_search is True
+        assert result.tool_skip_reason is None
