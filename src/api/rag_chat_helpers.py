@@ -92,9 +92,10 @@ def build_agent_messages(
     user_memory_context: str,
     composio_apps: list[str],
     normalized_message: str,
+    bind_tools: bool = True,
 ) -> list[BaseMessage]:
     template_name = (
-        "rag_chat_system" if settings.composio_enabled else "rag_chat_system_no_tools"
+        "rag_chat_system" if bind_tools else "rag_chat_system_no_tools"
     )
     system_content, _ = prompt_registry.render(
         template_name,
@@ -220,6 +221,7 @@ async def prepare_agent_rag_chat(
         user_memory_context=user_memory_context,
         composio_apps=composio_apps,
         normalized_message=normalized_message,
+        bind_tools=bind_tools,
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(
@@ -292,6 +294,7 @@ async def prepare_workspace_rag_chat(
         user_memory_context=user_memory_context,
         composio_apps=composio_apps,
         normalized_message=normalized_message,
+        bind_tools=bind_tools,
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(

@@ -10,6 +10,50 @@ from src.api.rag_chat_helpers import (
 )
 
 
+def test_build_agent_messages_uses_no_tools_template_when_bind_tools_false():
+    """System prompt must not mention Composio when tools are not bound."""
+    from unittest.mock import patch
+    from src.api.rag_chat_helpers import build_agent_messages
+
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings:
+        mock_settings.composio_enabled = True  # server has Composio
+        messages = build_agent_messages(
+            system_instructions="",
+            history=[],
+            rag_context="",
+            user_memory_context="",
+            composio_apps=["slack", "gmail"],
+            normalized_message="latest news",
+            bind_tools=False,  # user disabled it
+        )
+
+    system_content = messages[0].content
+    assert "composio" not in system_content.lower()
+    assert "slack" not in system_content.lower()
+    assert "gmail" not in system_content.lower()
+
+
+def test_build_agent_messages_includes_composio_when_bind_tools_true():
+    """System prompt must mention connected apps when tools are bound."""
+    from unittest.mock import patch
+    from src.api.rag_chat_helpers import build_agent_messages
+
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings:
+        mock_settings.composio_enabled = True
+        messages = build_agent_messages(
+            system_instructions="",
+            history=[],
+            rag_context="",
+            user_memory_context="",
+            composio_apps=["slack"],
+            normalized_message="send a slack message",
+            bind_tools=True,
+        )
+
+    system_content = messages[0].content
+    assert "slack" in system_content.lower()
+
+
 def test_trim_chat_history_keeps_tail():
     history = [MagicMock() for _ in range(30)]
     trimmed = trim_chat_history(history)
