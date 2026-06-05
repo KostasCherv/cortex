@@ -210,6 +210,10 @@ export async function streamFollowup(
       options.onSuggestions?.(parsed.suggestions)
       return false
     }
+    if (parsed.type === 'web_used') {
+      options.onWebUsed?.()
+      return false
+    }
     if (parsed.type === 'done') {
       options.onDone()
       return true
@@ -723,6 +727,7 @@ type RagAgentChatStreamOptions = {
   onChunk: (text: string) => void
   onCitations: (citations: RagCitation[]) => void
   onSuggestions?: (suggestions: string[]) => void
+  onWebUsed?: () => void
   onDone: () => void
   onError?: (error: string) => void
 }
@@ -767,6 +772,7 @@ export async function streamRagAgentChat(
   sessionId: string | null,
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
+  tools?: Record<string, boolean>,
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/api/rag/agents/${agentId}/chat/stream`, {
     method: 'POST',
@@ -775,7 +781,7 @@ export async function streamRagAgentChat(
       Accept: 'text/event-stream',
       ...authHeaders(accessToken),
     },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, session_id: sessionId, tools }),
     signal: options.signal,
   })
 
@@ -805,6 +811,10 @@ export async function streamRagAgentChat(
     }
     if (parsed.type === 'suggestions') {
       options.onSuggestions?.(parsed.suggestions)
+      return false
+    }
+    if (parsed.type === 'web_used') {
+      options.onWebUsed?.()
       return false
     }
     if (parsed.type === 'done') {
@@ -861,6 +871,7 @@ export async function streamRagWorkspaceChat(
   sessionId: string | null,
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
+  tools?: Record<string, boolean>,
 ): Promise<void> {
   const response = await fetch(`${API_BASE}/api/rag/chat/stream`, {
     method: 'POST',
@@ -869,7 +880,7 @@ export async function streamRagWorkspaceChat(
       Accept: 'text/event-stream',
       ...authHeaders(accessToken),
     },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({ message, session_id: sessionId, tools }),
     signal: options.signal,
   })
 
@@ -899,6 +910,10 @@ export async function streamRagWorkspaceChat(
     }
     if (parsed.type === 'suggestions') {
       options.onSuggestions?.(parsed.suggestions)
+      return false
+    }
+    if (parsed.type === 'web_used') {
+      options.onWebUsed?.()
       return false
     }
     if (parsed.type === 'done') {
