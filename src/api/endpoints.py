@@ -15,6 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import Runnable
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, BaseModel as _PydanticBase, ConfigDict, Field
 
@@ -575,7 +576,7 @@ async def _run_agent_loop(
     if allow_web_search and settings.tavily_api_key:
         web_tools = [_make_web_search_tool(web_used_flag)]
 
-    async def _invoke_turn(llm_target: object, turn: int) -> BaseMessage:
+    async def _invoke_turn(llm_target: Runnable, turn: int) -> BaseMessage:
         with start_step_span(
             name=f"agent_loop.turn_{turn}",
             run_type="llm",
