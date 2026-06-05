@@ -46,6 +46,7 @@ export function FollowupChat({
   const [streamingText, setStreamingText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
+  const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -87,6 +88,7 @@ export function FollowupChat({
       setError(null)
       setStreaming(true)
       setLatestSuggestions([])
+      setWebUsedLastReply(false)
 
       let accumulatedAnswer = ''
       let finalCitations: Citation[] = []
@@ -111,6 +113,9 @@ export function FollowupChat({
               pendingSuggestions = suggestions
               setLatestSuggestions(suggestions)
             }
+          },
+          onWebUsed: () => {
+            if (!controller.signal.aborted) setWebUsedLastReply(true)
           },
           onDone: () => {
             const assistantTurn: ConversationTurn = {
@@ -207,6 +212,7 @@ export function FollowupChat({
               <div className={cn(assistantAvatarClassName, 'size-7')}>AI</div>
               <div className={cn('max-w-[80%]', assistantBubbleClassName)}>
                 <ChatMarkdown content={streamingText || 'Thinking...'} />
+                {webUsedLastReply && <Badge variant="outline">Web used</Badge>}
               </div>
             </div>
           )}
