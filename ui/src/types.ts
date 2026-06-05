@@ -161,6 +161,7 @@ export type RagChatStreamEvent =
   | { type: 'chunk'; text: string }
   | { type: 'citations'; citations: RagCitation[] }
   | { type: 'suggestions'; suggestions: string[] }
+  | { type: 'web_used'; provider: string }
   | { type: 'done' }
   | { type: 'error'; error: string }
 

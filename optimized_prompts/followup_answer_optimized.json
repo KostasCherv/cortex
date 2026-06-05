@@ -1,0 +1,48 @@
+{
+  "generate.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `report_block`, `history_block`, `answer_context_block`, `web_results_json`, `question`, produce the fields `answer`.",
+      "fields": [
+        {
+          "prefix": "Report Block:",
+          "description": "${report_block}"
+        },
+        {
+          "prefix": "History Block:",
+          "description": "${history_block}"
+        },
+        {
+          "prefix": "Answer Context Block:",
+          "description": "${answer_context_block}"
+        },
+        {
+          "prefix": "Web Results Json:",
+          "description": "${web_results_json}"
+        },
+        {
+          "prefix": "Question:",
+          "description": "${question}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Answer:",
+          "description": "${answer}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

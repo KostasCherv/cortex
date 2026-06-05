@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils'
 import type { RagChatMessage } from '@/types'
 import type { ChatTransport } from './transports'
 import { getStopEditState, replaceLastEditableUserMessage } from './chatThreadState'
+import { ToolMenuButton } from './ToolMenuButton'
+import { defaultToolConfig } from './toolConfig'
+import type { ToolConfig } from './toolConfig'
 
 type Props = {
   transport: ChatTransport
@@ -130,6 +133,7 @@ export function ChatThreadContainer({
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [toolConfig, setToolConfig] = useState<ToolConfig>(() => defaultToolConfig())
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
@@ -158,6 +162,7 @@ export function ChatThreadContainer({
     setWebUsedLastReply(false)
     setLatestSuggestions([])
     setEditingMessageId(null)
+    setToolConfig(defaultToolConfig())
   }, [transport.key])
 
   useEffect(() => {
@@ -261,12 +266,11 @@ export function ChatThreadContainer({
     try {
       await transport.streamMessage(question, sessionId, accessToken, {
         signal: controller.signal,
-        onSession: (nextSessionId, webUsed) => {
+        onSession: (nextSessionId) => {
           if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
           streamedSessionId = nextSessionId
           loadedSessionRef.current = nextSessionId
           setSessionId(nextSessionId)
-          setWebUsedLastReply(Boolean(webUsed))
           if (!sessionId) onSessionActivated(nextSessionId)
         },
         onChunk: (textChunk) => {
@@ -285,6 +289,10 @@ export function ChatThreadContainer({
           if (controller.signal.aborted) return
           pendingSuggestions = suggestions
           setLatestSuggestions(suggestions)
+        },
+        onWebUsed: () => {
+          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
+          setWebUsedLastReply(true)
         },
         onDone: () => {
           if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
@@ -313,7 +321,7 @@ export function ChatThreadContainer({
           setError(streamError)
           setStreamingText('')
         },
-      })
+      }, toolConfig)
     } catch (err) {
       if (controller.signal.aborted) return
       if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
@@ -447,6 +455,13 @@ export function ChatThreadContainer({
           </div>
         )}
         <div className="flex gap-2 items-end">
+          <ToolMenuButton
+            toolConfig={toolConfig}
+            onToggle={(id, enabled) =>
+              setToolConfig((prev) => ({ ...prev, [id]: enabled }))
+            }
+            disabled={chatting}
+          />
           <Textarea
             className="resize-none min-h-10 max-h-32 text-sm"
             placeholder="Ask a question..."

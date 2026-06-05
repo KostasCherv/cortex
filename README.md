@@ -21,7 +21,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 
 - Orchestration: `LangGraph`
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
-- LLM and agent layer: `LangChain`, `OpenAI`, `OpenRouter`, `Ollama`
+- LLM and agent layer: `LangChain`, `DSPy`, `OpenAI`, `OpenRouter`, `Ollama`
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
 - Market data tools: `Alpha Vantage MCP`, `yfinance`
 - Retrieval and reranking: `Neo4j` (GraphRAG), `Cohere`
@@ -31,7 +31,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`
+- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization)
 
 ## Architecture
 
@@ -374,6 +374,67 @@ Edit `MODEL_CONFIGS` in `src/evals/model_comparison.py` to choose which models t
 
 ```bash
 uv run python3 src/evals/model_comparison.py
+```
+
+### Prompt optimization with DSPy
+
+Cortex uses [DSPy](https://dspy.ai) to algorithmically optimize prompt templates against the golden set — replacing manual prompt tweaking with reproducible, metric-driven iteration.
+
+**Why this exists:** Prompt quality is the single largest lever in LLM output quality, but hand-tuning is fragile and subjective. DSPy's MIPROv2 optimizer generates better instructions and few-shot examples by searching the prompt space, scoring each candidate against a metric, and keeping what works.
+
+**Architecture:** At `src/prompts/dspy_optimizer.py`:
+- `SummarizeSignature` / `ReportSignature` — typed DSPy signatures that mirror the existing Jinja2 template inputs
+- `SummarizeModule` / `ReportModule` — `dspy.Module` subclasses wrapping `ChainOfThought` for structured generation
+- `DspyPromptOptimizer` — orchestrates MIPROv2: builds a training set from the golden set, runs optimization, scores before/after, and persists the optimized program
+
+**Run optimization:**
+
+```bash
+uv run python -c "
+from src.prompts.dspy_optimizer import DspyPromptOptimizer, SummarizeModule
+from src.evals.model_comparison import load_golden_set
+
+optimizer = DspyPromptOptimizer()
+module = SummarizeModule()
+golden = load_golden_set()
+result = optimizer.optimize(module, golden, 'summarize')
+print(f'Before: {result.before_score}  After: {result.after_score}  Improvement: {result.improvement}')
+optimizer.save(result, 'optimized_summarize')
+"
+```
+
+**Compare original vs optimized:**
+
+```bash
+uv run python -c "
+from src.prompts.dspy_optimizer import DspyPromptOptimizer, SummarizeModule
+from src.evals.model_comparison import load_golden_set
+
+optimizer = DspyPromptOptimizer()
+golden = load_golden_set()
+results = optimizer.compare(SummarizeModule(), 'optimized_prompts/optimized_summarize.json', golden, 'summarize')
+for r in results:
+    print(f'{r[\"query\"][:50]:50s} orig={r[\"original_score\"]:.2f}  opt={r[\"optimized_score\"]:.2f}')
+"
+```
+
+**Load and use an optimized program at inference time:**
+
+```python
+from src.prompts.dspy_optimizer import DspyPromptOptimizer, SummarizeModule
+
+optimizer = DspyPromptOptimizer()
+module = optimizer.load(SummarizeModule(), 'optimized_prompts/optimized_summarize.json')
+prediction = module(query='your question', source_blocks='...', domain='')
+print(prediction.summaries)
+```
+
+**Integration is opt-in** — the existing Jinja2-based prompt pipeline is the default. DSPy optimization is a separate toolchain you run when you want to improve prompt quality against a known evaluation set. The golden set lives at `src/evals/golden_set.json` — add more cases to cover more scenarios.
+
+**Tests:**
+
+```bash
+uv run pytest tests/test_dspy_optimizer.py -v
 ```
 
 ## Best practices implemented

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Cortex — multi-step research and RAG orchestration with LangGraph, Tavily, and LLMs"
 requires-python = ">=3.11"
 dependencies = [
+    "dspy[optuna]>=2.5.0",
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
     "langchain-community>=0.3.0",

@@ -7,7 +7,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.api.endpoints import RagChatTools
 
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -78,6 +81,7 @@ class RagChatPrepared:
     bind_tools: bool
     tool_skip_reason: str | None
     composio_apps: list[str]
+    allow_web_search: bool = True
 
 
 def build_agent_messages(
@@ -158,6 +162,7 @@ async def prepare_agent_rag_chat(
     normalized_message: str,
     session_id: str | None,
     timings: RagChatTimings,
+    tools: "RagChatTools | None" = None,
 ) -> RagChatPrepared | None:
     t0 = time.perf_counter()
     agent_bundle = await get_agent_for_chat(agent_id, user_id)
@@ -175,11 +180,22 @@ async def prepare_agent_rag_chat(
     timings.session_ms = (time.perf_counter() - t_session) * 1000
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
-    bind_tools, tool_skip_reason = should_bind_composio_tools(
-        message=normalized_message,
-        resource_ids=resource_ids,
-        composio_apps=composio_apps,
-    )
+    if tools is not None:
+        bind_tools = tools.composio and settings.composio_enabled
+        if not tools.composio:
+            tool_skip_reason = "user_disabled"
+        elif not settings.composio_enabled:
+            tool_skip_reason = "server_disabled"
+        else:
+            tool_skip_reason = None
+        allow_web_search = tools.web_search
+    else:
+        bind_tools, tool_skip_reason = should_bind_composio_tools(
+            message=normalized_message,
+            resource_ids=resource_ids,
+            composio_apps=composio_apps,
+        )
+        allow_web_search = True
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -215,6 +231,7 @@ async def prepare_agent_rag_chat(
         bind_tools=bind_tools,
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
+        allow_web_search=allow_web_search,
     )
 
 
@@ -224,6 +241,7 @@ async def prepare_workspace_rag_chat(
     normalized_message: str,
     session_id: str | None,
     timings: RagChatTimings,
+    tools: "RagChatTools | None" = None,
 ) -> RagChatPrepared:
     resource_ids = await list_workspace_ready_resource_ids(user_id)
 
@@ -236,11 +254,22 @@ async def prepare_workspace_rag_chat(
     timings.session_ms = (time.perf_counter() - t_session) * 1000
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
-    bind_tools, tool_skip_reason = should_bind_composio_tools(
-        message=normalized_message,
-        resource_ids=resource_ids,
-        composio_apps=composio_apps,
-    )
+    if tools is not None:
+        bind_tools = tools.composio and settings.composio_enabled
+        if not tools.composio:
+            tool_skip_reason = "user_disabled"
+        elif not settings.composio_enabled:
+            tool_skip_reason = "server_disabled"
+        else:
+            tool_skip_reason = None
+        allow_web_search = tools.web_search
+    else:
+        bind_tools, tool_skip_reason = should_bind_composio_tools(
+            message=normalized_message,
+            resource_ids=resource_ids,
+            composio_apps=composio_apps,
+        )
+        allow_web_search = True
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -274,6 +303,7 @@ async def prepare_workspace_rag_chat(
         bind_tools=bind_tools,
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
+        allow_web_search=allow_web_search,
     )
 
 

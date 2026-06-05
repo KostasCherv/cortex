@@ -1,0 +1,68 @@
+[
+  {
+    "template": "followup_answer",
+    "subject": "follow-up research answer",
+    "goal": "Answer a follow-up question grounded in the existing research report, conversation history, retrieved passages, and web search context.",
+    "score_before": 0.8974,
+    "score_after": 0.8974,
+    "improvement": 0.0,
+    "metric": "word_overlap",
+    "duration_s": 0.0,
+    "optimized_path": null
+  },
+  {
+    "template": "rag_chat_system",
+    "subject": "RAG chat answer",
+    "goal": "Answer a user question grounded in retrieved document context and web search results, staying faithful to the provided sources.",
+    "score_before": 0.9153,
+    "score_after": 0.9153,
+    "improvement": 0.0,
+    "metric": "word_overlap",
+    "duration_s": 0.0,
+    "optimized_path": null
+  },
+  {
+    "template": "report",
+    "subject": "generate research report",
+    "goal": "Produce a polished markdown research report with executive summary, key findings, and conclusion consolidated from all source summaries.",
+    "score_before": 0.2495,
+    "score_after": 0.2495,
+    "improvement": 0.0,
+    "metric": "word_overlap",
+    "duration_s": 0.0,
+    "optimized_path": null
+  },
+  {
+    "template": "summarize",
+    "subject": "summarize retrieved sources",
+    "goal": "Generate structured JSON summaries of retrieved sources relevant to a research query, preserving source URLs and focusing on factual claims.",
+    "score_before": 0.8825,
+    "score_after": 0.8825,
+    "improvement": 0.0,
+    "metric": "word_overlap",
+    "duration_s": 0.0,
+    "optimized_path": null
+  },
+  {
+    "template": "web_search_decision",
+    "subject": "route assistant action",
+    "goal": "Route the next assistant action (answer_direct, answer_from_rag, web_search, fetch_url, ask_clarifying) based on conversation history, RAG context, and the user message.",
+    "score_before": 0.0,
+    "score_after": 0.0,
+    "improvement": 0.0,
+    "metric": "routing_accuracy",
+    "duration_s": 0.0,
+    "optimized_path": null
+  },
+  {
+    "template": "web_search_repair",
+    "subject": "repair URL access refusal",
+    "goal": "Repair when the model falsely claims it cannot access URLs \u2014 rewrite the answer using already-retrieved web content.",
+    "score_before": 1.0,
+    "score_after": 1.0,
+    "improvement": 0.0,
+    "metric": "word_overlap",
+    "duration_s": 0.0,
+    "optimized_path": null
+  }
+]

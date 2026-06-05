@@ -1,0 +1,40 @@
+{
+  "generate.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `query`, `source_blocks`, `domain`, produce the fields `summaries`.",
+      "fields": [
+        {
+          "prefix": "Query:",
+          "description": "${query}"
+        },
+        {
+          "prefix": "Source Blocks:",
+          "description": "${source_blocks}"
+        },
+        {
+          "prefix": "Domain:",
+          "description": "${domain}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Summaries:",
+          "description": "${summaries}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

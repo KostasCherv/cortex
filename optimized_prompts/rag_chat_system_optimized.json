@@ -1,0 +1,40 @@
+{
+  "generate.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [],
+    "signature": {
+      "instructions": "Given the fields `system_instructions`, `rag_context`, `web_results_json`, produce the fields `answer`.",
+      "fields": [
+        {
+          "prefix": "System Instructions:",
+          "description": "${system_instructions}"
+        },
+        {
+          "prefix": "Rag Context:",
+          "description": "${rag_context}"
+        },
+        {
+          "prefix": "Web Results Json:",
+          "description": "${web_results_json}"
+        },
+        {
+          "prefix": "Reasoning:",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Answer:",
+          "description": "${answer}"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.2.1",
+      "cloudpickle": "3.1"
+    }
+  }
+}

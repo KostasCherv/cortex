@@ -1,1 +1,2 @@
-"""Prompt templates and registry helpers."""
+"""Prompt templates, registry helpers, and DSPy optimization."""
+
