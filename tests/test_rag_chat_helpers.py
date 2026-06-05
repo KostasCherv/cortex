@@ -160,7 +160,7 @@ async def test_run_agent_loop_skips_router_when_bind_tools_false():
     from unittest.mock import patch
 
     with patch("src.api.endpoints.get_llm", return_value=mock_llm), patch(
-        "src.api.endpoints.build_general_tools", return_value=[]
+        "src.api.endpoints.build_agent_tools", return_value=[]
     ):
         answer, web_used = await _run_agent_loop(
             messages=[HumanMessage(content="Hi")],
@@ -217,6 +217,34 @@ async def test_prepare_workspace_respects_composio_false():
         )
         assert result.bind_tools is False
         assert result.allow_web_search is True
+        assert result.allow_wikipedia is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_respects_reference_tool_toggles():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.api.endpoints import RagChatTools
+    from unittest.mock import AsyncMock, patch
+
+    tools = RagChatTools(web_search=False, wikipedia=False, composio=False)
+
+    with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
+         patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
+         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="tell me about Athens",
+            session_id=None,
+            timings=RagChatTimings(),
+            tools=tools,
+        )
+        assert result.allow_web_search is False
+        assert result.allow_wikipedia is False
 
 
 @pytest.mark.asyncio

@@ -2137,7 +2137,7 @@ def test_run_agent_loop_returns_tuple():
 
     with patch("src.api.endpoints.get_llm") as mock_get_llm, \
          patch("src.api.endpoints.settings") as mock_settings, \
-         patch("src.api.endpoints.build_general_tools", return_value=[]):
+         patch("src.api.endpoints.build_agent_tools", return_value=[]):
         mock_settings.composio_max_agent_turns = 1
         mock_settings.composio_enabled = False
         llm = MagicMock()

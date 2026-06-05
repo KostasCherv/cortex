@@ -82,6 +82,7 @@ class RagChatPrepared:
     tool_skip_reason: str | None
     composio_apps: list[str]
     allow_web_search: bool = True
+    allow_wikipedia: bool = True
 
 
 def build_agent_messages(
@@ -195,6 +196,7 @@ async def prepare_agent_rag_chat(
         else:
             tool_skip_reason = None
         allow_web_search = tools.web_search
+        allow_wikipedia = tools.wikipedia
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
@@ -202,6 +204,7 @@ async def prepare_agent_rag_chat(
             composio_apps=composio_apps,
         )
         allow_web_search = True
+        allow_wikipedia = True
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -240,6 +243,7 @@ async def prepare_agent_rag_chat(
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
+        allow_wikipedia=allow_wikipedia,
     )
 
 
@@ -271,6 +275,7 @@ async def prepare_workspace_rag_chat(
         else:
             tool_skip_reason = None
         allow_web_search = tools.web_search
+        allow_wikipedia = tools.wikipedia
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
@@ -278,6 +283,7 @@ async def prepare_workspace_rag_chat(
             composio_apps=composio_apps,
         )
         allow_web_search = True
+        allow_wikipedia = True
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -314,6 +320,7 @@ async def prepare_workspace_rag_chat(
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
+        allow_wikipedia=allow_wikipedia,
     )
 
 

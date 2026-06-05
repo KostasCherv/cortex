@@ -68,7 +68,7 @@ async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
         _patch_router_tools(mock_mgr, [])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             with patch(
-                "src.api.endpoints.build_general_tools",
+                "src.api.endpoints.build_agent_tools",
                 return_value=[fake_tool],
             ):
                 answer, web_used = await _run_agent_loop(
@@ -99,7 +99,7 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
         _patch_router_tools(mock_mgr, [])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
             with patch(
-                "src.api.endpoints.build_general_tools",
+                "src.api.endpoints.build_agent_tools",
                 return_value=[fake_tool],
             ):
                 answer, web_used = await _run_agent_loop(

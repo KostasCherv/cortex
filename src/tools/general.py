@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_tavily import TavilyExtract
 from pydantic import BaseModel, Field
@@ -10,10 +11,19 @@ from src.config import settings
 from src.tools.search import perform_search_cached
 
 GENERAL_WEB_TOOL_NAMES = frozenset({"tavily_search", "tavily_extract"})
+_WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+_WIKIPEDIA_USER_AGENT = "ResearchAgent/1.0 (rag-chat; +https://www.mediawiki.org/wiki/API:Main_page)"
+_WIKIPEDIA_MAX_QUERY_LENGTH = 300
+_WIKIPEDIA_TOP_K = 5
+_WIKIPEDIA_EXTRACT_MAX_CHARS = 1000
 
 
 class _TavilySearchInput(BaseModel):
     query: str = Field(description="Search query to look up on the web")
+
+
+class _WikipediaInput(BaseModel):
+    query: str = Field(description="Topic to look up on Wikipedia")
 
 
 def _format_search_results(results: list[dict]) -> str:
@@ -75,3 +85,78 @@ def build_general_tools(*, allow_web: bool) -> list[BaseTool]:
         _make_cached_tavily_search_tool(),
         TavilyExtract(**tavily_kwargs),
     ]
+
+
+async def _wikipedia_lookup(query: str) -> str:
+    """Search Wikipedia via the MediaWiki API with robust error handling."""
+    normalized_query = query.strip()[:_WIKIPEDIA_MAX_QUERY_LENGTH]
+    if not normalized_query:
+        return "No Wikipedia query provided."
+
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": normalized_query,
+        "gsrlimit": _WIKIPEDIA_TOP_K,
+        "prop": "extracts",
+        "exintro": "1",
+        "explaintext": "1",
+        "format": "json",
+    }
+    headers = {"User-Agent": _WIKIPEDIA_USER_AGENT}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            response = await client.get(_WIKIPEDIA_API, params=params, headers=headers)
+            response.raise_for_status()
+            if not response.text.strip():
+                return "Wikipedia returned an empty response. Try again or use web search."
+            try:
+                data = response.json()
+            except ValueError:
+                return "Wikipedia returned an unexpected response. Try again or use web search."
+    except httpx.HTTPError as exc:
+        return f"Wikipedia lookup failed: {exc}"
+
+    summaries: list[str] = []
+    for page in data.get("query", {}).get("pages", {}).values():
+        if page.get("missing") is not None:
+            continue
+        title = page.get("title", "")
+        extract = (page.get("extract") or "").strip()
+        if not extract:
+            continue
+        summaries.append(
+            f"Page: {title}\nSummary: {extract[:_WIKIPEDIA_EXTRACT_MAX_CHARS]}"
+        )
+
+    if not summaries:
+        return "No good Wikipedia Search Result was found"
+    return "\n\n".join(summaries)
+
+
+def _make_wikipedia_tool() -> BaseTool:
+    return StructuredTool.from_function(
+        coroutine=_wikipedia_lookup,
+        name="wikipedia",
+        description=(
+            "Look up encyclopedic information on Wikipedia. "
+            "Use for people, places, concepts, companies, and historical topics."
+        ),
+        args_schema=_WikipediaInput,
+    )
+
+
+def build_reference_tools(*, allow_wikipedia: bool = True) -> list[BaseTool]:
+    """Return Wikipedia tool when enabled."""
+    if not allow_wikipedia:
+        return []
+
+    return [_make_wikipedia_tool()]
+
+
+def build_agent_tools(*, allow_web: bool, allow_wikipedia: bool = True) -> list[BaseTool]:
+    """Combine Tavily web tools with reference tools."""
+    return build_general_tools(allow_web=allow_web) + build_reference_tools(
+        allow_wikipedia=allow_wikipedia
+    )

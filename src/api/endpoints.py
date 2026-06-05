@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import Runnable
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.tools.general import build_general_tools, should_mark_web_used
+from src.tools.general import build_agent_tools, should_mark_web_used
 
 from src.graph.graph import build_graph
 from src.errors import CortexError
@@ -314,6 +314,7 @@ class RagChatTools(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     web_search: bool = True
+    wikipedia: bool = True
     composio: bool = False
 
 
@@ -532,12 +533,14 @@ async def _run_agent_loop(
     on_event=None,
     bind_tools: bool = True,
     allow_web_search: bool = True,
+    allow_wikipedia: bool = True,
 ) -> tuple[str, bool]:
     """Run an agentic tool-calling loop and return (answer, web_used).
 
     on_event: optional async callable(dict) called for tool_start / tool_end events.
     bind_tools: when False, skip Composio router session and tool schema binding.
     allow_web_search: when True, bind Tavily search + URL extract if TAVILY_API_KEY is set.
+    allow_wikipedia: when True, bind the Wikipedia reference tool.
     """
     llm = get_llm(temperature=0.0)
     max_turns = settings.composio_max_agent_turns
@@ -545,7 +548,10 @@ async def _run_agent_loop(
     last_response_text = ""
     web_used_flag: list[bool] = [False]
 
-    web_tools = build_general_tools(allow_web=allow_web_search)
+    agent_tools = build_agent_tools(
+        allow_web=allow_web_search,
+        allow_wikipedia=allow_wikipedia,
+    )
 
     async def _invoke_turn(llm_target: Runnable, turn: int) -> BaseMessage:
         with start_step_span(
@@ -559,8 +565,8 @@ async def _run_agent_loop(
             return await llm_target.ainvoke(loop_messages)
 
     if not bind_tools or not settings.composio_enabled:
-        base_llm = llm.bind_tools(web_tools) if web_tools else llm
-        web_tool_map = {t.name: t for t in web_tools}
+        base_llm = llm.bind_tools(agent_tools) if agent_tools else llm
+        web_tool_map = {t.name: t for t in agent_tools}
         for turn in range(max_turns):
             response = await _invoke_turn(base_llm, turn)
             last_response_text = _extract_llm_text(
@@ -595,7 +601,7 @@ async def _run_agent_loop(
     user_id = settings.composio_user_id
 
     async with manager.router_tools_context(user_id) as composio_tools:
-        all_tools = list(composio_tools) + web_tools
+        all_tools = list(composio_tools) + agent_tools
         llm_with_tools = llm.bind_tools(all_tools) if all_tools else llm
         tool_map = {t.name: t for t in all_tools}
 
@@ -1899,6 +1905,7 @@ async def rag_chat_with_agent(
                 metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
                 allow_web_search=prepared.allow_web_search,
+                allow_wikipedia=prepared.allow_wikipedia,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -2028,6 +2035,7 @@ async def rag_chat_with_agent_stream(
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
                     allow_web_search=prepared.allow_web_search,
+                    allow_wikipedia=prepared.allow_wikipedia,
                 )
             )
             while not loop_task.done():
@@ -2249,6 +2257,7 @@ async def rag_chat_workspace(
                 metadata={"user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
                 allow_web_search=prepared.allow_web_search,
+                allow_wikipedia=prepared.allow_wikipedia,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -2373,6 +2382,7 @@ async def rag_chat_workspace_stream(
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
                     allow_web_search=prepared.allow_web_search,
+                    allow_wikipedia=prepared.allow_wikipedia,
                 )
             )
             while not loop_task.done():

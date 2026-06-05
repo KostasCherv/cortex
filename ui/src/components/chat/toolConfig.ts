@@ -1,4 +1,4 @@
-import { Globe, Puzzle } from 'lucide-react'
+import { BookOpen, Globe, Puzzle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export type ToolDefinition = {
@@ -12,6 +12,7 @@ export type ToolConfig = Record<string, boolean>
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   { id: 'web_search', label: 'Web search', icon: Globe, defaultEnabled: true },
+  { id: 'wikipedia', label: 'Wikipedia', icon: BookOpen, defaultEnabled: true },
   { id: 'composio', label: 'Connected apps', icon: Puzzle, defaultEnabled: false },
 ]
 
