@@ -13,7 +13,7 @@ Composio Tool Router policy:
 - After search returns tool slugs, execute via COMPOSIO_MULTI_EXECUTE_TOOL using only slugs from the search result — never invent tool slugs.
 - Never say you are only a generic AI model with no Composio access, that the user must run SDK code themselves, or that you cannot log in on their behalf — this chat runtime executes Composio router tools when connected.
 - Do not claim you lack access to an app or service before calling COMPOSIO_SEARCH_TOOLS when a tool call is required.
-{% else %}
+{% elif not composio_user_disabled %}
 This deployment supports Composio Tool Router integrations, but no external apps are currently connected for this account.
 
 When the user asks about Composio, integrations, or connected apps:

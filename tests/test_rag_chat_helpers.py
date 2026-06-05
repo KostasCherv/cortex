@@ -11,10 +11,8 @@ from src.api.rag_chat_helpers import (
 
 
 def test_build_agent_messages_hides_composio_apps_when_bind_tools_false():
-    """Connected apps must not appear in the system prompt when bind_tools=False.
-
-    The template's {% if composio_apps %} block would otherwise instruct the
-    LLM to call Composio tools that were never bound to the model.
+    """When the user disables Composio, the system prompt must neither instruct
+    the LLM to call Composio tools nor falsely claim no apps are connected.
     """
     from unittest.mock import patch
     from src.api.rag_chat_helpers import build_agent_messages
@@ -32,11 +30,12 @@ def test_build_agent_messages_hides_composio_apps_when_bind_tools_false():
         )
 
     system_content = messages[0].content
-    # Connected app names must not appear — LLM should not be told to call them
+    # App names must not appear — LLM must not be told to call bound tools
     assert "slack" not in system_content.lower()
     assert "gmail" not in system_content.lower()
-    # But the system prompt itself still uses rag_chat_system (composio_enabled=True),
-    # so a generic "no apps connected" message may appear — that is acceptable.
+    # Fallback "no apps connected" text must also be absent — apps exist, they
+    # were just disabled by the user for this session.
+    assert "no external apps are currently connected" not in system_content.lower()
 
 
 def test_build_agent_messages_includes_composio_when_bind_tools_true():
