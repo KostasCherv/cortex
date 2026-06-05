@@ -2112,7 +2112,7 @@ def test_delete_agent_last_exchange_requires_auth():
 
 
 def test_rag_chat_request_default_tools():
-    from src.api.endpoints import RagChatRequest, RagChatTools
+    from src.api.endpoints import RagChatRequest
     req = RagChatRequest(message="hello")
     assert req.tools.web_search is True
     assert req.tools.composio is False

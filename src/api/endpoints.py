@@ -15,7 +15,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.graph.graph import build_graph
 from src.errors import CortexError
@@ -308,6 +308,8 @@ class RagAgentLinkRequest(BaseModel):
 
 
 class RagChatTools(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     web_search: bool = True
     composio: bool = False
 
