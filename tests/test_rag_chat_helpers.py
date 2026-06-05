@@ -98,3 +98,48 @@ async def test_run_agent_loop_skips_router_when_bind_tools_false():
     assert answer == "Done."
     assert web_used is False
     mock_llm.bind_tools.assert_not_called()
+
+
+def test_rag_chat_prepared_has_allow_web_search():
+    from src.api.rag_chat_helpers import RagChatPrepared
+    from langchain_core.messages import HumanMessage
+    from src.rag_engine import RagQueryResult
+    prepared = RagChatPrepared(
+        agent=None,
+        resource_ids=[],
+        rag_context=MagicMock(spec=RagQueryResult),
+        chat_session_id="sess-1",
+        messages=[HumanMessage(content="hi")],
+        bind_tools=False,
+        tool_skip_reason=None,
+        composio_apps=[],
+        allow_web_search=True,
+    )
+    assert prepared.allow_web_search is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_respects_composio_false():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.api.endpoints import RagChatTools
+    from unittest.mock import AsyncMock, patch
+
+    tools = RagChatTools(web_search=True, composio=False)
+
+    with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
+         patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
+         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
+        mock_mgr.return_value.get_connected_app_names.return_value = ["slack"]
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="latest news",
+            session_id=None,
+            timings=RagChatTimings(),
+            tools=tools,
+        )
+        assert result.bind_tools is False
+        assert result.allow_web_search is True

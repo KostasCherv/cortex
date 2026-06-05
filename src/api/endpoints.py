@@ -1901,6 +1901,7 @@ async def rag_chat_with_agent(
             normalized_message=normalized_message,
             session_id=body.session_id,
             timings=timings,
+            tools=body.tools,
         )
         if prepared is None:
             logger.warning(
@@ -1922,7 +1923,7 @@ async def rag_chat_with_agent(
                 messages=prepared.messages,
                 metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
-                allow_web_search=body.tools.web_search,
+                allow_web_search=prepared.allow_web_search,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -2027,6 +2028,7 @@ async def rag_chat_with_agent_stream(
             normalized_message=normalized_message,
             session_id=body.session_id,
             timings=timings,
+            tools=body.tools,
         )
     if prepared is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
@@ -2050,7 +2052,7 @@ async def rag_chat_with_agent_stream(
                     metadata={"agent_id": agent_id, "user_id": current_user.user_id},
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
-                    allow_web_search=body.tools.web_search,
+                    allow_web_search=prepared.allow_web_search,
                 )
             )
             while not loop_task.done():
@@ -2263,6 +2265,7 @@ async def rag_chat_workspace(
             normalized_message=normalized_message,
             session_id=body.session_id,
             timings=timings,
+            tools=body.tools,
         )
         try:
             t_loop = time.perf_counter()
@@ -2270,7 +2273,7 @@ async def rag_chat_workspace(
                 messages=prepared.messages,
                 metadata={"user_id": current_user.user_id},
                 bind_tools=prepared.bind_tools,
-                allow_web_search=body.tools.web_search,
+                allow_web_search=prepared.allow_web_search,
             )
             timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
         except Exception as exc:
@@ -2370,6 +2373,7 @@ async def rag_chat_workspace_stream(
             normalized_message=normalized_message,
             session_id=body.session_id,
             timings=timings,
+            tools=body.tools,
         )
     citations = _build_rag_citations(prepared.rag_context.chunks)
     citations = _build_workspace_fallback_citations(
@@ -2393,7 +2397,7 @@ async def rag_chat_workspace_stream(
                     metadata={"user_id": current_user.user_id},
                     on_event=on_event,
                     bind_tools=prepared.bind_tools,
-                    allow_web_search=body.tools.web_search,
+                    allow_web_search=prepared.allow_web_search,
                 )
             )
             while not loop_task.done():
