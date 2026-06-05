@@ -210,10 +210,6 @@ export async function streamFollowup(
       options.onSuggestions?.(parsed.suggestions)
       return false
     }
-    if (parsed.type === 'web_used') {
-      options.onWebUsed?.()
-      return false
-    }
     if (parsed.type === 'done') {
       options.onDone()
       return true

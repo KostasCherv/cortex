@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
@@ -58,8 +58,8 @@ export function ToolMenuButton({ toolConfig, onToggle, disabled }: Props) {
                 </span>
                 <Switch
                   checked={enabled}
-                  onCheckedChange={(v) => onToggle(tool.id, v)}
-                  onClick={(e) => e.stopPropagation()}
+                  onCheckedChange={(v: boolean) => onToggle(tool.id, v)}
+                  onClick={(e: MouseEvent) => e.stopPropagation()}
                   aria-label={`Toggle ${tool.label}`}
                 />
               </button>
