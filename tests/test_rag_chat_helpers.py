@@ -26,7 +26,8 @@ def test_build_agent_messages_hides_composio_apps_when_bind_tools_false():
             user_memory_context="",
             composio_apps=["slack", "gmail"],
             normalized_message="latest news",
-            bind_tools=False,  # user disabled Composio for this request
+            bind_tools=False,
+            composio_user_disabled=True,  # tool_skip_reason == "user_disabled"
         )
 
     system_content = messages[0].content
@@ -36,6 +37,28 @@ def test_build_agent_messages_hides_composio_apps_when_bind_tools_false():
     # Fallback "no apps connected" text must also be absent — apps exist, they
     # were just disabled by the user for this session.
     assert "no external apps are currently connected" not in system_content.lower()
+
+
+def test_build_agent_messages_shows_no_apps_connected_when_apps_empty():
+    """'No apps connected' fallback must still appear when composio is enabled
+    server-side but no apps are linked — i.e. not user-disabled."""
+    from unittest.mock import patch
+    from src.api.rag_chat_helpers import build_agent_messages
+
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings:
+        mock_settings.composio_enabled = True
+        messages = build_agent_messages(
+            system_instructions="",
+            history=[],
+            rag_context="",
+            user_memory_context="",
+            composio_apps=[],
+            normalized_message="check my email",
+            bind_tools=False,
+            composio_user_disabled=False,  # no_connected_apps path, not user-disabled
+        )
+
+    assert "no external apps are currently connected" in messages[0].content.lower()
 
 
 def test_build_agent_messages_includes_composio_when_bind_tools_true():

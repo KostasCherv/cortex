@@ -93,6 +93,7 @@ def build_agent_messages(
     composio_apps: list[str],
     normalized_message: str,
     bind_tools: bool = True,
+    composio_user_disabled: bool = False,
 ) -> list[BaseMessage]:
     template_name = (
         "rag_chat_system" if settings.composio_enabled else "rag_chat_system_no_tools"
@@ -103,12 +104,11 @@ def build_agent_messages(
             "system_instructions": system_instructions,
             "rag_context": rag_context,
             "user_memory_context": user_memory_context,
+            # Pass empty apps when not bound so the template's {% if composio_apps %}
+            # block never fires; composio_user_disabled then controls whether the
+            # "no apps connected" fallback is also suppressed.
             "composio_apps": composio_apps if bind_tools else [],
-            # True when the user explicitly disabled Composio for this request;
-            # suppresses the "no apps connected" fallback text in the template
-            # so the prompt neither claims tools are available nor lies about
-            # connection state.
-            "composio_user_disabled": not bind_tools and settings.composio_enabled,
+            "composio_user_disabled": composio_user_disabled,
         },
     )
     messages: list[BaseMessage] = [SystemMessage(content=system_content)]
@@ -227,6 +227,7 @@ async def prepare_agent_rag_chat(
         composio_apps=composio_apps,
         normalized_message=normalized_message,
         bind_tools=bind_tools,
+        composio_user_disabled=(tool_skip_reason == "user_disabled"),
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(
@@ -300,6 +301,7 @@ async def prepare_workspace_rag_chat(
         composio_apps=composio_apps,
         normalized_message=normalized_message,
         bind_tools=bind_tools,
+        composio_user_disabled=(tool_skip_reason == "user_disabled"),
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(
