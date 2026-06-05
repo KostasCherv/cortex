@@ -49,6 +49,14 @@ class Settings(BaseSettings):
         default="tavily",
         description="Active web search provider for agent chat tool calls.",
     )
+    arxiv_mcp_storage_path: str = Field(
+        default="~/.arxiv-mcp-server/papers",
+        description="Local cache directory for arxiv-mcp-server paper downloads.",
+    )
+    arxiv_mcp_command: str = Field(
+        default="",
+        description="Optional override path to the arxiv-mcp-server executable.",
+    )
     # Composio
     composio_api_key: str = Field(
         default="",

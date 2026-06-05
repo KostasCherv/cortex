@@ -217,7 +217,7 @@ async def test_prepare_workspace_respects_composio_false():
         )
         assert result.bind_tools is False
         assert result.allow_web_search is True
-        assert result.allow_wikipedia is True
+        assert result.reference_tools["wikipedia"] is True
 
 
 @pytest.mark.asyncio
@@ -227,7 +227,13 @@ async def test_prepare_workspace_respects_reference_tool_toggles():
     from src.api.endpoints import RagChatTools
     from unittest.mock import AsyncMock, patch
 
-    tools = RagChatTools(web_search=False, wikipedia=False, composio=False)
+    tools = RagChatTools(
+        web_search=False,
+        wikipedia=False,
+        arxiv=False,
+        open_library=False,
+        composio=False,
+    )
 
     with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
@@ -244,7 +250,11 @@ async def test_prepare_workspace_respects_reference_tool_toggles():
             tools=tools,
         )
         assert result.allow_web_search is False
-        assert result.allow_wikipedia is False
+        assert result.reference_tools == {
+            "wikipedia": False,
+            "arxiv": False,
+            "open_library": False,
+        }
 
 
 @pytest.mark.asyncio

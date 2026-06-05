@@ -40,6 +40,8 @@ dependencies = [
     "composio-langchain>=0.6.0",
     "yfinance>=0.2.40",
     "langchain-tavily>=0.2.18",
+    "arxiv-mcp-server>=0.5.0",
+    "langchain-mcp-adapters>=0.2.2",
 ]
 
 [project.optional-dependencies]

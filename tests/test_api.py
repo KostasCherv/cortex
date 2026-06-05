@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
+import pytest
 
 from src.api.endpoints import app
 from src.auth import AuthenticatedUser, get_authenticated_user
@@ -692,6 +693,7 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
         patch("src.api.endpoints.settings.supabase_secret_key", ""),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
+        patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
         asyncio.run(app.router.on_startup[0]())
         mock_init.assert_not_called()
@@ -705,6 +707,7 @@ def test_startup_validation_configures_application_logging():
         patch("src.api.endpoints.settings.supabase_secret_key", ""),
         patch("src.api.endpoints.ensure_store_initialized"),
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
+        patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
         asyncio.run(app.router.on_startup[0]())
 
@@ -717,10 +720,26 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
         patch("src.api.endpoints.settings.supabase_secret_key", "service-role"),
         patch("src.api.endpoints.ensure_store_initialized") as mock_init,
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
+        patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
         asyncio.run(app.router.on_startup[0]())
         mock_init.assert_called_once()
         mock_storage_ready.assert_awaited_once()
+
+
+def test_startup_validation_fails_when_arxiv_mcp_is_unavailable():
+    with (
+        patch("src.api.endpoints.settings.supabase_url", ""),
+        patch("src.api.endpoints.settings.supabase_secret_key", ""),
+        patch("src.api.endpoints.ensure_store_initialized"),
+        patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
+        patch(
+            "src.api.endpoints.ensure_arxiv_mcp_available",
+            new=AsyncMock(side_effect=RuntimeError("arxiv-mcp-server missing")),
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="arxiv-mcp-server missing"):
+            asyncio.run(app.router.on_startup[0]())
 
 
 
@@ -1093,6 +1112,12 @@ def test_rag_chat_calls_agent_loop():
     mock_context.context = "Relevant context."
     mock_context.chunks = []
     mock_loop = AsyncMock(return_value=("Answer", False))
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
 
     with (
         patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
@@ -1105,6 +1130,8 @@ def test_rag_chat_calls_agent_loop():
         patch("src.api.endpoints._run_agent_loop", mock_loop),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -1114,6 +1141,10 @@ def test_rag_chat_calls_agent_loop():
 
     assert response.status_code == 200
     mock_loop.assert_awaited_once()
+    end_workflow.assert_called_once()
+    assert end_workflow.call_args.args[0] is trace_ctx
+    assert end_workflow.call_args.kwargs["status"] == "success"
+    assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
 
 
 def test_rag_chat_stream_calls_agent_loop():
@@ -1123,6 +1154,15 @@ def test_rag_chat_stream_calls_agent_loop():
     mock_context.context = "Relevant context."
     mock_context.chunks = []
     mock_loop = AsyncMock(return_value=("Answer", False))
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    async def loop_with_trace_snapshot(*args, **kwargs):
+        return await mock_loop(*args, **kwargs)
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
 
     with (
         patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
@@ -1132,9 +1172,11 @@ def test_rag_chat_stream_calls_agent_loop():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", mock_loop),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -1144,6 +1186,10 @@ def test_rag_chat_stream_calls_agent_loop():
 
     assert response.status_code == 200
     mock_loop.assert_awaited_once()
+    end_workflow.assert_called_once()
+    assert end_workflow.call_args.args[0] is trace_ctx
+    assert end_workflow.call_args.kwargs["status"] == "success"
+    assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
 
 
 def test_workspace_rag_chat_calls_agent_loop():
@@ -1151,6 +1197,12 @@ def test_workspace_rag_chat_calls_agent_loop():
     mock_context.context = "Workspace context."
     mock_context.chunks = []
     mock_loop = AsyncMock(return_value=("Answer", False))
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
 
     with (
         patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
@@ -1163,6 +1215,8 @@ def test_workspace_rag_chat_calls_agent_loop():
         patch("src.api.endpoints._run_agent_loop", mock_loop),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -1172,6 +1226,10 @@ def test_workspace_rag_chat_calls_agent_loop():
 
     assert response.status_code == 200
     mock_loop.assert_awaited_once()
+    end_workflow.assert_called_once()
+    assert end_workflow.call_args.args[0] is trace_ctx
+    assert end_workflow.call_args.kwargs["status"] == "success"
+    assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
 
 
 def test_workspace_rag_chat_stream_calls_agent_loop():
@@ -1179,6 +1237,15 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
     mock_context.context = "Workspace context."
     mock_context.chunks = []
     mock_loop = AsyncMock(return_value=("Answer", False))
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    async def loop_with_trace_snapshot(*args, **kwargs):
+        return await mock_loop(*args, **kwargs)
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
 
     with (
         patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
@@ -1188,9 +1255,11 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", mock_loop),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
         patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -1200,6 +1269,10 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
 
     assert response.status_code == 200
     mock_loop.assert_awaited_once()
+    end_workflow.assert_called_once()
+    assert end_workflow.call_args.args[0] is trace_ctx
+    assert end_workflow.call_args.kwargs["status"] == "success"
+    assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
 
 
 # ---------------------------------------------------------------------------

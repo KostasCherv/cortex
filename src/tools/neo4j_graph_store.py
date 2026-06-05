@@ -202,7 +202,7 @@ class Neo4jGraphStore:
         )
 
         try:
-            llm = get_llm(temperature=0.0)
+            llm = get_llm(temperature=0.1)
             response = llm.invoke(prompt)
             content = response.content if hasattr(response, "content") else response
             if isinstance(content, list):

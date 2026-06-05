@@ -1,5 +1,6 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 
@@ -171,3 +172,40 @@ async def test_refresh_user_memory_merges_new_candidates_into_existing_content()
     assert result == "updated"
     payload = store.upsert_user_memory.await_args.kwargs["payload"]
     assert payload["content"] == "Prefers concise answers.\nI work in fintech."
+
+
+@pytest.mark.asyncio
+async def test_refresh_user_memory_returns_error_for_non_retryable_store_failure():
+    from src.user_memory import refresh_user_memory
+
+    store = AsyncMock()
+    store.claim_user_memory_refresh_event.return_value = True
+    store.get_user_memory.return_value = None
+    store.upsert_user_memory.side_effect = httpx.HTTPStatusError(
+        "bad request",
+        request=httpx.Request("POST", "https://example.com/rest/v1/user_memory"),
+        response=httpx.Response(
+            400,
+            json={"code": "PGRST204", "message": "schema cache mismatch"},
+            request=httpx.Request("POST", "https://example.com/rest/v1/user_memory"),
+        ),
+    )
+
+    with (
+        patch("src.user_memory._get_store", return_value=store),
+        patch("src.user_memory.logger") as mock_logger,
+    ):
+        result = await refresh_user_memory(
+            user_id="user-1",
+            source_mode="workspace_chat",
+            source_session_id="sess-1",
+            user_message="I prefer concise answers.",
+            assistant_message="I'll keep it brief.",
+            event_key="evt-memory-4",
+            source_user_message_id="user-msg-1",
+            source_assistant_message_id="assistant-msg-1",
+        )
+
+    assert result == "error"
+    assert isinstance(mock_logger.warning, MagicMock)
+    mock_logger.warning.assert_called_once()

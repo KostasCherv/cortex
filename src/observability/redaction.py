@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 SENSITIVE_KEYS = {
-    "query",
     "prompt",
     "raw_text",
     "report",

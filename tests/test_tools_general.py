@@ -6,12 +6,12 @@ import pytest
 
 from src.tools.general import (
     GENERAL_WEB_TOOL_NAMES,
-    _wikipedia_lookup,
     build_agent_tools,
     build_general_tools,
-    build_reference_tools,
     should_mark_web_used,
 )
+from src.tools.reference import wikipedia_lookup
+from src.tools.registry import build_reference_tools
 
 
 def test_general_web_tool_names():
@@ -66,14 +66,8 @@ def test_build_general_tools_binds_search_and_extract_together():
     mock_extract.assert_called_once_with(tavily_api_key="tvly-test")
 
 
-def test_build_reference_tools_includes_wikipedia_when_enabled():
-    tools = build_reference_tools()
-    assert len(tools) == 1
-    assert tools[0].name == "wikipedia"
-
-
 def test_build_reference_tools_respects_disable_flag():
-    assert build_reference_tools(allow_wikipedia=False) == []
+    assert build_reference_tools(reference_flags={"wikipedia": False, "arxiv": False, "open_library": False}) == []
 
 
 def test_build_agent_tools_combines_web_and_reference_tools():
@@ -84,10 +78,10 @@ def test_build_agent_tools_combines_web_and_reference_tools():
         ) as mock_ref:
             mock_web.return_value = [MagicMock(name="tavily_search")]
             mock_ref.return_value = [MagicMock(name="wikipedia")]
-            tools = build_agent_tools(allow_web=True)
+            tools = build_agent_tools(allow_web=True, reference_flags={"wikipedia": True})
     assert len(tools) == 2
     mock_web.assert_called_once_with(allow_web=True)
-    mock_ref.assert_called_once_with(allow_wikipedia=True)
+    mock_ref.assert_called_once_with(reference_flags={"wikipedia": True})
 
 
 @pytest.mark.asyncio
@@ -101,8 +95,8 @@ async def test_wikipedia_lookup_handles_empty_response_body():
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.tools.general.httpx.AsyncClient", return_value=mock_client):
-        result = await _wikipedia_lookup("Zurich")
+    with patch("src.tools.reference.httpx.AsyncClient", return_value=mock_client):
+        result = await wikipedia_lookup("Zurich")
 
     assert "empty response" in result.lower()
 
@@ -119,8 +113,8 @@ async def test_wikipedia_lookup_handles_invalid_json():
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.tools.general.httpx.AsyncClient", return_value=mock_client):
-        result = await _wikipedia_lookup("Zurich")
+    with patch("src.tools.reference.httpx.AsyncClient", return_value=mock_client):
+        result = await wikipedia_lookup("Zurich")
 
     assert "unexpected response" in result.lower()
 
@@ -139,11 +133,43 @@ async def test_wikipedia_lookup_formats_page_summaries():
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.tools.general.httpx.AsyncClient", return_value=mock_client):
-        result = await _wikipedia_lookup("Zurich")
+    with patch("src.tools.reference.httpx.AsyncClient", return_value=mock_client):
+        result = await wikipedia_lookup("Zurich")
 
     assert "Page: Zurich" in result
     assert "City in Switzerland." in result
+
+
+@pytest.mark.asyncio
+async def test_open_library_lookup_formats_book_hits():
+    from src.tools.reference import open_library_lookup
+
+    payload = {
+        "docs": [
+            {
+                "title": "Dune",
+                "author_name": ["Frank Herbert"],
+                "first_publish_year": 1965,
+                "key": "/works/OL893415W",
+            }
+        ]
+    }
+    response = MagicMock()
+    response.text = '{"docs":[{"title":"Dune"}]}'
+    response.raise_for_status = MagicMock()
+    response.json.return_value = payload
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("src.tools.reference.httpx.AsyncClient", return_value=mock_client):
+        result = await open_library_lookup("Dune")
+
+    assert "Title: Dune" in result
+    assert "Frank Herbert" in result
+    assert "https://openlibrary.org/works/OL893415W" in result
 
 
 @pytest.mark.asyncio

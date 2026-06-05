@@ -112,6 +112,8 @@ uv sync
 cp .env.example .env
 ```
 
+`arxiv-mcp-server` is installed as part of the backend dependencies. The API launches it over `stdio` when needed, so you do not run a separate arXiv service or background process.
+
 ### 2. Start local services (Redis + Neo4j)
 
 ```bash
@@ -163,6 +165,8 @@ REDIS_URL=redis://localhost:6379/0
 ```bash
 uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Backend startup now validates that `arxiv-mcp-server` is available in the same runtime environment. If it is missing or cannot load its tools, startup fails immediately instead of disabling arXiv silently.
 
 ### 5. Start frontend UI
 

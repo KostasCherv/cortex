@@ -1,5 +1,6 @@
 """Tests for observability helpers and redaction behavior."""
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 from src.observability.context import build_trace_metadata, build_trace_tags
@@ -7,14 +8,14 @@ from src.observability.langsmith import end_workflow_run, start_step_span, start
 from src.observability.redaction import REDACTED, redact_payload
 
 
-def test_redaction_default_censors_sensitive_keys():
+def test_redaction_default_preserves_user_query_but_censors_other_sensitive_keys():
     payload = {
         "query": "secret query",
         "count": 3,
         "nested": {"prompt": "do not leak", "ok": True},
     }
     out = redact_payload(payload, mode="redacted_default")
-    assert out["query"] == REDACTED
+    assert out["query"] == "secret query"
     assert out["count"] == 3
     assert out["nested"]["prompt"] == REDACTED
     assert out["nested"]["ok"] is True
@@ -51,6 +52,62 @@ def test_workflow_run_context_populates_metadata_when_disabled(monkeypatch):
 
     # Should no-op when run is disabled.
     end_workflow_run(ctx, status="success", outputs={"ok": True})
+
+
+def test_start_workflow_run_uses_entrypoint_specific_run_name(monkeypatch):
+    from src.observability import langsmith as ls
+
+    trace_calls: list[dict] = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        yield
+
+    @contextmanager
+    def fake_trace(name, **kwargs):
+        trace_calls.append({"name": name, **kwargs})
+        yield MagicMock()
+
+    monkeypatch.setattr(ls.settings, "langsmith_tracing", True)
+    monkeypatch.setattr(ls.settings, "langsmith_api_key", "test-key")
+    monkeypatch.setattr(ls, "_sampling_allows_trace", lambda: True)
+    monkeypatch.setattr(ls, "trace", fake_trace)
+    monkeypatch.setattr(ls, "tracing_context", fake_tracing_context)
+    monkeypatch.setattr(ls, "Client", object)
+    monkeypatch.setattr(ls, "_get_langsmith_client", lambda: MagicMock())
+
+    with start_workflow_run(entrypoint="rag_chat", query="hello"):
+        pass
+
+    assert trace_calls[0]["name"] == "rag_chat"
+
+
+def test_start_workflow_run_keeps_research_workflow_name_for_background(monkeypatch):
+    from src.observability import langsmith as ls
+
+    trace_calls: list[dict] = []
+
+    @contextmanager
+    def fake_tracing_context(**kwargs):
+        yield
+
+    @contextmanager
+    def fake_trace(name, **kwargs):
+        trace_calls.append({"name": name, **kwargs})
+        yield MagicMock()
+
+    monkeypatch.setattr(ls.settings, "langsmith_tracing", True)
+    monkeypatch.setattr(ls.settings, "langsmith_api_key", "test-key")
+    monkeypatch.setattr(ls, "_sampling_allows_trace", lambda: True)
+    monkeypatch.setattr(ls, "trace", fake_trace)
+    monkeypatch.setattr(ls, "tracing_context", fake_tracing_context)
+    monkeypatch.setattr(ls, "Client", object)
+    monkeypatch.setattr(ls, "_get_langsmith_client", lambda: MagicMock())
+
+    with start_workflow_run(entrypoint="background", query="hello"):
+        pass
+
+    assert trace_calls[0]["name"] == "research-workflow"
 
 
 def test_langfuse_generation_noops_when_disabled(monkeypatch):

@@ -8,6 +8,8 @@ import re
 import uuid
 from datetime import UTC, datetime
 
+import httpx
+
 from src import outbox
 from src.db.supabase_store import SupabaseSessionStore
 
@@ -120,6 +122,14 @@ def _event_key(
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()  # nosec B324
 
 
+def _is_non_retryable_store_error(exc: Exception) -> bool:
+    if isinstance(exc, RuntimeError):
+        return "supabase persistence is not configured" in str(exc).lower()
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    return 400 <= exc.response.status_code < 500
+
+
 async def get_user_memory(user_id: str) -> dict:
     try:
         row = await _get_store().get_user_memory(
@@ -225,52 +235,67 @@ async def refresh_user_memory(
     source_user_message_id: str | None = None,
     source_assistant_message_id: str | None = None,
 ) -> str:
-    store = _get_store()
-    workspace_id = workspace_id or _workspace_id_for_user(user_id)
-    now = datetime.now(UTC).isoformat()
-    claimed = await store.claim_user_memory_refresh_event(
-        {
-            "id": str(uuid.uuid4()),
-            "owner_id": user_id,
-            "workspace_id": workspace_id,
-            "event_key": event_key,
-            "source_mode": source_mode,
-            "source_session_id": source_session_id,
-            "source_user_message_id": source_user_message_id,
-            "source_assistant_message_id": source_assistant_message_id,
-            "processed_at": now,
-            "created_at": now,
-        }
-    )
-    if not claimed:
-        return "skipped"
+    try:
+        store = _get_store()
+        workspace_id = workspace_id or _workspace_id_for_user(user_id)
+        now = datetime.now(UTC).isoformat()
+        claimed = await store.claim_user_memory_refresh_event(
+            {
+                "id": str(uuid.uuid4()),
+                "owner_id": user_id,
+                "workspace_id": workspace_id,
+                "event_key": event_key,
+                "source_mode": source_mode,
+                "source_session_id": source_session_id,
+                "source_user_message_id": source_user_message_id,
+                "source_assistant_message_id": source_assistant_message_id,
+                "processed_at": now,
+                "created_at": now,
+            }
+        )
+        if not claimed:
+            return "skipped"
 
-    candidates = _extract_memory_candidates(user_message, assistant_message)
-    if not candidates:
-        return "noop"
+        candidates = _extract_memory_candidates(user_message, assistant_message)
+        if not candidates:
+            return "noop"
 
-    current = await store.get_user_memory(owner_id=user_id, workspace_id=workspace_id)
-    current_content = str(current.get("content") or "") if current else ""
-    merged_content = _merge_memory_content(current_content, candidates)
-    if merged_content == current_content and current is not None:
+        current = await store.get_user_memory(owner_id=user_id, workspace_id=workspace_id)
+        current_content = str(current.get("content") or "") if current else ""
+        merged_content = _merge_memory_content(current_content, candidates)
+        if merged_content == current_content and current is not None:
+            await store.upsert_user_memory(
+                payload={
+                    "owner_id": user_id,
+                    "workspace_id": workspace_id,
+                    "content": current_content,
+                    "updated_at": current.get("updated_at") or now,
+                    "last_refreshed_at": now,
+                }
+            )
+            return "noop"
+
         await store.upsert_user_memory(
             payload={
                 "owner_id": user_id,
                 "workspace_id": workspace_id,
-                "content": current_content,
-                "updated_at": current.get("updated_at") or now,
+                "content": merged_content,
+                "updated_at": now,
                 "last_refreshed_at": now,
             }
         )
-        return "noop"
-
-    await store.upsert_user_memory(
-        payload={
-            "owner_id": user_id,
-            "workspace_id": workspace_id,
-            "content": merged_content,
-            "updated_at": now,
-            "last_refreshed_at": now,
-        }
-    )
-    return "updated"
+        return "updated"
+    except Exception as exc:
+        if not _is_non_retryable_store_error(exc):
+            raise
+        logger.warning(
+            "[user_memory] refresh skipped after non-retryable store error "
+            "user_id=%s workspace_id=%s source_mode=%s source_session_id=%s event_key=%s error=%s",
+            user_id,
+            workspace_id or _workspace_id_for_user(user_id),
+            source_mode,
+            source_session_id,
+            event_key,
+            exc,
+        )
+        return "error"

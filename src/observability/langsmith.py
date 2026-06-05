@@ -65,6 +65,14 @@ def _get_langsmith_client() -> Any | None:
     )
 
 
+def _workflow_run_name(entrypoint: str) -> str:
+    if entrypoint.startswith("rag_chat"):
+        return entrypoint
+    if entrypoint == "background":
+        return "research-workflow"
+    return entrypoint
+
+
 @contextmanager
 def start_workflow_run(
     *,
@@ -80,7 +88,7 @@ def start_workflow_run(
         tracing_enabled=enabled,
     )
     redaction_mode = settings.langsmith_redaction_mode
-    run_name = "research-workflow"
+    run_name = _workflow_run_name(entrypoint)
     run_inputs = redact_payload(
         {"query": query},
         mode=redaction_mode,

@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -30,6 +30,11 @@ from src.rag import (
 )
 from src.rag_engine import RagQueryResult
 from src.tools.composio_toolset import get_composio_toolset_manager
+from src.tools.registry import (
+    default_reference_tool_flags,
+    reference_flags_from_tools,
+    reference_tool_prompt_lines,
+)
 from src.user_memory import get_user_memory_prompt_block
 
 logger = logging.getLogger(__name__)
@@ -57,7 +62,6 @@ _EXTERNAL_INTENT_MARKERS = (
     "today",
     "price",
     "stock",
-    "weather",
     "search the web",
     "look up",
     "fetch",
@@ -82,7 +86,7 @@ class RagChatPrepared:
     tool_skip_reason: str | None
     composio_apps: list[str]
     allow_web_search: bool = True
-    allow_wikipedia: bool = True
+    reference_tools: dict[str, bool] = field(default_factory=default_reference_tool_flags)
 
 
 def build_agent_messages(
@@ -110,6 +114,7 @@ def build_agent_messages(
             # "no apps connected" fallback is also suppressed.
             "composio_apps": composio_apps if bind_tools else [],
             "composio_user_disabled": composio_user_disabled,
+            "reference_tool_lines": reference_tool_prompt_lines(),
         },
     )
     messages: list[BaseMessage] = [SystemMessage(content=system_content)]
@@ -196,7 +201,7 @@ async def prepare_agent_rag_chat(
         else:
             tool_skip_reason = None
         allow_web_search = tools.web_search
-        allow_wikipedia = tools.wikipedia
+        reference_tools = reference_flags_from_tools(tools)
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
@@ -204,7 +209,7 @@ async def prepare_agent_rag_chat(
             composio_apps=composio_apps,
         )
         allow_web_search = True
-        allow_wikipedia = True
+        reference_tools = default_reference_tool_flags()
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -243,7 +248,7 @@ async def prepare_agent_rag_chat(
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
-        allow_wikipedia=allow_wikipedia,
+        reference_tools=reference_tools,
     )
 
 
@@ -275,7 +280,7 @@ async def prepare_workspace_rag_chat(
         else:
             tool_skip_reason = None
         allow_web_search = tools.web_search
-        allow_wikipedia = tools.wikipedia
+        reference_tools = reference_flags_from_tools(tools)
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
@@ -283,7 +288,7 @@ async def prepare_workspace_rag_chat(
             composio_apps=composio_apps,
         )
         allow_web_search = True
-        allow_wikipedia = True
+        reference_tools = default_reference_tool_flags()
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
@@ -320,7 +325,7 @@ async def prepare_workspace_rag_chat(
         tool_skip_reason=tool_skip_reason,
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
-        allow_wikipedia=allow_wikipedia,
+        reference_tools=reference_tools,
     )
 
 
