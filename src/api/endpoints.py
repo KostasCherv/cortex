@@ -571,11 +571,11 @@ async def _run_agent_loop(
     last_response_text = ""
     web_used_flag: list[bool] = [False]
 
-    web_tools: list = []
+    web_tools: list[StructuredTool] = []
     if allow_web_search and settings.tavily_api_key:
         web_tools = [_make_web_search_tool(web_used_flag)]
 
-    async def _invoke_turn(llm_target: BaseMessage | object, turn: int) -> object:
+    async def _invoke_turn(llm_target: object, turn: int) -> BaseMessage:
         with start_step_span(
             name=f"agent_loop.turn_{turn}",
             run_type="llm",
@@ -584,10 +584,11 @@ async def _run_agent_loop(
             metadata=metadata,
             tags=["llm", "agent_loop"],
         ):
-            return await llm_target.ainvoke(loop_messages)  # type: ignore[union-attr]
+            return await llm_target.ainvoke(loop_messages)
 
     if not bind_tools or not settings.composio_enabled:
         base_llm = llm.bind_tools(web_tools) if web_tools else llm
+        web_tool_map = {t.name: t for t in web_tools}
         for turn in range(max_turns):
             response = await _invoke_turn(base_llm, turn)
             last_response_text = _extract_llm_text(
@@ -597,7 +598,6 @@ async def _run_agent_loop(
             if not tool_calls:
                 break
             loop_messages.append(response)
-            web_tool_map = {t.name: t for t in web_tools}
             for tc in tool_calls:
                 tool_name = tc["name"]
                 tool_id = tc.get("id", tool_name)
