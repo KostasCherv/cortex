@@ -76,6 +76,8 @@ from src.tools.composio_toolset import (
     shutdown_composio_toolset,
 )
 from src.llm.factory import get_llm
+from src.llm.text_utils import extract_llm_text
+from src.api.rag_chat_helpers import build_agent_messages
 from src.prompts.registry import prompt_registry
 from src import outbox
 from src.planner import (
@@ -730,48 +732,6 @@ def _workflow_error_text(exc: Exception) -> str:
     return str(exc)
 
 
-def _extract_llm_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks: list[str] = []
-        for part in content:
-            if isinstance(part, str):
-                chunks.append(part)
-                continue
-            text = getattr(part, "text", None)
-            if isinstance(text, str):
-                chunks.append(text)
-                continue
-            if isinstance(part, dict):
-                dict_text = part.get("text")
-                if isinstance(dict_text, str):
-                    chunks.append(dict_text)
-        return "".join(chunks)
-    return str(content)
-
-
-def _build_agent_messages(
-    *,
-    system_instructions: str,
-    history: list,
-    rag_context: str,
-    user_memory_context: str,
-    composio_apps: list[str],
-    normalized_message: str,
-) -> list[BaseMessage]:
-    from src.api.rag_chat_helpers import build_agent_messages
-
-    return build_agent_messages(
-        system_instructions=system_instructions,
-        history=history,
-        rag_context=rag_context,
-        user_memory_context=user_memory_context,
-        composio_apps=composio_apps,
-        normalized_message=normalized_message,
-    )
-
-
 async def _run_agent_loop(
     *,
     messages: list[BaseMessage],
@@ -822,7 +782,7 @@ async def _run_agent_loop(
         for turn in range(max_turns):
             response = await _invoke_turn(llm_with_tools, turn)
 
-            last_response_text = _extract_llm_text(
+            last_response_text = extract_llm_text(
                 response.content if hasattr(response, "content") else response
             )
             tool_calls = getattr(response, "tool_calls", None) or []
@@ -1279,7 +1239,7 @@ async def _generate_suggestions(query: str, answer: str, context: str) -> list[s
             f"Context topics: {context[:500]}"
         )
         result = await llm.ainvoke(prompt)
-        content = _extract_llm_text(result.content)
+        content = extract_llm_text(result.content)
         lines = content.strip().split("\n")
         suggestions = []
         for line in lines:
@@ -1368,7 +1328,7 @@ async def _stream_followup(
     rag_combined = (
         f"{context_block}\n\n{report_block}" if report_block else context_block
     )
-    messages = _build_agent_messages(
+    messages = build_agent_messages(
         system_instructions="You are a research assistant. Answer using the provided context and sources.",
         history=list(session.conversation[-6:]),
         rag_context=rag_combined,

@@ -7,6 +7,7 @@ from datetime import datetime, UTC
 from langchain_core.language_models import BaseChatModel
 
 from src.errors import SearchError, LLMError
+from src.llm.text_utils import extract_llm_text
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
 from src.llm.output_parsers import build_validation_retry_prompt, parse_research_summaries_json
@@ -41,25 +42,6 @@ def _sanitize_model_name(raw_model: object) -> str:
     if "magicmock" in lowered or "<mock" in lowered:
         return "unknown"
     return model
-
-
-def _extract_llm_text(response: object) -> str:
-    """Extract plain text from provider-specific LLM response shapes."""
-    content = response.content if hasattr(response, "content") else response
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-                continue
-            if isinstance(block, dict):
-                text = block.get("text") or block.get("content")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
-    return str(content).strip()
 
 
 async def _invoke_llm(
@@ -103,7 +85,7 @@ async def _invoke_llm(
                 generation.mark_error(exc)
                 raise
 
-            generation.mark_output(_extract_llm_text(response))
+            generation.mark_output(extract_llm_text(response))
             if state is not None:
                 state["langfuse_trace_id"] = generation.trace_id
                 state["langfuse_observation_id"] = generation.observation_id
@@ -309,7 +291,7 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                 ),
                 state=state,
             )
-            response_text = _extract_llm_text(response)
+            response_text = extract_llm_text(response)
             parsed = None
             parse_error: Exception | None = None
 
@@ -340,7 +322,7 @@ async def summarize_node(state: ResearchState) -> ResearchState:
                         ),
                         state=state,
                     )
-                    response_text = _extract_llm_text(repair_response)
+                    response_text = extract_llm_text(repair_response)
 
             if parsed is None:
                 raise ValueError(f"Could not parse summarize JSON: {parse_error}")

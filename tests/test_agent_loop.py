@@ -290,7 +290,7 @@ async def test_run_agent_loop_respects_max_turns():
 
 
 def test_build_agent_messages_constructs_correct_structure():
-    from src.api.endpoints import _build_agent_messages
+    from src.api.rag_chat_helpers import build_agent_messages
 
     class FakeMsg:
         def __init__(self, role, content):
@@ -298,7 +298,7 @@ def test_build_agent_messages_constructs_correct_structure():
             self.content = content
 
     history = [FakeMsg("user", "Hello"), FakeMsg("assistant", "Hi there")]
-    messages = _build_agent_messages(
+    messages = build_agent_messages(
         system_instructions="Be concise",
         history=history,
         rag_context="Some doc text",
