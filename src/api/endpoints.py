@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import (
@@ -374,7 +374,7 @@ class MemoryUpdateRequest(BaseModel):
 
 
 @app.exception_handler(CortexError)
-async def cortex_error_handler(request: Request, exc: CortexError):
+async def cortex_error_handler(request: Request, exc: CortexError) -> JSONResponse:
     raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -776,7 +776,7 @@ async def _run_agent_loop(
     *,
     messages: list[BaseMessage],
     metadata: dict[str, object],
-    on_event=None,
+    on_event: Callable[[dict[str, object]], Awaitable[None]] | None = None,
     bind_tools: bool = True,
     allow_web_search: bool = True,
     reference_tools: dict[str, bool] | None = None,

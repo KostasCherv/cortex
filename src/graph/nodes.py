@@ -4,6 +4,8 @@ import asyncio
 import logging
 from datetime import datetime, UTC
 
+from langchain_core.language_models import BaseChatModel
+
 from src.errors import SearchError, LLMError
 from src.graph.state import ResearchState
 from src.llm.factory import get_llm
@@ -64,7 +66,7 @@ async def _invoke_llm(
     prompt: str,
     *,
     step_name: str,
-    llm,
+    llm: BaseChatModel,
     metadata: dict[str, object] | None = None,
     state: ResearchState | None = None,
 ):
