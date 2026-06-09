@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
-def _make_tool(name: str, result: str) -> MagicMock:
+def _make_tool(name: str, result: object) -> MagicMock:
     tool = MagicMock()
     tool.name = name
     tool.arun = AsyncMock(return_value=result)
@@ -40,13 +40,14 @@ async def test_run_agent_loop_no_tool_calls_returns_answer():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer, web_used = await _run_agent_loop(
+            result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is 6 times 7?")],
                 metadata={},
             )
 
-    assert answer == "The answer is 42."
-    assert web_used is False
+    assert result.answer == "The answer is 42."
+    assert result.web_used is False
+    assert result.citations == []
 
 
 @pytest.mark.asyncio
@@ -71,13 +72,13 @@ async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
                 "src.api.endpoints.build_agent_tools",
                 return_value=[fake_tool],
             ):
-                answer, web_used = await _run_agent_loop(
+                result = await _run_agent_loop(
                     messages=[HumanMessage(content="Read https://example.com")],
                     metadata={},
                 )
 
-    assert answer == "Could not fetch that URL."
-    assert web_used is False
+    assert result.answer == "Could not fetch that URL."
+    assert result.web_used is False
 
 
 @pytest.mark.asyncio
@@ -93,7 +94,13 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
     mock_llm.bind_tools.return_value = mock_llm
     mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
 
-    fake_tool = _make_tool("tavily_search", '{"results": []}')
+    fake_tool = _make_tool(
+        "tavily_search",
+        (
+            "[Example result](https://example.com/news)\nFresh reporting",
+            {"results": [{"title": "Example result", "url": "https://example.com/news", "raw_content": "Fresh reporting"}]},
+        ),
+    )
 
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
@@ -102,13 +109,21 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
                 "src.api.endpoints.build_agent_tools",
                 return_value=[fake_tool],
             ):
-                answer, web_used = await _run_agent_loop(
+                result = await _run_agent_loop(
                     messages=[HumanMessage(content="What's the latest news?")],
                     metadata={},
                 )
 
-    assert answer == "Here is the news."
-    assert web_used is True
+    assert result.answer == "Here is the news."
+    assert result.web_used is True
+    assert result.citations == [
+        {
+            "source_title": "Example result",
+            "source_url": "https://example.com/news",
+            "chunk_id": "tavily-web-1",
+            "text": "Fresh reporting",
+        }
+    ]
     fake_tool.arun.assert_awaited_once()
 
 
@@ -128,13 +143,13 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [fake_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer, web_used = await _run_agent_loop(
+            result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
             )
 
-    assert answer == "AAPL is trading at $200."
-    assert web_used is False
+    assert result.answer == "AAPL is trading at $200."
+    assert result.web_used is False
     fake_tool.arun.assert_awaited_once()
 
 
@@ -166,13 +181,13 @@ async def test_run_agent_loop_router_search_then_execute():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [search_tool, execute_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer, web_used = await _run_agent_loop(
+            result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
             )
 
-    assert answer == "AAPL is trading at $200."
-    assert web_used is False
+    assert result.answer == "AAPL is trading at $200."
+    assert result.web_used is False
     search_tool.arun.assert_awaited_once()
     execute_tool.arun.assert_awaited_once()
     assert mock_llm.ainvoke.call_count == 3
@@ -236,7 +251,7 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
     with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [broken_tool])
         with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            answer, web_used = await _run_agent_loop(
+            result = await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
                 metadata={},
                 on_event=capture_event,
@@ -244,8 +259,8 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
 
     error_events = [e for e in events if e["type"] == "tool_end" and e["status"] == "error"]
     assert len(error_events) == 1
-    assert "could not create" in answer
-    assert web_used is False
+    assert "could not create" in result.answer
+    assert result.web_used is False
 
 
 @pytest.mark.asyncio
@@ -303,3 +318,54 @@ def test_build_agent_messages_constructs_correct_structure():
     assert isinstance(messages[2], AIMessage)
     assert isinstance(messages[-1], HumanMessage)
     assert messages[-1].content == "What is the price?"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_collects_arxiv_read_paper_citation():
+    from src.api.endpoints import _run_agent_loop
+
+    @asynccontextmanager
+    async def _arxiv_context(*, enabled: bool = True):
+        del enabled
+        yield [
+            _make_tool(
+                "read_paper",
+                (
+                    "Section 4 shows the retrieval method in detail.",
+                    {"structured_content": {"paper_id": "2401.12345", "title": "Retrieval Paper"}},
+                ),
+            )
+        ]
+
+    tool_call_response = _ai_message_with_tool_call(
+        "read_paper",
+        "call_read",
+        {"paper_id": "2401.12345", "start": 50000},
+    )
+    final_response = AIMessage(content="The paper proposes a new retrieval method.")
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
+
+    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [])
+        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+            with patch("src.api.endpoints.build_agent_tools", return_value=[]):
+                with patch("src.api.endpoints.arxiv_mcp_tools_context", new=_arxiv_context):
+                    result = await _run_agent_loop(
+                        messages=[HumanMessage(content="Read that paper")],
+                        metadata={},
+                        bind_tools=False,
+                        reference_tools={"arxiv": True},
+                    )
+
+    assert result.answer == "The paper proposes a new retrieval method."
+    assert result.citations == [
+        {
+            "source_title": "Retrieval Paper",
+            "source_url": "https://arxiv.org/abs/2401.12345",
+            "chunk_id": "read_paper:2401.12345:50000",
+            "text": "Section 4 shows the retrieval method in detail.",
+        }
+    ]

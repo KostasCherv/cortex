@@ -736,7 +736,7 @@ type RagAgentChatStreamOptions = {
 function normalizeRagCitation(citation: Partial<RagCitation> | null | undefined): RagCitation | null {
   if (
     typeof citation?.source_title !== 'string' ||
-    typeof citation?.source_url !== 'string' ||
+    (typeof citation?.source_url !== 'string' && citation?.source_url !== null) ||
     typeof citation?.chunk_id !== 'string' ||
     typeof citation?.text !== 'string'
   ) {

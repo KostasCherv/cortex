@@ -36,15 +36,24 @@ async def _cached_tavily_search(query: str) -> str:
     return _format_search_results(results)
 
 
+async def _cached_tavily_search_with_artifact(query: str) -> tuple[str, dict[str, list[dict]]]:
+    results = await perform_search_cached(
+        query,
+        max_results=settings.max_search_results,
+    )
+    return _format_search_results(results), {"results": results}
+
+
 def _make_cached_tavily_search_tool() -> BaseTool:
     return StructuredTool.from_function(
-        coroutine=_cached_tavily_search,
+        coroutine=_cached_tavily_search_with_artifact,
         name="tavily_search",
         description=(
             "Search the web for up-to-date information. "
             "Use when the answer requires current data, prices, news, or facts beyond the documents."
         ),
         args_schema=_TavilySearchInput,
+        response_format="content_and_artifact",
     )
 
 
@@ -52,6 +61,10 @@ def should_mark_web_used(tool_name: str, raw_result: object) -> bool:
     """Return True only when a general web tool returned usable external data."""
     if tool_name not in GENERAL_WEB_TOOL_NAMES:
         return False
+
+    if isinstance(raw_result, tuple) and len(raw_result) == 2:
+        _, artifact = raw_result
+        return should_mark_web_used(tool_name, artifact)
 
     if isinstance(raw_result, dict):
         if raw_result.get("error") is not None:

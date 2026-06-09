@@ -22,13 +22,19 @@ function CitationBadges({ citations }: { citations: Citation[] }) {
   if (citations.length === 0) return null
   return (
     <div className="flex flex-wrap gap-1.5 mt-2">
-      {citations.map((c) => (
-        <a key={c.source_url} href={c.source_url} target="_blank" rel="noopener noreferrer">
-          <Badge variant="outline" className="text-xs hover:bg-muted">
+      {citations.map((c, index) =>
+        c.source_url ? (
+          <a key={c.source_url} href={c.source_url} target="_blank" rel="noopener noreferrer">
+            <Badge variant="outline" className="text-xs hover:bg-muted">
+              {c.source_title || 'source'}
+            </Badge>
+          </a>
+        ) : (
+          <Badge key={`${c.source_title}-${index}`} variant="outline" className="text-xs">
             {c.source_title || 'source'}
           </Badge>
-        </a>
-      ))}
+        ),
+      )}
     </div>
   )
 }

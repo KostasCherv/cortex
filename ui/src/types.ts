@@ -43,7 +43,7 @@ export type RunFeedbackRequest = {
 }
 
 export type Citation = {
-  source_url: string
+  source_url: string | null
   source_title: string
 }
 

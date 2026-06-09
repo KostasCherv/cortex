@@ -125,25 +125,65 @@ async def open_library_lookup(query: str) -> str:
     return "\n\n".join(summaries)
 
 
+async def wikipedia_lookup_with_artifact(query: str) -> tuple[str, dict[str, list[dict[str, str]]]]:
+    text = await wikipedia_lookup(query)
+    if text.startswith("No ") or "failed:" in text or "unexpected response" in text or "empty response" in text:
+        return text, {"results": []}
+
+    parts = []
+    for block in text.split("\n\n"):
+        lines = block.splitlines()
+        if len(lines) < 2:
+            continue
+        title = lines[0].removeprefix("Page: ").strip()
+        extract = lines[1].removeprefix("Summary: ").strip()
+        parts.append({"title": title, "extract": extract})
+    return text, {"results": parts}
+
+
+async def open_library_lookup_with_artifact(query: str) -> tuple[str, dict[str, list[dict[str, str]]]]:
+    text = await open_library_lookup(query)
+    if text.startswith("No ") or "failed:" in text or "unexpected response" in text or "empty response" in text:
+        return text, {"results": []}
+
+    parts: list[dict[str, str]] = []
+    for block in text.split("\n\n"):
+        item: dict[str, str] = {}
+        for line in block.splitlines():
+            if line.startswith("Title: "):
+                item["title"] = line.removeprefix("Title: ").strip()
+            elif line.startswith("Authors: "):
+                item["authors"] = line.removeprefix("Authors: ").strip()
+            elif line.startswith("First published: "):
+                item["year"] = line.removeprefix("First published: ").strip()
+            elif line.startswith("URL: "):
+                item["url"] = line.removeprefix("URL: ").strip()
+        if item.get("title"):
+            parts.append(item)
+    return text, {"results": parts}
+
+
 def make_wikipedia_tool() -> BaseTool:
     return StructuredTool.from_function(
-        coroutine=wikipedia_lookup,
+        coroutine=wikipedia_lookup_with_artifact,
         name="wikipedia",
         description=(
             "Look up encyclopedic information on Wikipedia. "
             "Use for people, places, concepts, companies, and historical topics."
         ),
         args_schema=_WikipediaInput,
+        response_format="content_and_artifact",
     )
 
 
 def make_open_library_tool() -> BaseTool:
     return StructuredTool.from_function(
-        coroutine=open_library_lookup,
+        coroutine=open_library_lookup_with_artifact,
         name="open_library",
         description=(
             "Search Open Library for book metadata. "
             "Use for titles, authors, publication years, and bibliographic details."
         ),
         args_schema=_OpenLibraryInput,
+        response_format="content_and_artifact",
     )

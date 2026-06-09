@@ -1503,6 +1503,60 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
     ]
 
 
+def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
+    from src.api.endpoints import AgentLoopResult
+
+    mock_context = MagicMock()
+    mock_context.context = ""
+    mock_context.chunks = []
+
+    with (
+        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=[])),
+        patch("src.api.rag_chat_helpers.retrieve_context_for_query", new=AsyncMock(return_value=mock_context)),
+        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch(
+            "src.api.endpoints._run_agent_loop",
+            new=AsyncMock(
+                return_value=AgentLoopResult(
+                    answer="Answer from arXiv.",
+                    web_used=False,
+                    citations=[
+                        {
+                            "source_title": "Retrieval Paper",
+                            "source_url": "https://arxiv.org/abs/2401.12345",
+                            "chunk_id": "read_paper:2401.12345:50000",
+                            "text": "Section 4 shows the retrieval method in detail.",
+                        }
+                    ],
+                )
+            ),
+        ),
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        response = client.post(
+            "/api/rag/chat/stream",
+            json={"message": "Summarize that paper", "session_id": None, "tools": {"arxiv": True}},
+        )
+
+    assert response.status_code == 200
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    citations_event = next(event for event in events if event["type"] == "citations")
+    assert citations_event["citations"] == [
+        {
+            "source_title": "Retrieval Paper",
+            "source_url": "https://arxiv.org/abs/2401.12345",
+            "chunk_id": "read_paper:2401.12345:50000",
+            "text": "Section 4 shows the retrieval method in detail.",
+        }
+    ]
+
+
 def test_workspace_rag_chat_allows_no_ready_resources():
     mock_context = MagicMock()
     mock_context.context = ""
@@ -2198,8 +2252,8 @@ def test_rag_chat_tools_explicit():
     assert req.tools.composio is True
 
 
-def test_run_agent_loop_returns_tuple():
-    """_run_agent_loop must return (answer: str, web_used: bool)."""
+def test_run_agent_loop_returns_result_object():
+    """_run_agent_loop returns a structured result with answer/web_used/citations."""
     import asyncio
     from unittest.mock import AsyncMock, MagicMock, patch
     from langchain_core.messages import HumanMessage
@@ -2224,8 +2278,6 @@ def test_run_agent_loop_returns_tuple():
             bind_tools=False,
             allow_web_search=False,
         ))
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        answer, web_used = result
-        assert isinstance(answer, str)
-        assert web_used is False
+        assert isinstance(result.answer, str)
+        assert result.web_used is False
+        assert result.citations == []
