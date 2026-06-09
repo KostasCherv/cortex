@@ -22,6 +22,11 @@ _RERANK_MODEL = "shared_reranker"
 _RERANK_TOP_K = 5
 _RERANK_CANDIDATE_LIMIT = 10
 _RERANK_MAX_DOC_CHARS = 1200
+_MAX_TOTAL_SUMMARIZE_CHARS = 50000
+_PER_SOURCE_CHAR_LIMIT = 10000
+_GRAPH_QUERY_TOP_K = 3
+_GRAPH_QUERY_TIMEOUT_SECONDS = 8
+_GRAPH_CONTEXT_CHAR_LIMIT = 2000
 
 
 def _sanitize_model_name(raw_model: object) -> str:
@@ -248,8 +253,8 @@ async def summarize_node(state: ResearchState) -> ResearchState:
         prepared_sources: list[dict[str, str]] = []
         source_blocks: list[str] = []
         total_chars = 0
-        max_total_chars = 50000
-        per_source_limit = 10000
+        max_total_chars = _MAX_TOTAL_SUMMARIZE_CHARS
+        per_source_limit = _PER_SOURCE_CHAR_LIMIT
 
         for item in contents:
             text = item.get("raw_text", "").strip()
@@ -476,7 +481,7 @@ async def memory_context_node(state: ResearchState) -> ResearchState:
                 name="memory_context_node.graph_query",
                 run_type="retriever",
                 node_name="memory_context",
-                inputs={"query": query, "top_k": 3},
+                inputs={"query": query, "top_k": _GRAPH_QUERY_TOP_K},
                 tags=["external", "neo4j"],
             ):
                 result = await asyncio.wait_for(
@@ -485,11 +490,11 @@ async def memory_context_node(state: ResearchState) -> ResearchState:
                         query=query,
                         owner_id=user_id,
                         workspace_id=workspace_id,
-                        top_k=3,
+                        top_k=_GRAPH_QUERY_TOP_K,
                     ),
-                    timeout=8,
+                    timeout=_GRAPH_QUERY_TIMEOUT_SECONDS,
                 )
-            context = (result.context or "")[:2000]
+            context = (result.context or "")[:_GRAPH_CONTEXT_CHAR_LIMIT]
             return {
                 **state,
                 "memory_context": context,

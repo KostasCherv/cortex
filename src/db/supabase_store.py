@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_HTTP_TIMEOUT_SECONDS = 20.0
+
 
 class SupabaseSessionStore:
     """Persist sessions in Supabase PostgREST with strict user scoping."""
@@ -82,7 +84,7 @@ class SupabaseSessionStore:
         headers = dict(self._headers)
         if extra_headers:
             headers.update(extra_headers)
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
             response = await client.request(
                 method,
                 f"{self._base_url}/{path}",
