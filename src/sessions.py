@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store
 
 
 @dataclass
@@ -90,19 +90,9 @@ class Session:
         }
 
 
-_store: SupabaseSessionStore | None = None
-
-
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
-
-
 def ensure_store_initialized() -> None:
     """Fail fast at startup if Supabase persistence is misconfigured."""
-    _get_store()
+    get_session_store()
 
 
 def suggest_session_title(query: str | None) -> str:
@@ -120,27 +110,27 @@ def suggest_session_title(query: str | None) -> str:
 
 async def create_session(user_id: str, title: str | None = None) -> Session:
     """Create a new user-owned session and persist it."""
-    return await _get_store().create_session(user_id=user_id, title=title or "New session")
+    return await get_session_store().create_session(user_id=user_id, title=title or "New session")
 
 
 async def list_sessions(user_id: str) -> list[dict[str, str]]:
     """List user-owned sessions ordered by newest first."""
-    return await _get_store().list_sessions(user_id=user_id)
+    return await get_session_store().list_sessions(user_id=user_id)
 
 
 async def get_session(session_id: str, user_id: str) -> Session | None:
     """Return a session by ID scoped to the owning user."""
-    return await _get_store().get_session(session_id=session_id, user_id=user_id)
+    return await get_session_store().get_session(session_id=session_id, user_id=user_id)
 
 
 async def append_run(user_id: str, session_id: str, run: SessionRun) -> None:
     """Persist a completed run for a given session and user."""
-    await _get_store().append_run(user_id=user_id, session_id=session_id, run=run)
+    await get_session_store().append_run(user_id=user_id, session_id=session_id, run=run)
 
 
 async def create_session_run(user_id: str, session_id: str, run: SessionRun) -> None:
     """Persist a new run in running/pending state."""
-    await _get_store().create_session_run(user_id=user_id, session_id=session_id, run=run)
+    await get_session_store().create_session_run(user_id=user_id, session_id=session_id, run=run)
 
 
 async def update_session_run(
@@ -151,7 +141,7 @@ async def update_session_run(
     patch: dict,
 ) -> bool:
     """Patch status or metadata for an existing run."""
-    return await _get_store().update_session_run(
+    return await get_session_store().update_session_run(
         run_id=run_id,
         user_id=user_id,
         session_id=session_id,
@@ -161,7 +151,7 @@ async def update_session_run(
 
 async def get_session_run(*, run_id: str, user_id: str, session_id: str) -> SessionRun | None:
     """Return a single run by ID scoped to the owning user/session."""
-    return await _get_store().get_session_run(
+    return await get_session_store().get_session_run(
         run_id=run_id,
         user_id=user_id,
         session_id=session_id,
@@ -170,12 +160,12 @@ async def get_session_run(*, run_id: str, user_id: str, session_id: str) -> Sess
 
 async def append_turn(user_id: str, session_id: str, turn: ConversationTurn) -> None:
     """Persist a conversation turn for a given session and user."""
-    await _get_store().append_turn(user_id=user_id, session_id=session_id, turn=turn)
+    await get_session_store().append_turn(user_id=user_id, session_id=session_id, turn=turn)
 
 
 async def update_session_title(user_id: str, session_id: str, title: str) -> bool:
     """Update a user-owned session title."""
-    return await _get_store().update_session_title(
+    return await get_session_store().update_session_title(
         user_id=user_id,
         session_id=session_id,
         title=title,
@@ -184,7 +174,7 @@ async def update_session_title(user_id: str, session_id: str, title: str) -> boo
 
 async def delete_session(user_id: str, session_id: str) -> bool:
     """Delete a user-owned session."""
-    return await _get_store().delete_session(
+    return await get_session_store().delete_session(
         user_id=user_id,
         session_id=session_id,
     )

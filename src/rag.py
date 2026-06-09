@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import UploadFile
 
 from src.config import settings
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store, get_storage_adapter
 from src.prompts.registry import prompt_registry
 from src.rag_engine import (
     RagQueryResult,
@@ -21,7 +21,6 @@ from src.rag_engine import (
     ingest_resource_from_locator,
     query_resource_context,
 )
-from src.storage import SupabaseStorageAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -172,26 +171,8 @@ class RagValidationError(Exception):
         self.code = code
 
 
-_store: SupabaseSessionStore | None = None
-_storage: SupabaseStorageAdapter | None = None
-
-
 def _workspace_id_for_user(user_id: str) -> str:
     return user_id
-
-
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
-
-
-def _get_storage() -> SupabaseStorageAdapter:
-    global _storage
-    if _storage is None:
-        _storage = SupabaseStorageAdapter()
-    return _storage
 
 
 def _validate_upload(file: UploadFile, content: bytes) -> None:
@@ -390,7 +371,7 @@ async def update_chat_message_suggestions(
     agent_id: str | None,
     suggestions: list[str],
 ) -> bool:
-    return await _get_store().update_rag_chat_message_suggestions(
+    return await get_session_store().update_rag_chat_message_suggestions(
         message_id=message_id,
         session_id=session_id,
         owner_id=owner_id,
@@ -404,7 +385,7 @@ async def suggest_agent_definition(prompt: str) -> AgentDefinitionDraft:
 
 async def list_resources(user_id: str) -> list[RagResource]:
     workspace_id = _workspace_id_for_user(user_id)
-    rows = await _get_store().list_rag_resources(
+    rows = await get_session_store().list_rag_resources(
         owner_id=user_id, workspace_id=workspace_id
     )
     return [RagResource(**row) for row in rows]
@@ -412,7 +393,7 @@ async def list_resources(user_id: str) -> list[RagResource]:
 
 async def get_resource(resource_id: str, user_id: str) -> RagResource | None:
     workspace_id = _workspace_id_for_user(user_id)
-    row = await _get_store().get_rag_resource(
+    row = await get_session_store().get_rag_resource(
         resource_id=resource_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -429,7 +410,7 @@ async def create_resource_and_ingest(
     _validate_upload(file, content)
 
     workspace_id = _workspace_id_for_user(user_id)
-    current_count = await _get_store().count_rag_resources_in_workspace(
+    current_count = await get_session_store().count_rag_resources_in_workspace(
         owner_id=user_id,
         workspace_id=workspace_id,
     )
@@ -442,7 +423,7 @@ async def create_resource_and_ingest(
     resource_id = str(uuid.uuid4())
     filename = file.filename or f"resource-{resource_id}.txt"
     storage_key = f"{workspace_id}/{user_id}/{resource_id}/{filename}"
-    storage_uri = await _get_storage().upload_bytes(
+    storage_uri = await get_storage_adapter().upload_bytes(
         key=storage_key,
         content=content,
         content_type=file.content_type or "application/octet-stream",
@@ -471,7 +452,7 @@ async def create_resource_and_ingest(
     )
     outbox_id = str(uuid.uuid4())
     outbox_now = datetime.now(UTC).isoformat()
-    await _get_store().create_resource_job_and_outbox(
+    await get_session_store().create_resource_job_and_outbox(
         resource_payload=resource.to_dict(),
         job_payload=job.to_dict(),
         outbox_payload={
@@ -492,7 +473,7 @@ async def create_resource_and_ingest(
 
 
 async def _run_ingestion_job(job_id: str) -> None:
-    store = _get_store()
+    store = get_session_store()
 
     job_row = await store.get_rag_ingestion_job(job_id)
     if not job_row:
@@ -537,7 +518,7 @@ async def _run_ingestion_job(job_id: str) -> None:
         )
 
         try:
-            signed_file_url = await _get_storage().create_signed_download_url(
+            signed_file_url = await get_storage_adapter().create_signed_download_url(
                 storage_uri=resource.storage_uri,
                 expires_in=settings.rag_signed_url_ttl_seconds,
             )
@@ -599,7 +580,7 @@ async def _run_ingestion_job(job_id: str) -> None:
 
 async def get_resource_status(resource_id: str, user_id: str) -> dict:
     workspace_id = _workspace_id_for_user(user_id)
-    resource_row = await _get_store().get_rag_resource(
+    resource_row = await get_session_store().get_rag_resource(
         resource_id=resource_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -607,7 +588,7 @@ async def get_resource_status(resource_id: str, user_id: str) -> dict:
     if not resource_row:
         return {}
 
-    job = await _get_store().get_latest_rag_ingestion_job_for_resource(
+    job = await get_session_store().get_latest_rag_ingestion_job_for_resource(
         resource_id=resource_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -626,7 +607,7 @@ async def delete_resource(resource_id: str, user_id: str) -> bool:
 
     try:
         await delete_resource_artifacts(
-            store=_get_store(),
+            store=get_session_store(),
             resource_id=resource.resource_id,
             owner_id=resource.owner_id,
             workspace_id=resource.workspace_id,
@@ -637,12 +618,12 @@ async def delete_resource(resource_id: str, user_id: str) -> bool:
 
     if resource.storage_uri:
         try:
-            await _get_storage().delete_object(storage_uri=resource.storage_uri)
+            await get_storage_adapter().delete_object(storage_uri=resource.storage_uri)
         except Exception:  # nosec B110 — object cleanup is best-effort; existing comment explains intent
             # Object cleanup is best-effort; DB deletion should still proceed.
             pass
 
-    return await _get_store().delete_rag_resource(
+    return await get_session_store().delete_rag_resource(
         resource_id=resource.resource_id,
         owner_id=user_id,
         workspace_id=resource.workspace_id,
@@ -651,7 +632,7 @@ async def delete_resource(resource_id: str, user_id: str) -> bool:
 
 async def list_agents(user_id: str) -> list[RagAgent]:
     workspace_id = _workspace_id_for_user(user_id)
-    rows = await _get_store().list_rag_agents(
+    rows = await get_session_store().list_rag_agents(
         owner_id=user_id, workspace_id=workspace_id
     )
     return [RagAgent(**row) for row in rows]
@@ -690,9 +671,9 @@ async def create_agent(
         created_at=now,
         updated_at=now,
     )
-    await _get_store().create_rag_agent(agent.to_dict())
+    await get_session_store().create_rag_agent(agent.to_dict())
     if linked_resource_ids:
-        await _get_store().replace_rag_agent_resources(
+        await get_session_store().replace_rag_agent_resources(
             agent_id=agent.agent_id,
             owner_id=user_id,
             workspace_id=workspace_id,
@@ -711,7 +692,7 @@ async def update_agent(
     linked_resource_ids: list[str] | None,
 ) -> RagAgent | None:
     workspace_id = _workspace_id_for_user(user_id)
-    existing = await _get_store().get_rag_agent(
+    existing = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -727,7 +708,7 @@ async def update_agent(
     if system_instructions is not None:
         patch["system_instructions"] = system_instructions
     if patch:
-        await _get_store().update_rag_agent(
+        await get_session_store().update_rag_agent(
             agent_id=agent_id,
             owner_id=user_id,
             workspace_id=workspace_id,
@@ -745,14 +726,14 @@ async def update_agent(
             workspace_id=workspace_id,
             resource_ids=linked_resource_ids,
         )
-        await _get_store().replace_rag_agent_resources(
+        await get_session_store().replace_rag_agent_resources(
             agent_id=agent_id,
             owner_id=user_id,
             workspace_id=workspace_id,
             resource_ids=linked_resource_ids,
         )
 
-    updated = await _get_store().get_rag_agent(
+    updated = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -764,14 +745,14 @@ async def update_agent(
 
 async def delete_agent(agent_id: str, user_id: str) -> bool:
     workspace_id = _workspace_id_for_user(user_id)
-    existing = await _get_store().get_rag_agent(
+    existing = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
     )
     if not existing:
         return False
-    return await _get_store().delete_rag_agent(
+    return await get_session_store().delete_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -785,7 +766,7 @@ async def link_resources(
     resource_ids: list[str],
 ) -> RagAgent | None:
     workspace_id = _workspace_id_for_user(user_id)
-    current = await _get_store().get_rag_agent(
+    current = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -809,14 +790,14 @@ async def link_resources(
         resource_ids=final_ids,
     )
 
-    await _get_store().replace_rag_agent_resources(
+    await get_session_store().replace_rag_agent_resources(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
         resource_ids=final_ids,
     )
 
-    updated = await _get_store().get_rag_agent(
+    updated = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -835,7 +816,7 @@ async def _validate_resources_linkable(
     if not resource_ids:
         return
 
-    resources = await _get_store().get_rag_resources_by_ids(
+    resources = await get_session_store().get_rag_resources_by_ids(
         resource_ids=resource_ids,
         owner_id=owner_id,
         workspace_id=workspace_id,
@@ -864,7 +845,7 @@ async def get_agent_for_chat(
     agent_id: str, user_id: str
 ) -> tuple[RagAgent, list[str]] | None:
     workspace_id = _workspace_id_for_user(user_id)
-    row = await _get_store().get_rag_agent(
+    row = await get_session_store().get_rag_agent(
         agent_id=agent_id,
         owner_id=user_id,
         workspace_id=workspace_id,
@@ -883,7 +864,7 @@ async def create_or_get_chat_session(
     initial_message: str | None = None,
 ) -> str:
     if session_id:
-        valid = await _get_store().get_rag_chat_session(
+        valid = await get_session_store().get_rag_chat_session(
             session_id=session_id,
             owner_id=user_id,
             agent_id=agent_id,
@@ -892,7 +873,7 @@ async def create_or_get_chat_session(
             return session_id
 
     new_session = str(uuid.uuid4())
-    await _get_store().create_rag_chat_session(
+    await get_session_store().create_rag_chat_session(
         {
             "session_id": new_session,
             "owner_id": user_id,
@@ -917,7 +898,7 @@ async def create_or_get_workspace_chat_session(
     initial_message: str | None = None,
 ) -> str:
     if session_id:
-        valid = await _get_store().get_rag_chat_session(
+        valid = await get_session_store().get_rag_chat_session(
             session_id=session_id,
             owner_id=user_id,
             agent_id=None,
@@ -927,7 +908,7 @@ async def create_or_get_workspace_chat_session(
             return session_id
 
     new_session = str(uuid.uuid4())
-    await _get_store().create_rag_chat_session(
+    await get_session_store().create_rag_chat_session(
         {
             "session_id": new_session,
             "owner_id": user_id,
@@ -950,7 +931,7 @@ async def create_or_get_workspace_chat_session(
 async def list_chat_sessions(
     agent_id: str | None, user_id: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> list[dict[str, str | None]]:
-    return await _get_store().list_rag_chat_sessions(
+    return await get_session_store().list_rag_chat_sessions(
         agent_id=agent_id, owner_id=user_id, chat_scope=chat_scope
     )
 
@@ -962,7 +943,7 @@ async def get_chat_session(
     user_id: str,
     chat_scope: str = CHAT_SCOPE_AGENT,
 ) -> dict[str, str | None] | None:
-    return await _get_store().get_rag_chat_session(
+    return await get_session_store().get_rag_chat_session(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
@@ -973,7 +954,7 @@ async def get_chat_session(
 async def update_chat_session_title(
     *, session_id: str, agent_id: str | None, user_id: str, title: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> bool:
-    return await _get_store().update_rag_chat_session_title(
+    return await get_session_store().update_rag_chat_session_title(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
@@ -985,7 +966,7 @@ async def update_chat_session_title(
 async def delete_chat_session(
     *, session_id: str, agent_id: str | None, user_id: str, chat_scope: str = CHAT_SCOPE_AGENT
 ) -> bool:
-    return await _get_store().delete_rag_chat_session(
+    return await get_session_store().delete_rag_chat_session(
         session_id=session_id,
         owner_id=user_id,
         agent_id=agent_id,
@@ -994,19 +975,19 @@ async def delete_chat_session(
 
 
 async def append_chat_message(message: RagChatMessage) -> None:
-    await _get_store().create_rag_chat_message(message.to_dict())
+    await get_session_store().create_rag_chat_message(message.to_dict())
 
 
 async def delete_last_exchange(
     *, session_id: str, user_id: str
 ) -> tuple[bool, str | None]:
-    return await _get_store().delete_last_user_assistant_pair(
+    return await get_session_store().delete_last_user_assistant_pair(
         session_id=session_id, owner_id=user_id
     )
 
 
 async def list_chat_messages(session_id: str, user_id: str) -> list[RagChatMessage]:
-    rows = await _get_store().list_rag_chat_messages(
+    rows = await get_session_store().list_rag_chat_messages(
         session_id=session_id, owner_id=user_id
     )
     return [RagChatMessage(**row) for row in rows]
@@ -1021,7 +1002,7 @@ async def retrieve_context_for_query(
     if not resource_ids:
         return RagQueryResult(context="", chunks=[], entities=None)
     return await query_resource_context(
-        store=_get_store(),
+        store=get_session_store(),
         resource_ids=resource_ids,
         query=question,
         owner_id=user_id,
@@ -1031,7 +1012,7 @@ async def retrieve_context_for_query(
 
 async def list_workspace_ready_resource_ids(user_id: str) -> list[str]:
     workspace_id = _workspace_id_for_user(user_id)
-    rows = await _get_store().list_rag_resources(owner_id=user_id, workspace_id=workspace_id)
+    rows = await get_session_store().list_rag_resources(owner_id=user_id, workspace_id=workspace_id)
     return [
         row["resource_id"]
         for row in rows

@@ -25,7 +25,7 @@ def _make_store(rows=None, claim_result=True):
 async def test_enqueue_event_inserts_outbox_row():
     mock_store = AsyncMock()
 
-    with patch("src.outbox._get_store", return_value=mock_store):
+    with patch("src.outbox.get_session_store", return_value=mock_store):
         event = await enqueue_event("rag/ingestion.requested", {"job_id": "j-1"})
 
     assert mock_store.insert_outbox_event.await_count == 1
@@ -42,7 +42,7 @@ async def test_dispatch_marks_sent_on_success():
     mock_inngest.send = AsyncMock(return_value=["event-id"])
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
     ):
         count = await dispatch_outbox_events()
@@ -59,7 +59,7 @@ async def test_dispatch_skips_when_claim_fails():
     mock_inngest = AsyncMock()
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
     ):
         count = await dispatch_outbox_events()
@@ -75,7 +75,7 @@ async def test_dispatch_schedules_retry_on_transient_failure():
     mock_inngest.send = AsyncMock(side_effect=RuntimeError("network error"))
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
     ):
         count = await dispatch_outbox_events()
@@ -95,7 +95,7 @@ async def test_dispatch_permanently_fails_after_max_attempts():
     mock_inngest.send = AsyncMock(side_effect=RuntimeError("still failing"))
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
     ):
         count = await dispatch_outbox_events()
@@ -117,7 +117,7 @@ async def test_dispatch_processes_multiple_events():
     mock_inngest.send = AsyncMock(return_value=["event-id"])
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
     ):
         count = await dispatch_outbox_events()
@@ -131,7 +131,7 @@ async def test_dispatch_resets_stuck_dispatching_before_fetch():
     mock_store = _make_store(rows=[])
 
     with (
-        patch("src.outbox._get_store", return_value=mock_store),
+        patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", AsyncMock()),
     ):
         await dispatch_outbox_events()

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store
 from src.errors import StructuredOutputError
 from src.llm.output_parsers import build_validation_retry_prompt, parse_model_json
 from src.prompts.registry import prompt_registry
@@ -22,7 +22,6 @@ from src.user_memory import enqueue_memory_refresh, get_user_memory_prompt_block
 _ITINERARY_LIST_LIMIT = 20
 _MAX_CONTEXT_RESULTS = 3
 _MAX_FETCHED_PAGES = 2
-_store: SupabaseSessionStore | None = None
 
 
 class ItineraryPlannerValidationError(Exception):
@@ -33,13 +32,6 @@ class ItineraryPlannerValidationError(Exception):
 
 def _workspace_id_for_user(user_id: str) -> str:
     return user_id
-
-
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
 
 
 def _require_text(value: str) -> str:
@@ -451,12 +443,12 @@ async def create_itinerary_session(user_id: str) -> ItinerarySessionSummary:
         "created_at": now,
         "updated_at": now,
     }
-    await _get_store().create_itinerary_session(row)
+    await get_session_store().create_itinerary_session(row)
     return _session_summary_from_row(row)
 
 
 async def list_itinerary_sessions(user_id: str) -> ItinerarySessionListResponse:
-    rows = await _get_store().list_itinerary_sessions(
+    rows = await get_session_store().list_itinerary_sessions(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
         limit=_ITINERARY_LIST_LIMIT,
@@ -465,21 +457,21 @@ async def list_itinerary_sessions(user_id: str) -> ItinerarySessionListResponse:
 
 
 async def get_itinerary_session_detail(session_id: str, user_id: str) -> ItinerarySessionDetail | None:
-    row = await _get_store().get_itinerary_session(
+    row = await get_session_store().get_itinerary_session(
         session_id=session_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
     )
     if row is None:
         return None
-    messages = [_message_from_row(item) for item in await _get_store().list_itinerary_messages(session_id=session_id, owner_id=user_id)]
-    versions = [_version_from_row(item) for item in await _get_store().list_itinerary_versions(session_id=session_id, owner_id=user_id)]
+    messages = [_message_from_row(item) for item in await get_session_store().list_itinerary_messages(session_id=session_id, owner_id=user_id)]
+    versions = [_version_from_row(item) for item in await get_session_store().list_itinerary_versions(session_id=session_id, owner_id=user_id)]
     return _session_detail_from_parts(row, messages=messages, versions=versions)
 
 
 async def rename_itinerary_session(session_id: str, user_id: str, title: str) -> bool:
     normalized_title = _require_text(title)[:120]
-    return await _get_store().update_itinerary_session(
+    return await get_session_store().update_itinerary_session(
         session_id=session_id,
         owner_id=user_id,
         patch={"title": normalized_title, "updated_at": datetime.now(UTC).isoformat()},
@@ -487,7 +479,7 @@ async def rename_itinerary_session(session_id: str, user_id: str, title: str) ->
 
 
 async def delete_itinerary_session(session_id: str, user_id: str) -> bool:
-    return await _get_store().delete_itinerary_session(
+    return await get_session_store().delete_itinerary_session(
         session_id=session_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
@@ -510,7 +502,7 @@ async def append_itinerary_message(
         metadata=metadata or {},
         created_at=datetime.now(UTC).isoformat(),
     )
-    await _get_store().create_itinerary_message(
+    await get_session_store().create_itinerary_message(
         {
             "id": message.message_id,
             "session_id": session_id,
@@ -525,7 +517,7 @@ async def append_itinerary_message(
 
 
 async def update_itinerary_session(*, user_id: str, session_id: str, patch: dict[str, Any]) -> bool:
-    return await _get_store().update_itinerary_session(
+    return await get_session_store().update_itinerary_session(
         session_id=session_id,
         owner_id=user_id,
         patch=patch,
@@ -549,7 +541,7 @@ async def create_itinerary_version(
         itinerary=itinerary,
         created_at=datetime.now(UTC).isoformat(),
     )
-    await _get_store().create_itinerary_version(
+    await get_session_store().create_itinerary_version(
         {
             "id": version.version_id,
             "session_id": session_id,

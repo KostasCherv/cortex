@@ -11,7 +11,7 @@ async def test_get_user_memory_prompt_block_returns_empty_when_memory_missing():
     store = AsyncMock()
     store.get_user_memory.return_value = None
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         block = await get_user_memory_prompt_block("user-1", "Anything")
 
     assert block == ""
@@ -30,7 +30,7 @@ async def test_get_user_memory_prompt_block_renders_saved_memory():
         "last_refreshed_at": "2026-06-04T10:05:00+00:00",
     }
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         block = await get_user_memory_prompt_block("user-1", "Need product advice")
 
     assert "Prefers concise answers." in block
@@ -50,7 +50,7 @@ async def test_update_user_memory_persists_single_document():
         "last_refreshed_at": "2026-06-04T10:05:00+00:00",
     }
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         result = await update_user_memory("user-1", "  Updated memory.  ")
 
     assert result["content"] == "Updated memory."
@@ -66,7 +66,7 @@ async def test_delete_user_memory_deletes_row():
     store = AsyncMock()
     store.delete_user_memory.return_value = True
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         result = await delete_user_memory("user-1")
 
     assert result == {"deleted": True}
@@ -100,7 +100,7 @@ async def test_refresh_user_memory_claims_event_before_upserting_memory():
     store.claim_user_memory_refresh_event.return_value = True
     store.get_user_memory.return_value = None
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         result = await refresh_user_memory(
             user_id="user-1",
             source_mode="workspace_chat",
@@ -126,7 +126,7 @@ async def test_refresh_user_memory_skips_duplicate_events():
     store = AsyncMock()
     store.claim_user_memory_refresh_event.return_value = False
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         result = await refresh_user_memory(
             user_id="user-1",
             source_mode="workspace_chat",
@@ -157,7 +157,7 @@ async def test_refresh_user_memory_merges_new_candidates_into_existing_content()
         "last_refreshed_at": "2026-06-04T10:05:00+00:00",
     }
 
-    with patch("src.user_memory._get_store", return_value=store):
+    with patch("src.user_memory.get_session_store", return_value=store):
         result = await refresh_user_memory(
             user_id="user-1",
             source_mode="workspace_chat",
@@ -192,7 +192,7 @@ async def test_refresh_user_memory_returns_error_for_non_retryable_store_failure
     )
 
     with (
-        patch("src.user_memory._get_store", return_value=store),
+        patch("src.user_memory.get_session_store", return_value=store),
         patch("src.user_memory.logger") as mock_logger,
     ):
         result = await refresh_user_memory(

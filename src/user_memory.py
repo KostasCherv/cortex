@@ -11,17 +11,9 @@ from datetime import UTC, datetime
 import httpx
 
 from src import outbox
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store
 
-_store: SupabaseSessionStore | None = None
 logger = logging.getLogger(__name__)
-
-
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
 
 
 def _workspace_id_for_user(user_id: str) -> str:
@@ -132,7 +124,7 @@ def _is_non_retryable_store_error(exc: Exception) -> bool:
 
 async def get_user_memory(user_id: str) -> dict:
     try:
-        row = await _get_store().get_user_memory(
+        row = await get_session_store().get_user_memory(
             owner_id=user_id,
             workspace_id=_workspace_id_for_user(user_id),
         )
@@ -157,13 +149,13 @@ async def update_user_memory(user_id: str, content: str) -> dict:
         "content": cleaned,
         "updated_at": now,
     }
-    current = await _get_store().get_user_memory(
+    current = await get_session_store().get_user_memory(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
     )
     if current and current.get("last_refreshed_at") is not None:
         payload["last_refreshed_at"] = current["last_refreshed_at"]
-    await _get_store().upsert_user_memory(payload=payload)
+    await get_session_store().upsert_user_memory(payload=payload)
     return {
         "content": cleaned,
         "updated_at": now,
@@ -172,7 +164,7 @@ async def update_user_memory(user_id: str, content: str) -> dict:
 
 
 async def delete_user_memory(user_id: str) -> dict:
-    deleted = await _get_store().delete_user_memory(
+    deleted = await get_session_store().delete_user_memory(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
     )
@@ -236,7 +228,7 @@ async def refresh_user_memory(
     source_assistant_message_id: str | None = None,
 ) -> str:
     try:
-        store = _get_store()
+        store = get_session_store()
         workspace_id = workspace_id or _workspace_id_for_user(user_id)
         now = datetime.now(UTC).isoformat()
         claimed = await store.claim_user_memory_refresh_event(

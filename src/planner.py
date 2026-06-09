@@ -11,7 +11,7 @@ from typing import Mapping, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store
 from src.errors import StructuredOutputError
 from src.llm.output_parsers import build_validation_retry_prompt, parse_model_json
 from src.prompts.registry import prompt_registry
@@ -19,9 +19,6 @@ from src.prompts.registry import prompt_registry
 MODEL_T = TypeVar("MODEL_T", bound=BaseModel)
 _PLANS_LIST_LIMIT = 20
 _PROMPT_PREVIEW_LIMIT = 160
-
-_store: SupabaseSessionStore | None = None
-
 
 class PlannerValidationError(Exception):
     def __init__(self, code: str, message: str) -> None:
@@ -232,13 +229,6 @@ def _workspace_id_for_user(user_id: str) -> str:
     return user_id
 
 
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
-
-
 def _prompt_preview(prompt: str) -> str:
     cleaned = " ".join(prompt.strip().split())
     if len(cleaned) <= _PROMPT_PREVIEW_LIMIT:
@@ -436,12 +426,12 @@ async def save_prd(
         "created_at": now,
         "updated_at": now,
     }
-    await _get_store().create_prd_plan(saved_row)
+    await get_session_store().create_prd_plan(saved_row)
     return _saved_prd_from_row(saved_row)
 
 
 async def list_saved_prds(user_id: str) -> list[SavedPRDSummary]:
-    rows = await _get_store().list_prd_plans(
+    rows = await get_session_store().list_prd_plans(
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
         limit=_PLANS_LIST_LIMIT,
@@ -450,7 +440,7 @@ async def list_saved_prds(user_id: str) -> list[SavedPRDSummary]:
 
 
 async def get_saved_prd(user_id: str, plan_id: str) -> SavedPRD | None:
-    row = await _get_store().get_prd_plan(
+    row = await get_session_store().get_prd_plan(
         plan_id=plan_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),
@@ -464,7 +454,7 @@ async def get_saved_prd(user_id: str, plan_id: str) -> SavedPRD | None:
 
 
 async def delete_saved_prd(user_id: str, plan_id: str) -> bool:
-    return await _get_store().delete_prd_plan(
+    return await get_session_store().delete_prd_plan(
         plan_id=plan_id,
         owner_id=user_id,
         workspace_id=_workspace_id_for_user(user_id),

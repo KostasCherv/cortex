@@ -7,18 +7,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.db.supabase_store import SupabaseSessionStore
+from src.db.provider import get_session_store
 
 _MAX_ATTEMPTS = 5
-
-_store: SupabaseSessionStore | None = None
-
-
-def _get_store() -> SupabaseSessionStore:
-    global _store
-    if _store is None:
-        _store = SupabaseSessionStore()
-    return _store
 
 
 def _backoff_seconds(attempts: int) -> int:
@@ -48,7 +39,7 @@ async def enqueue_event(event_name: str, payload: dict[str, Any]) -> OutboxEvent
         next_attempt_at=now,
         created_at=now,
     )
-    await _get_store().insert_outbox_event(
+    await get_session_store().insert_outbox_event(
         {
             "id": event.id,
             "event_name": event.event_name,
@@ -68,7 +59,7 @@ async def dispatch_outbox_events(limit: int = 50) -> int:
 
     logger = logging.getLogger(__name__)
 
-    store = _get_store()
+    store = get_session_store()
 
     try:
         # Recover rows stuck in dispatching state from a previous crashed dispatcher

@@ -39,7 +39,7 @@ async def test_retrieve_context_for_query_returns_empty_without_resource_ids():
 
 async def test_create_resource_rejects_unsupported_extension():
     file = UploadFile(filename="notes.exe", file=BytesIO(b"abc"), headers={"content-type": "text/plain"})
-    with patch("src.rag._get_store", return_value=AsyncMock()):
+    with patch("src.rag.get_session_store", return_value=AsyncMock()):
         try:
             await create_resource_and_ingest(file, "user-1")
             assert False, "Expected RagValidationError"
@@ -68,7 +68,7 @@ async def test_list_chat_sessions_returns_agent_scoped_summaries():
         },
     ]
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         sessions = await list_chat_sessions(agent_id="agent-1", user_id="user-1")
 
     mock_store.list_rag_chat_sessions.assert_awaited_once_with(
@@ -89,7 +89,7 @@ async def test_get_chat_session_is_scoped_to_owner_and_agent():
         "created_at": "2026-04-23T09:00:00+00:00",
     }
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         session = await get_chat_session(
             session_id="chat-1",
             agent_id="agent-1",
@@ -110,7 +110,7 @@ async def test_update_chat_session_title_delegates_to_store():
     mock_store = AsyncMock()
     mock_store.update_rag_chat_session_title.return_value = True
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         updated = await update_chat_session_title(
             session_id="chat-1",
             agent_id="agent-1",
@@ -132,7 +132,7 @@ async def test_delete_chat_session_delegates_to_store():
     mock_store = AsyncMock()
     mock_store.delete_rag_chat_session.return_value = True
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         deleted = await delete_chat_session(
             session_id="chat-1",
             agent_id="agent-1",
@@ -153,7 +153,7 @@ async def test_delete_agent_delegates_to_store():
     mock_store.get_rag_agent.return_value = {"agent_id": "agent-1"}
     mock_store.delete_rag_agent.return_value = True
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         deleted = await delete_agent(agent_id="agent-1", user_id="user-1")
 
     assert deleted is True
@@ -169,7 +169,7 @@ async def test_delete_agent_returns_false_when_missing():
     mock_store = AsyncMock()
     mock_store.get_rag_agent.return_value = None
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         deleted = await delete_agent(agent_id="agent-404", user_id="user-1")
 
     assert deleted is False
@@ -357,8 +357,8 @@ async def test_run_ingestion_job_marks_ready_on_success():
     mock_storage.create_signed_download_url = AsyncMock(return_value="https://signed-url")
 
     with (
-        patch("src.rag._get_store", return_value=mock_store),
-        patch("src.rag._get_storage", return_value=mock_storage),
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
         patch("src.rag.ingest_resource_from_locator", new=AsyncMock(return_value=3)),
     ):
         await _run_ingestion_job("job-1")
@@ -403,8 +403,8 @@ async def test_run_ingestion_job_marks_failed_after_retries():
     mock_storage.create_signed_download_url = AsyncMock(return_value="https://signed-url")
 
     with (
-        patch("src.rag._get_store", return_value=mock_store),
-        patch("src.rag._get_storage", return_value=mock_storage),
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
         patch("src.rag.ingest_resource_from_locator", new=AsyncMock(side_effect=RuntimeError("ingest failed"))),
     ):
         await _run_ingestion_job("job-1")
@@ -427,8 +427,8 @@ async def test_create_resource_writes_outbox_event():
     mock_storage.upload_bytes = AsyncMock(return_value="supabase://rag-resources/user-1/path")
 
     with (
-        patch("src.rag._get_store", return_value=mock_store),
-        patch("src.rag._get_storage", return_value=mock_storage),
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
     ):
         resource, job = await create_resource_and_ingest(file, "user-1")
 
@@ -449,7 +449,7 @@ async def test_delete_last_exchange_uses_store_method():
     mock_store = AsyncMock()
     mock_store.delete_last_user_assistant_pair.return_value = (True, None)
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         deleted, err = await delete_last_exchange(session_id="sess-1", user_id="user-1")
 
     assert deleted is True
@@ -463,7 +463,7 @@ async def test_delete_last_exchange_propagates_empty_error():
     mock_store = AsyncMock()
     mock_store.delete_last_user_assistant_pair.return_value = (False, "empty")
 
-    with patch("src.rag._get_store", return_value=mock_store):
+    with patch("src.rag.get_session_store", return_value=mock_store):
         deleted, err = await delete_last_exchange(session_id="sess-1", user_id="user-1")
 
     assert deleted is False
