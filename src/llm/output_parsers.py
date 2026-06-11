@@ -215,6 +215,20 @@ class EntityRelationExtractionEnvelope(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
 
 
+class ChunkEntityRelationExtraction(BaseModel):
+    """Per-chunk entity and relation extraction within a batched payload."""
+
+    chunk_index: int = Field(ge=0)
+    entities: list[ExtractedEntity] = Field(default_factory=list)
+    relations: list[ExtractedRelation] = Field(default_factory=list)
+
+
+class BatchedEntityRelationExtractionEnvelope(BaseModel):
+    """Validated batched graph extraction payload keyed by chunk index."""
+
+    chunks: list[ChunkEntityRelationExtraction] = Field(default_factory=list)
+
+
 class ClarificationDecision(BaseModel):
     """Router decision produced by the clarification node."""
 
@@ -374,6 +388,13 @@ def parse_research_summaries_json(text: str) -> list[ResearchSummary]:
 def parse_entity_relation_extraction_json(text: str) -> EntityRelationExtractionEnvelope:
     """Parse graph extraction output into validated nested entity and relation models."""
     return parse_model_json(text, model=EntityRelationExtractionEnvelope)
+
+
+def parse_batched_entity_relation_extraction_json(
+    text: str,
+) -> BatchedEntityRelationExtractionEnvelope:
+    """Parse batched graph extraction output into per-chunk entity and relation models."""
+    return parse_model_json(text, model=BatchedEntityRelationExtractionEnvelope)
 
 
 def parse_clarification_decision_json(text: str) -> ClarificationDecision:

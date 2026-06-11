@@ -39,19 +39,20 @@ def test_ingest_document_writes_document_chunk_and_entity_batches():
     embed.embed_texts.side_effect = lambda texts: [[0.1] * 4 for _ in texts]
 
     store = Neo4jGraphStore(driver=driver, embedding_client=embed)
-    store._extract_entities_relations = MagicMock(
-        return_value=(
-            [
-                {
-                    "id": "entity-1",
-                    "name": "OpenAI",
-                    "normalized_name": "openai",
-                    "entity_type": "Org",
-                    "confidence": 0.9,
-                }
-            ],
-            [],
-        )
+    entity_tuple = (
+        [
+            {
+                "id": "entity-1",
+                "name": "OpenAI",
+                "normalized_name": "openai",
+                "entity_type": "Org",
+                "confidence": 0.9,
+            }
+        ],
+        [],
+    )
+    store._extract_entities_relations_batched = MagicMock(
+        side_effect=lambda chunk_texts: [entity_tuple for _ in chunk_texts]
     )
 
     ingested = store.ingest_document(
@@ -76,7 +77,7 @@ def test_ingest_document_skips_llm_extraction_for_session_attachments():
     embed.embed_texts.side_effect = lambda texts: [[0.1] * 4 for _ in texts]
 
     store = Neo4jGraphStore(driver=driver, embedding_client=embed)
-    store._extract_entities_relations = MagicMock(return_value=([], []))
+    store._extract_entities_relations_batched = MagicMock(return_value=[])
     store._heuristic_entities_relations = MagicMock(return_value=([], []))
 
     ingested = store.ingest_document(
@@ -91,7 +92,7 @@ def test_ingest_document_skips_llm_extraction_for_session_attachments():
     )
 
     assert ingested == 1
-    store._extract_entities_relations.assert_not_called()
+    store._extract_entities_relations_batched.assert_not_called()
     store._heuristic_entities_relations.assert_not_called()
 
 
@@ -103,7 +104,9 @@ def test_ingest_document_caps_llm_extraction_to_max_chunks():
     embed.embed_texts.side_effect = lambda texts: [[0.1] * 4 for _ in texts]
 
     store = Neo4jGraphStore(driver=driver, embedding_client=embed)
-    store._extract_entities_relations = MagicMock(return_value=([], []))
+    store._extract_entities_relations_batched = MagicMock(
+        side_effect=lambda chunk_texts: [([], []) for _ in chunk_texts]
+    )
     store._heuristic_entities_relations = MagicMock(return_value=([], []))
 
     # Produces more chunks than the LLM extraction cap.
@@ -120,7 +123,9 @@ def test_ingest_document_caps_llm_extraction_to_max_chunks():
     )
 
     assert ingested > _MAX_LLM_EXTRACTION_CHUNKS
-    assert store._extract_entities_relations.call_count == _MAX_LLM_EXTRACTION_CHUNKS
+    store._extract_entities_relations_batched.assert_called_once()
+    batched_chunks = store._extract_entities_relations_batched.call_args.args[0]
+    assert len(batched_chunks) == _MAX_LLM_EXTRACTION_CHUNKS
     assert store._heuristic_entities_relations.call_count == ingested - _MAX_LLM_EXTRACTION_CHUNKS
 
 
@@ -380,6 +385,26 @@ def test_extract_entities_relations_falls_back_to_heuristics_after_repair_failur
     assert mock_llm.invoke.call_count == 2
     assert entities == ["heuristic"]
     assert relations == ["rels"]
+
+
+def test_extract_entities_relations_batched_parses_per_chunk_payload():
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = MagicMock(
+        content=(
+            '{"chunks":[{"chunk_index":0,"entities":[{"name":"OpenAI","entity_type":"Org","confidence":0.9}],'
+            '"relations":[]},{"chunk_index":1,"entities":[{"name":"Anthropic","entity_type":"Org","confidence":0.8}],'
+            '"relations":[]}]}'
+        )
+    )
+
+    store = Neo4jGraphStore(driver=MagicMock(), embedding_client=MagicMock())
+
+    with patch("src.tools.neo4j_graph_store.get_llm", return_value=mock_llm):
+        results = store._extract_entities_relations_batched(["OpenAI text", "Anthropic text"])
+
+    assert mock_llm.invoke.call_count == 1
+    assert [entity["name"] for entity in results[0][0]] == ["OpenAI"]
+    assert [entity["name"] for entity in results[1][0]] == ["Anthropic"]
 
 
 def test_extract_entities_relations_drops_relations_with_unknown_endpoints():

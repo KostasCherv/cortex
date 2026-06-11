@@ -15,7 +15,12 @@ from src.config import settings
 from src.errors import ConfigurationError, VectorStoreError
 from src.llm.embeddings import EmbeddingClient
 from src.llm.factory import get_llm
-from src.llm.output_parsers import build_validation_retry_prompt, parse_entity_relation_extraction_json
+from src.llm.output_parsers import (
+    EntityRelationExtractionEnvelope,
+    build_validation_retry_prompt,
+    parse_batched_entity_relation_extraction_json,
+    parse_entity_relation_extraction_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,97 +195,160 @@ class Neo4jGraphStore:
 
         return entities, relations
 
+    @staticmethod
+    def _llm_response_text(response: Any) -> str:
+        content = response.content if hasattr(response, "content") else response
+        if isinstance(content, list):
+            return "\n".join(
+                part if isinstance(part, str) else str(part.get("text", ""))
+                for part in content
+            )
+        return str(content)
+
+    def _entities_relations_from_payload(
+        self, payload: EntityRelationExtractionEnvelope
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        entities_by_name: dict[str, dict[str, Any]] = {}
+        for row in payload.entities:
+            name = row.name.strip()
+            normalized = name.lower()
+            if normalized in entities_by_name:
+                continue
+            entities_by_name[normalized] = {
+                "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),  # nosec B324 — graph node ID, not a security hash
+                "name": name,
+                "normalized_name": normalized,
+                "entity_type": row.entity_type,
+                "confidence": row.confidence or _DEFAULT_MENTION_CONFIDENCE,
+            }
+
+        relations: list[dict[str, Any]] = []
+        for row in payload.relations:
+            source_name = row.source.strip()
+            target_name = row.target.strip()
+            source_key = source_name.lower()
+            target_key = target_name.lower()
+            if source_key not in entities_by_name or target_key not in entities_by_name:
+                continue
+            relations.append(
+                {
+                    "source_id": entities_by_name[source_key]["id"],
+                    "target_id": entities_by_name[target_key]["id"],
+                    "source_name": entities_by_name[source_key]["name"],
+                    "target_name": entities_by_name[target_key]["name"],
+                    "type": row.type,
+                    "confidence": row.confidence or _DEFAULT_RELATION_CONFIDENCE,
+                }
+            )
+
+        return list(entities_by_name.values()), relations
+
+    def _parse_entity_relation_payload_with_repair(
+        self,
+        llm: Any,
+        *,
+        text_out: str,
+        schema_text: str,
+        parse_payload: Any,
+    ) -> Any:
+        try:
+            return parse_payload(text_out)
+        except Exception as exc:
+            repair_prompt = build_validation_retry_prompt(
+                schema_text=schema_text,
+                invalid_response=text_out,
+                validation_error=exc,
+            )
+            repair_response = llm.invoke(repair_prompt)
+            repaired_text = self._llm_response_text(repair_response)
+            return parse_payload(repaired_text)
+
     def _extract_entities_relations(
         self, text: str
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        prompt = (
-            "Extract entities and directed relationships from the text.\n"
-            "Return STRICT JSON only with this schema:\n"
-            '{"entities":[{"name":str,"entity_type":str,"confidence":float}],'
-            '"relations":[{"source":str,"target":str,"type":str,"confidence":float}]}\n'
-            "Limit entities to the most relevant 20.\n"
-            f"TEXT:\n{text[:4500]}"
+        results = self._extract_entities_relations_batched([text])
+        return results[0]
+
+    def _extract_entities_relations_batched(
+        self, chunk_texts: list[str]
+    ) -> list[tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
+        if not chunk_texts:
+            return []
+
+        single_chunk_schema = (
+            '{"entities":[{"name":"<entity name>","entity_type":"<type>","confidence":0.0-1.0}],'
+            '"relations":[{"source":"<entity name>","target":"<entity name>",'
+            '"type":"<relationship type>","confidence":0.0-1.0}]}'
         )
+        batched_schema = (
+            '{"chunks":[{"chunk_index":0,"entities":[{"name":"<entity name>",'
+            '"entity_type":"<type>","confidence":0.0-1.0}],'
+            '"relations":[{"source":"<entity name>","target":"<entity name>",'
+            '"type":"<relationship type>","confidence":0.0-1.0}]}]}'
+        )
+
+        if len(chunk_texts) == 1:
+            prompt = (
+                "Extract entities and directed relationships from the text.\n"
+                "Return STRICT JSON only with this schema:\n"
+                '{"entities":[{"name":str,"entity_type":str,"confidence":float}],'
+                '"relations":[{"source":str,"target":str,"type":str,"confidence":float}]}\n'
+                "Limit entities to the most relevant 20.\n"
+                f"TEXT:\n{chunk_texts[0][:4500]}"
+            )
+            parse_payload = parse_entity_relation_extraction_json
+            schema_text = single_chunk_schema
+        else:
+            chunk_sections = []
+            for idx, chunk_text in enumerate(chunk_texts):
+                chunk_sections.append(f"CHUNK {idx}:\n{chunk_text[:4500]}")
+            prompt = (
+                "Extract entities and directed relationships from each text chunk.\n"
+                "Return STRICT JSON only with this schema:\n"
+                '{"chunks":[{"chunk_index":int,"entities":[{"name":str,"entity_type":str,'
+                '"confidence":float}],"relations":[{"source":str,"target":str,"type":str,'
+                '"confidence":float}]}]}\n'
+                "Include one object per chunk index. Limit entities to the most relevant 20 per chunk.\n"
+                + "\n\n".join(chunk_sections)
+            )
+            parse_payload = parse_batched_entity_relation_extraction_json
+            schema_text = batched_schema
 
         try:
             llm = get_llm(temperature=0.1)
             response = llm.invoke(prompt)
-            content = response.content if hasattr(response, "content") else response
-            if isinstance(content, list):
-                text_out = "\n".join(
-                    part if isinstance(part, str) else str(part.get("text", ""))
-                    for part in content
-                )
-            else:
-                text_out = str(content)
+            text_out = self._llm_response_text(response)
+            payload = self._parse_entity_relation_payload_with_repair(
+                llm,
+                text_out=text_out,
+                schema_text=schema_text,
+                parse_payload=parse_payload,
+            )
 
-            try:
-                payload = parse_entity_relation_extraction_json(text_out)
-            except Exception as exc:
-                repair_prompt = build_validation_retry_prompt(
-                    schema_text=(
-                        '{"entities":[{"name":"<entity name>","entity_type":"<type>","confidence":0.0-1.0}],'
-                        '"relations":[{"source":"<entity name>","target":"<entity name>",'
-                        '"type":"<relationship type>","confidence":0.0-1.0}]}'
-                    ),
-                    invalid_response=text_out,
-                    validation_error=exc,
-                )
-                repair_response = llm.invoke(repair_prompt)
-                repair_content = (
-                    repair_response.content if hasattr(repair_response, "content") else repair_response
-                )
-                if isinstance(repair_content, list):
-                    text_out = "\n".join(
-                        part if isinstance(part, str) else str(part.get("text", ""))
-                        for part in repair_content
-                    )
+            if len(chunk_texts) == 1:
+                single_payload = payload
+                entities, relations = self._entities_relations_from_payload(single_payload)
+                if entities:
+                    return [(entities, relations)]
+                return [self._heuristic_entities_relations(chunk_texts[0])]
+
+            by_index: dict[int, tuple[list[dict[str, Any]], list[dict[str, Any]]]] = {}
+            for chunk_payload in payload.chunks:
+                entities, relations = self._entities_relations_from_payload(chunk_payload)
+                by_index[chunk_payload.chunk_index] = (entities, relations)
+
+            results: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = []
+            for idx, chunk_text in enumerate(chunk_texts):
+                extracted = by_index.get(idx)
+                if extracted and extracted[0]:
+                    results.append(extracted)
                 else:
-                    text_out = str(repair_content)
-                payload = parse_entity_relation_extraction_json(text_out)
-
-            entities_by_name: dict[str, dict[str, Any]] = {}
-            for row in payload.entities:
-                name = row.name.strip()
-                normalized = name.lower()
-                if normalized in entities_by_name:
-                    continue
-                entities_by_name[normalized] = {
-                    "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),  # nosec B324 — graph node ID, not a security hash
-                    "name": name,
-                    "normalized_name": normalized,
-                    "entity_type": row.entity_type,
-                    "confidence": row.confidence or _DEFAULT_MENTION_CONFIDENCE,
-                }
-
-            relations: list[dict[str, Any]] = []
-            for row in payload.relations:
-                source_name = row.source.strip()
-                target_name = row.target.strip()
-                source_key = source_name.lower()
-                target_key = target_name.lower()
-                if (
-                    source_key not in entities_by_name
-                    or target_key not in entities_by_name
-                ):
-                    continue
-                relations.append(
-                    {
-                        "source_id": entities_by_name[source_key]["id"],
-                        "target_id": entities_by_name[target_key]["id"],
-                        "source_name": entities_by_name[source_key]["name"],
-                        "target_name": entities_by_name[target_key]["name"],
-                        "type": row.type,
-                        "confidence": row.confidence or _DEFAULT_RELATION_CONFIDENCE,
-                    }
-                )
-
-            if entities_by_name:
-                return list(entities_by_name.values()), relations
+                    results.append(self._heuristic_entities_relations(chunk_text))
+            return results
         except Exception as exc:
-            logger.info("[graph_store] llm extraction fallback: %s", exc)
+            logger.info("[graph_store] batched llm extraction fallback: %s", exc)
 
-        return self._heuristic_entities_relations(text)
+        return [self._heuristic_entities_relations(chunk_text) for chunk_text in chunk_texts]
 
     def ingest_document(
         self,
@@ -321,6 +389,13 @@ class Neo4jGraphStore:
         mention_rows: list[dict[str, Any]] = []
         relation_rows: list[dict[str, Any]] = []
         skip_graph_llm = source_type in _FAST_INGEST_SOURCE_TYPES
+        llm_chunk_extractions: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] | None = (
+            None
+        )
+        if not skip_graph_llm:
+            llm_chunks = chunks[:_MAX_LLM_EXTRACTION_CHUNKS]
+            if llm_chunks:
+                llm_chunk_extractions = self._extract_entities_relations_batched(llm_chunks)
 
         for idx, chunk_text in enumerate(chunks):
             chunk_id = hashlib.sha1(f"{document_id}:{idx}".encode("utf-8")).hexdigest()  # nosec B324 — chunk ID for graph linking, not a security hash
@@ -352,8 +427,8 @@ class Neo4jGraphStore:
 
             if skip_graph_llm:
                 entities, relations = [], []
-            elif idx < _MAX_LLM_EXTRACTION_CHUNKS:
-                entities, relations = self._extract_entities_relations(chunk_text)
+            elif idx < _MAX_LLM_EXTRACTION_CHUNKS and llm_chunk_extractions is not None:
+                entities, relations = llm_chunk_extractions[idx]
             else:
                 # Keep graph coverage on long documents without paying for LLM extraction
                 # on every chunk.
