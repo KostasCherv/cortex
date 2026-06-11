@@ -24,7 +24,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(
         default="http://localhost:11434", description="Ollama base URL"
     )
-    ollama_model: str = Field(default="llama3.2", description="Ollama model name")
+    lmstudio_base_url: str = Field(
+        default="http://localhost:1234/v1", description="LM Studio base URL"
+    )
+    lmstudio_model: str = Field(default="model", description="LM Studio model name")
     embedding_provider: str = Field(
         default="openai",
         description="Embedding provider: 'ollama' or 'openai'",

@@ -44,6 +44,7 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         if not settings.openai_api_key:
             raise ConfigurationError("OPENAI_API_KEY is not set.")
         from langchain_openai import ChatOpenAI
+
         return ChatOpenAI(
             model=settings.openai_model,
             temperature=temperature,
@@ -74,6 +75,17 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
             **common_kwargs,
         )
 
+    if provider == "lmstudio":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=settings.lmstudio_model,
+            temperature=temperature,
+            base_url=settings.lmstudio_base_url,
+            api_key="lm-studio",
+            **common_kwargs,
+        )
+
     raise ConfigurationError(
-        f"Unknown LLM_PROVIDER '{provider}'. Choose 'openai', 'ollama', or 'openrouter'."
+        f"Unknown LLM_PROVIDER '{provider}'. Choose 'openai', 'ollama', 'openrouter', or 'lmstudio'."
     )
