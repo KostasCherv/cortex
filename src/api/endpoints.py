@@ -117,6 +117,7 @@ from src.rag import (
     append_chat_message,
     delete_last_exchange,
     delete_chat_session as delete_rag_chat_session,
+    delete_rag_chat_session_attachment,
     delete_rag_chat_session_attachments_and_artifacts,
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
@@ -309,6 +310,10 @@ class UpdateSessionTitleRequest(BaseModel):
     title: str
 
 
+class CreateRagChatSessionRequest(BaseModel):
+    filename: str | None = None
+
+
 class RunFeedbackRequest(BaseModel):
     helpful: bool
     comment: str | None = None
@@ -387,6 +392,52 @@ class MemoryUpdateRequest(BaseModel):
 @app.exception_handler(CortexError)
 async def cortex_error_handler(request: Request, exc: CortexError) -> JSONResponse:
     raise HTTPException(status_code=500, detail=str(exc))
+
+
+async def _require_agent_chat_session(
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+) -> None:
+    agent_bundle = await get_agent_for_chat(agent_id, user_id)
+    if agent_bundle is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=user_id,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chat session '{session_id}' not found."
+        )
+
+
+async def _files_needing_session_ingest(
+    *,
+    session_id: str,
+    agent_id: str,
+    user_id: str,
+    files: list[UploadFile],
+) -> list[UploadFile]:
+    if not files:
+        return []
+    existing = await list_rag_chat_session_attachments(
+        session_id=session_id,
+        owner_id=user_id,
+        agent_id=agent_id,
+    )
+    ready_filenames = {
+        attachment.filename
+        for attachment in existing
+        if attachment.state == "ready" and attachment.filename
+    }
+    return [
+        file
+        for file in files
+        if (file.filename or "") not in ready_filenames
+    ]
 
 
 def _raise_rag_validation_error(exc: RagValidationError) -> None:
@@ -2294,12 +2345,19 @@ async def rag_chat_with_agent(
                     raise HTTPException(
                         status_code=404, detail=f"Agent '{agent_id}' not found."
                     )
-                await ingest_agent_chat_session_uploads(
+                files_to_ingest = await _files_needing_session_ingest(
                     session_id=chat_session_id,
                     agent_id=agent_id,
                     user_id=current_user.user_id,
                     files=files,
                 )
+                if files_to_ingest:
+                    await ingest_agent_chat_session_uploads(
+                        session_id=chat_session_id,
+                        agent_id=agent_id,
+                        user_id=current_user.user_id,
+                        files=files_to_ingest,
+                    )
                 prepared = await prepare_agent_rag_chat(
                     agent_id=agent_id,
                     user_id=current_user.user_id,
@@ -2496,14 +2554,21 @@ async def rag_chat_with_agent_stream(
                             status_code=404, detail=f"Agent '{agent_id}' not found."
                         )
                     yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing attachment…'})}\n\n"
-                    await ingest_agent_chat_session_uploads(
+                    files_to_ingest = await _files_needing_session_ingest(
                         session_id=chat_session_id,
                         agent_id=agent_id,
                         user_id=current_user.user_id,
                         files=files,
                     )
-                    yield f"data: {json.dumps({'type': 'status', 'message': 'Preparing document context…'})}\n\n"
+                    if files_to_ingest:
+                        yield f"data: {json.dumps({'type': 'status', 'message': 'Processing attachment…'})}\n\n"
+                        await ingest_agent_chat_session_uploads(
+                            session_id=chat_session_id,
+                            agent_id=agent_id,
+                            user_id=current_user.user_id,
+                            files=files_to_ingest,
+                        )
+                        yield f"data: {json.dumps({'type': 'status', 'message': 'Preparing document context…'})}\n\n"
                     prepared = await prepare_agent_rag_chat(
                         agent_id=agent_id,
                         user_id=current_user.user_id,
@@ -2683,6 +2748,101 @@ async def list_rag_agent_chat_session_messages(
         "agent_id": agent_id,
         "messages": [m.to_dict() for m in messages],
     }
+
+
+@app.post("/api/rag/agents/{agent_id}/chat/sessions", tags=["RAG"])
+async def create_rag_agent_chat_session(
+    agent_id: str,
+    body: CreateRagChatSessionRequest | None = None,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
+    if agent_bundle is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+
+    initial_message = None
+    if body and body.filename:
+        initial_message = f"Attached: {body.filename.strip()}"
+
+    session_id = await create_or_get_chat_session(
+        user_id=current_user.user_id,
+        agent_id=agent_id,
+        session_id=None,
+        initial_message=initial_message,
+    )
+    return {"session_id": session_id, "agent_id": agent_id}
+
+
+@app.post(
+    "/api/rag/agents/{agent_id}/chat/sessions/{session_id}/attachments",
+    tags=["RAG"],
+)
+async def upload_rag_agent_chat_session_attachments(
+    agent_id: str,
+    session_id: str,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _require_agent_chat_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+
+    form = await request.form()
+    files = [
+        value
+        for key, value in form.multi_items()
+        if key == "files" and isinstance(value, StarletteUploadFile)
+    ]
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required.")
+
+    try:
+        attachments = await ingest_agent_chat_session_uploads(
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=current_user.user_id,
+            files=files,
+        )
+    except RagValidationError as exc:
+        _raise_rag_validation_error(exc)
+
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "attachments": [attachment.to_dict() for attachment in attachments],
+    }
+
+
+@app.delete(
+    "/api/rag/agents/{agent_id}/chat/sessions/{session_id}/attachments/{attachment_id}",
+    tags=["RAG"],
+)
+async def delete_rag_agent_chat_session_attachment_endpoint(
+    agent_id: str,
+    session_id: str,
+    attachment_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _require_agent_chat_session(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+
+    deleted = await delete_rag_chat_session_attachment(
+        session_id=session_id,
+        attachment_id=attachment_id,
+        owner_id=current_user.user_id,
+        agent_id=agent_id,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Attachment '{attachment_id}' not found.",
+        )
+    return {"session_id": session_id, "attachment_id": attachment_id, "deleted": True}
 
 
 @app.get(

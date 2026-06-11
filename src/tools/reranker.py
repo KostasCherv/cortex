@@ -116,7 +116,11 @@ def _rerank_with_cohere(
 
     if ranked:
         return ranked[:top_k]
-    return []
+    logger.info(
+        "[reranker] no chunks met relevance threshold %.2f; using retrieval order",
+        threshold,
+    )
+    return _fallback(chunks, top_k)
 
 
 def rerank_chunks(

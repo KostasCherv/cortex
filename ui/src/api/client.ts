@@ -1003,6 +1003,69 @@ export async function listRagAgentChatSessionAttachments(
   return (await response.json()) as { attachments: SessionAttachment[] }
 }
 
+export async function createRagAgentChatSession(
+  agentId: string,
+  accessToken: string | null,
+  options?: { filename?: string },
+): Promise<{ session_id: string; agent_id: string }> {
+  const response = await fetch(`${API_BASE}/api/rag/agents/${agentId}/chat/sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(accessToken) as Record<string, string>,
+    },
+    body: JSON.stringify(options?.filename ? { filename: options.filename } : {}),
+  })
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to create chat session: ${response.status}`))
+  }
+  return (await response.json()) as { session_id: string; agent_id: string }
+}
+
+export async function uploadRagAgentChatSessionAttachments(
+  agentId: string,
+  sessionId: string,
+  files: File[],
+  accessToken: string | null,
+  signal?: AbortSignal,
+): Promise<{ attachments: SessionAttachment[] }> {
+  const form = new FormData()
+  for (const file of files) {
+    form.append('files', file)
+  }
+  const response = await fetch(
+    `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/attachments`,
+    {
+      method: 'POST',
+      headers: authHeaders(accessToken) as Record<string, string>,
+      body: form,
+      signal,
+    },
+  )
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to upload session attachments: ${response.status}`))
+  }
+  return (await response.json()) as { attachments: SessionAttachment[] }
+}
+
+export async function deleteRagAgentChatSessionAttachment(
+  agentId: string,
+  sessionId: string,
+  attachmentId: string,
+  accessToken: string | null,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/attachments/${attachmentId}`,
+    {
+      method: 'DELETE',
+      headers: authHeaders(accessToken),
+    },
+  )
+  if (!response.ok) {
+    throw new Error(await parseApiError(response, `Failed to delete session attachment: ${response.status}`))
+  }
+}
+
 export async function listRagWorkspaceChatSessions(
   accessToken: string | null,
 ): Promise<{ sessions: RagChatSessionSummary[] }> {

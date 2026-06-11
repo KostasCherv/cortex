@@ -21,6 +21,13 @@ const ACCEPTED_MIME = [
   'text/markdown',
 ].join(',')
 
+type PendingFileUpload = {
+  id: string
+  file: File
+  status: 'uploading' | 'failed'
+  error?: string
+}
+
 type Props = {
   transport: ChatTransport
   accessToken: string
@@ -126,7 +133,15 @@ function CitationMarkers({ citations }: { citations: RagChatMessage['citations']
   )
 }
 
-function AttachmentShelf({ attachments }: { attachments: SessionAttachment[] }) {
+function AttachmentShelf({
+  attachments,
+  onDelete,
+  deletingAttachmentId,
+}: {
+  attachments: SessionAttachment[]
+  onDelete?: (attachmentId: string) => void
+  deletingAttachmentId?: string | null
+}) {
   if (attachments.length === 0) return null
   return (
     <div className="mx-6 mb-3 flex flex-wrap gap-2 max-md:mx-4">
@@ -147,6 +162,17 @@ function AttachmentShelf({ attachments }: { attachments: SessionAttachment[] }) 
           >
             {a.state}
           </Badge>
+          {a.state === 'ready' && onDelete && (
+            <button
+              type="button"
+              aria-label={`Remove ${a.filename}`}
+              className="rounded text-muted-foreground hover:text-foreground disabled:opacity-50"
+              disabled={deletingAttachmentId === a.attachment_id}
+              onClick={() => onDelete(a.attachment_id)}
+            >
+              <X size={10} />
+            </button>
+          )}
         </div>
       ))}
     </div>
@@ -175,8 +201,10 @@ export function ChatThreadContainer({
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [toolConfig, setToolConfig] = useState<ToolConfig>(() => defaultToolConfig())
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [pendingUploads, setPendingUploads] = useState<PendingFileUpload[]>([])
   const [sessionAttachments, setSessionAttachments] = useState<SessionAttachment[]>([])
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null)
+  const uploadingAttachments = pendingUploads.some((upload) => upload.status === 'uploading')
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
@@ -207,8 +235,9 @@ export function ChatThreadContainer({
     setLatestSuggestions([])
     setEditingMessageId(null)
     setToolConfig(defaultToolConfig())
-    setPendingFiles([])
+    setPendingUploads([])
     setSessionAttachments([])
+    setDeletingAttachmentId(null)
   }, [transport.key])
 
   useEffect(() => {
@@ -247,6 +276,84 @@ export function ChatThreadContainer({
     [accessToken, transport],
   )
 
+  const refreshSessionAttachments = useCallback(
+    async (targetSessionId: string) => {
+      if (!transport.loadSessionAttachments) return
+      try {
+        const attachments = await transport.loadSessionAttachments(targetSessionId, accessToken)
+        setSessionAttachments(attachments)
+      } catch {
+        // attachment list failure is non-fatal
+      }
+    },
+    [accessToken, transport],
+  )
+
+  const uploadPendingFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0 || !transport.uploadAttachments || !transport.ensureSession) return
+
+      const uploadIds = files.map(() => crypto.randomUUID())
+      setPendingUploads((prev) => [
+        ...prev,
+        ...files.map((file, index) => ({
+          id: uploadIds[index],
+          file,
+          status: 'uploading' as const,
+        })),
+      ])
+
+      try {
+        let targetSessionId = sessionId
+        if (!targetSessionId) {
+          targetSessionId = await transport.ensureSession(accessToken, files[0]?.name)
+          loadedSessionRef.current = targetSessionId
+          setSessionId(targetSessionId)
+          onSessionActivated(targetSessionId)
+        }
+        const uploaded = await transport.uploadAttachments(targetSessionId, files, accessToken)
+        setSessionAttachments((prev) => {
+          const byId = new Map(prev.map((attachment) => [attachment.attachment_id, attachment]))
+          for (const attachment of uploaded) {
+            byId.set(attachment.attachment_id, attachment)
+          }
+          return Array.from(byId.values())
+        })
+        setPendingUploads((prev) => prev.filter((upload) => !uploadIds.includes(upload.id)))
+        onSessionsChanged()
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Upload failed.'
+        setPendingUploads((prev) =>
+          prev.map((upload) =>
+            uploadIds.includes(upload.id)
+              ? { ...upload, status: 'failed', error: message }
+              : upload,
+          ),
+        )
+        setError(message)
+      }
+    },
+    [accessToken, onSessionActivated, onSessionsChanged, sessionId, transport],
+  )
+
+  const handleDeleteAttachment = useCallback(
+    async (attachmentId: string) => {
+      if (!sessionId || !transport.deleteAttachment) return
+      setDeletingAttachmentId(attachmentId)
+      try {
+        await transport.deleteAttachment(sessionId, attachmentId, accessToken)
+        setSessionAttachments((prev) =>
+          prev.filter((attachment) => attachment.attachment_id !== attachmentId),
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to remove attachment.')
+      } finally {
+        setDeletingAttachmentId(null)
+      }
+    },
+    [accessToken, sessionId, transport],
+  )
+
   useEffect(() => {
     if (!activeSessionId) {
       if (activeSessionId === null && loadedSessionRef.current !== null) {
@@ -270,13 +377,14 @@ export function ChatThreadContainer({
     },
   ) => {
     const text = overrideText ?? input
-    if (!text.trim() || chatting) return
+    if (!text.trim() || chatting || uploadingAttachments) return
     const question = text.trim()
     const requestId = ++messagesRequestRef.current
     lastExchangePersistedRef.current = false
 
-    const filesToSend = [...pendingFiles]
-    setPendingFiles([])
+    const readyAttachmentNames = sessionAttachments
+      .filter((attachment) => attachment.state === 'ready')
+      .map((attachment) => attachment.filename)
 
     if (!opts?.skipOptimisticAppend) {
       const optimisticUserMessage: RagChatMessage = {
@@ -285,8 +393,8 @@ export function ChatThreadContainer({
         agent_id: null,
         owner_id: '',
         role: 'user',
-        content: filesToSend.length > 0
-          ? `${question}\n\n📎 ${filesToSend.map((f) => f.name).join(', ')}`
+        content: readyAttachmentNames.length > 0
+          ? `${question}\n\n📎 ${readyAttachmentNames.join(', ')}`
           : question,
         citations: [],
         created_at: new Date().toISOString(),
@@ -384,6 +492,9 @@ export function ChatThreadContainer({
           setStreamingStatus(null)
           lastExchangePersistedRef.current = true
           onSessionsChanged()
+          if (finalSessionId !== 'pending') {
+            void refreshSessionAttachments(finalSessionId)
+          }
         },
         onError: (streamError) => {
           streamFailed = true
@@ -392,7 +503,7 @@ export function ChatThreadContainer({
           setStreamingText('')
           setStreamingStatus(null)
         },
-      }, toolConfig, filesToSend.length > 0 ? filesToSend : undefined)
+      }, toolConfig)
     } catch (err) {
       if (controller.signal.aborted) return
       if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
@@ -507,7 +618,11 @@ export function ChatThreadContainer({
       </ScrollArea>
 
       {sessionAttachments.length > 0 && (
-        <AttachmentShelf attachments={sessionAttachments} />
+        <AttachmentShelf
+          attachments={sessionAttachments}
+          onDelete={transport.deleteAttachment ? handleDeleteAttachment : undefined}
+          deletingAttachmentId={deletingAttachmentId}
+        />
       )}
 
       {error && <p role="alert" className="mx-6 mb-2 shrink-0 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive max-md:mx-4">{error}</p>}
@@ -531,21 +646,31 @@ export function ChatThreadContainer({
           </div>
         )}
 
-        {pendingFiles.length > 0 && (
+        {pendingUploads.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
-            {pendingFiles.map((file, i) => (
+            {pendingUploads.map((upload) => (
               <div
-                key={`${file.name}-${i}`}
+                key={upload.id}
                 className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-2 py-1 text-[11px]"
               >
                 <Paperclip size={10} className="shrink-0 text-muted-foreground" />
-                <span className="max-w-[120px] truncate text-foreground">{file.name}</span>
-                <span className="text-muted-foreground">({formatBytes(file.size)})</span>
+                <span className="max-w-[120px] truncate text-foreground">{upload.file.name}</span>
+                <span className="text-muted-foreground">({formatBytes(upload.file.size)})</span>
+                <Badge
+                  variant="outline"
+                  className={cn('text-[10px] px-1 py-0 h-4', {
+                    'border-muted-foreground/30 text-muted-foreground': upload.status === 'uploading',
+                    'border-destructive/40 text-destructive': upload.status === 'failed',
+                  })}
+                >
+                  {upload.status === 'uploading' ? 'uploading' : 'failed'}
+                </Badge>
                 <button
                   type="button"
-                  aria-label={`Remove ${file.name}`}
+                  aria-label={`Remove ${upload.file.name}`}
                   className="ml-0.5 rounded text-muted-foreground hover:text-foreground"
-                  onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                  disabled={upload.status === 'uploading'}
+                  onClick={() => setPendingUploads((prev) => prev.filter((item) => item.id !== upload.id))}
                 >
                   <X size={10} />
                 </button>
@@ -566,7 +691,7 @@ export function ChatThreadContainer({
                 onChange={(e) => {
                   const selected = Array.from(e.target.files ?? [])
                   if (selected.length > 0) {
-                    setPendingFiles((prev) => [...prev, ...selected])
+                    void uploadPendingFiles(selected)
                   }
                   e.target.value = ''
                 }}
@@ -577,7 +702,7 @@ export function ChatThreadContainer({
                 variant="ghost"
                 className="shrink-0"
                 aria-label="Attach files"
-                disabled={chatting}
+                disabled={chatting || uploadingAttachments}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Paperclip size={15} />
@@ -603,7 +728,7 @@ export function ChatThreadContainer({
                 void (editingMessageId ? submitEdit() : send())
               }
             }}
-            disabled={chatting}
+            disabled={chatting || uploadingAttachments}
           />
           {chatting ? (
             <Button
@@ -628,7 +753,7 @@ export function ChatThreadContainer({
             <Button
               size="icon"
               onClick={() => void (editingMessageId ? submitEdit() : send())}
-              disabled={!input.trim() && pendingFiles.length === 0}
+              disabled={!input.trim() || uploadingAttachments}
               aria-label={editingMessageId ? 'Update and resend' : 'Send message'}
             >
               <SendHorizontal size={15} />

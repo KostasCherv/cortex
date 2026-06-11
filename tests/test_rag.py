@@ -2,6 +2,8 @@ import logging
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from starlette.datastructures import UploadFile
 
 from src.rag import (
@@ -17,6 +19,7 @@ from src.rag import (
     get_chat_session,
     list_chat_sessions,
     retrieve_context_for_query,
+    retrieve_merged_context_for_agent_chat,
     suggest_agent_definition,
     suggest_chat_session_title,
     update_chat_session_title,
@@ -468,3 +471,70 @@ async def test_delete_last_exchange_propagates_empty_error():
 
     assert deleted is False
     assert err == "empty"
+
+
+async def test_retrieve_merged_context_prioritizes_session_attachments():
+    attachment_context = MagicMock(
+        context="[source:Fence_Backend.pdf chunk:a1]\nBackend role",
+        chunks=[{"chunk_id": "a1", "text": "Backend role", "source_title": "Fence_Backend.pdf"}],
+        entities=["backend"],
+    )
+    agent_context = MagicMock(
+        context="[source:CV.pdf chunk:b1]\nMy resume",
+        chunks=[{"chunk_id": "b1", "text": "My resume", "source_title": "CV.pdf"}],
+        entities=["resume"],
+    )
+
+    with patch(
+        "src.rag.retrieve_context_for_query",
+        new=AsyncMock(side_effect=[attachment_context, agent_context]),
+    ) as retrieve_mock:
+        result = await retrieve_merged_context_for_agent_chat(
+            user_id="user-1",
+            agent_resource_ids=["agent-res-1", "agent-res-2"],
+            session_attachment_resource_ids=["attachment-res-1"],
+            session_attachment_files=["Fence_Backend.pdf"],
+            question="analyze the fence backend file",
+        )
+
+    assert retrieve_mock.await_count == 2
+    assert result.chunks[0]["chunk_id"] == "a1"
+    assert "Backend role" in result.context
+    assert "My resume" in result.context
+    attachment_call = retrieve_mock.await_args_list[0].kwargs
+    assert attachment_call["resource_ids"] == ["attachment-res-1"]
+    assert "Fence_Backend.pdf" in attachment_call["question"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_single_session_attachment_fails_when_no_text_extracted():
+    from src.rag import ingest_single_session_attachment
+
+    file = UploadFile(
+        filename="scanned.pdf",
+        file=BytesIO(b"%PDF-1.4"),
+        headers={"content-type": "application/pdf"},
+    )
+    mock_store = MagicMock()
+    mock_store.create_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_store.update_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_storage = MagicMock()
+    mock_storage.upload_bytes = AsyncMock(return_value="supabase://bucket/scanned.pdf")
+    mock_storage.delete_object = AsyncMock()
+
+    with (
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
+        patch("src.rag.ingest_resource_from_bytes", new=AsyncMock(return_value=0)),
+        patch("src.rag.uuid.uuid4", side_effect=["res-1", "att-1"]),
+    ):
+        with pytest.raises(RagValidationError) as exc_info:
+            await ingest_single_session_attachment(
+                session_id="chat-1",
+                agent_id="agent-1",
+                user_id="test-user",
+                file=file,
+            )
+
+    assert exc_info.value.code == "processing_failed"
+    assert "No extractable text" in str(exc_info.value)

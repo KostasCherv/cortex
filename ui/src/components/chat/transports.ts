@@ -1,5 +1,7 @@
 import {
+  createRagAgentChatSession,
   deleteRagAgentChatLastExchange,
+  deleteRagAgentChatSessionAttachment,
   deleteRagWorkspaceChatLastExchange,
   getRagAgentChatSessionMessages,
   getRagWorkspaceChatSessionMessages,
@@ -8,6 +10,7 @@ import {
   listRagWorkspaceChatSessions,
   streamRagAgentChat,
   streamRagWorkspaceChat,
+  uploadRagAgentChatSessionAttachments,
 } from '@/api/client'
 import type { RagChatMessage, RagChatSessionSummary, SessionAttachment } from '@/types'
 import type { ToolConfig } from './toolConfig'
@@ -36,6 +39,21 @@ export type ChatTransport = {
     sessionId: string,
     accessToken: string,
   ) => Promise<SessionAttachment[]>
+  ensureSession?: (
+    accessToken: string,
+    filename?: string,
+  ) => Promise<string>
+  uploadAttachments?: (
+    sessionId: string,
+    files: File[],
+    accessToken: string,
+    signal?: AbortSignal,
+  ) => Promise<SessionAttachment[]>
+  deleteAttachment?: (
+    sessionId: string,
+    attachmentId: string,
+    accessToken: string,
+  ) => Promise<void>
   streamMessage: (
     message: string,
     sessionId: string | null,
@@ -65,6 +83,23 @@ export function createAgentChatTransport(agentId: string): ChatTransport {
     loadSessionAttachments: async (sessionId, accessToken) => {
       const res = await listRagAgentChatSessionAttachments(agentId, sessionId, accessToken)
       return res.attachments
+    },
+    ensureSession: async (accessToken, filename) => {
+      const res = await createRagAgentChatSession(agentId, accessToken, { filename })
+      return res.session_id
+    },
+    uploadAttachments: async (sessionId, files, accessToken, signal) => {
+      const res = await uploadRagAgentChatSessionAttachments(
+        agentId,
+        sessionId,
+        files,
+        accessToken,
+        signal,
+      )
+      return res.attachments
+    },
+    deleteAttachment: async (sessionId, attachmentId, accessToken) => {
+      await deleteRagAgentChatSessionAttachment(agentId, sessionId, attachmentId, accessToken)
     },
     streamMessage: async (message, sessionId, accessToken, callbacks, tools, files) => {
       await streamRagAgentChat(agentId, message, sessionId, accessToken, {

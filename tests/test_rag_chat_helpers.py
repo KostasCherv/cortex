@@ -284,7 +284,7 @@ async def test_prepare_agent_merges_session_attachment_resource_ids():
     ) as mock_list_attachments, patch(
         "src.api.rag_chat_helpers.get_composio_toolset_manager"
     ) as mock_mgr, patch(
-        "src.api.rag_chat_helpers.retrieve_context_for_query",
+        "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
         new_callable=AsyncMock,
         return_value=rag_context,
     ) as mock_retrieve, patch(
@@ -319,7 +319,9 @@ async def test_prepare_agent_merges_session_attachment_resource_ids():
     )
     mock_retrieve.assert_awaited_once_with(
         user_id="user-1",
-        resource_ids=["agent-res-1", "attachment-res-1", "attachment-res-2"],
+        agent_resource_ids=["agent-res-1"],
+        session_attachment_resource_ids=["attachment-res-1", "attachment-res-2"],
+        session_attachment_files=["brief.pdf", "notes.txt"],
         question="What changed?",
     )
 
@@ -353,7 +355,7 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
     ), patch(
         "src.api.rag_chat_helpers.get_composio_toolset_manager"
     ) as mock_mgr, patch(
-        "src.api.rag_chat_helpers.retrieve_context_for_query",
+        "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
         new_callable=AsyncMock,
         return_value=rag_context,
     ) as mock_retrieve, patch(
@@ -380,7 +382,9 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
     assert result.resource_ids == ["shared-res", "agent-res-1", "attachment-res-1"]
     mock_retrieve.assert_awaited_once_with(
         user_id="user-1",
-        resource_ids=["shared-res", "agent-res-1", "attachment-res-1"],
+        agent_resource_ids=["shared-res", "agent-res-1"],
+        session_attachment_resource_ids=["shared-res", "attachment-res-1"],
+        session_attachment_files=["shared.pdf", "brief.pdf"],
         question="What changed?",
     )
 

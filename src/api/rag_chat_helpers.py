@@ -29,6 +29,7 @@ from src.rag import (
     list_ready_rag_chat_session_attachment_resource_ids,
     list_workspace_ready_resource_ids,
     retrieve_context_for_query,
+    retrieve_merged_context_for_agent_chat,
 )
 from src.rag_engine import RagQueryResult
 from src.tools.composio_toolset import get_composio_toolset_manager
@@ -251,9 +252,11 @@ async def prepare_agent_rag_chat(
     timings.tools_bound = bind_tools
     timings.tool_skip_reason = tool_skip_reason
 
-    retrieve_task = retrieve_context_for_query(
+    retrieve_task = retrieve_merged_context_for_agent_chat(
         user_id=user_id,
-        resource_ids=merged_resource_ids,
+        agent_resource_ids=resource_ids,
+        session_attachment_resource_ids=session_attachment_resource_ids,
+        session_attachment_files=session_attachment_files,
         question=normalized_message,
     )
     memory_task = get_user_memory_prompt_block(user_id, normalized_message)

@@ -1047,6 +1047,94 @@ async def retrieve_context_for_query(
     )
 
 
+def _merge_rag_query_results(
+    primary: RagQueryResult,
+    secondary: RagQueryResult,
+) -> RagQueryResult:
+    seen_chunk_ids: set[str] = set()
+    merged_chunks: list[dict] = []
+    for chunk in primary.chunks + secondary.chunks:
+        chunk_id = str(chunk.get("chunk_id") or "")
+        if chunk_id:
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+        merged_chunks.append(chunk)
+
+    entities: list[str] = []
+    seen_entities: set[str] = set()
+    for value in (primary.entities or []) + (secondary.entities or []):
+        if value in seen_entities:
+            continue
+        seen_entities.add(value)
+        entities.append(value)
+
+    context_parts: list[str] = []
+    for row in merged_chunks:
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        context_parts.append(
+            f"[source:{row.get('source_title', '')} chunk:{row.get('chunk_id', '')}]\n{text}"
+        )
+
+    return RagQueryResult(
+        context="\n\n".join(context_parts),
+        chunks=merged_chunks,
+        entities=entities or None,
+    )
+
+
+async def retrieve_merged_context_for_agent_chat(
+    *,
+    user_id: str,
+    agent_resource_ids: list[str],
+    session_attachment_resource_ids: list[str],
+    session_attachment_files: list[str],
+    question: str,
+) -> RagQueryResult:
+    """Retrieve attachment and agent resources separately so uploads are not crowded out."""
+    attachment_ids = list(session_attachment_resource_ids)
+    attachment_id_set = set(attachment_ids)
+    agent_only_ids = [rid for rid in agent_resource_ids if rid not in attachment_id_set]
+
+    if attachment_ids:
+        attachment_question = question
+        if session_attachment_files:
+            attachment_question = (
+                f"{question}\n\nAttached files: {', '.join(session_attachment_files)}"
+            )
+        attachment_context = await retrieve_context_for_query(
+            user_id=user_id,
+            resource_ids=attachment_ids,
+            question=attachment_question,
+        )
+        if not attachment_context.chunks:
+            logger.warning(
+                "[rag] session attachment retrieval returned no chunks user_id=%s resource_ids=%s files=%s",
+                user_id,
+                attachment_ids,
+                session_attachment_files,
+            )
+    else:
+        attachment_context = RagQueryResult(context="", chunks=[], entities=None)
+
+    if agent_only_ids:
+        agent_context = await retrieve_context_for_query(
+            user_id=user_id,
+            resource_ids=agent_only_ids,
+            question=question,
+        )
+    else:
+        agent_context = RagQueryResult(context="", chunks=[], entities=None)
+
+    if attachment_ids and agent_only_ids:
+        return _merge_rag_query_results(attachment_context, agent_context)
+    if attachment_ids:
+        return attachment_context
+    return agent_context
+
+
 async def list_workspace_ready_resource_ids(user_id: str) -> list[str]:
     workspace_id = _workspace_id_for_user(user_id)
     rows = await get_session_store().list_rag_resources(owner_id=user_id, workspace_id=workspace_id)
@@ -1154,6 +1242,163 @@ async def _rollback_session_attachments(
     )
 
 
+_SESSION_ATTACHMENT_INGEST_CONCURRENCY = 3
+
+
+async def _mark_session_attachment_failed(
+    *,
+    attachment: RagSessionAttachment,
+    session_id: str,
+    agent_id: str,
+    owner_id: str,
+    storage,
+    exc: Exception,
+    row_created: bool,
+) -> None:
+    if row_created:
+        attachment.state = "failed"
+        attachment.error_details = str(exc)
+        attachment.updated_at = datetime.now(UTC).isoformat()
+        try:
+            await _update_rag_chat_session_attachment(
+                attachment_id=attachment.attachment_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                owner_id=owner_id,
+                patch={"state": "failed", "error_details": attachment.error_details},
+            )
+        except Exception as update_exc:
+            logger.warning(
+                "[rag] failed to mark session attachment failed attachment_id=%s session_id=%s: %s",
+                attachment.attachment_id,
+                session_id,
+                update_exc,
+            )
+        if attachment.storage_uri:
+            try:
+                await storage.delete_object(storage_uri=attachment.storage_uri)
+            except Exception as del_exc:
+                logger.warning(
+                    "[rag] failed to delete blob for failed attachment_id=%s: %s",
+                    attachment.attachment_id,
+                    del_exc,
+                )
+    elif attachment.storage_uri:
+        try:
+            await storage.delete_object(storage_uri=attachment.storage_uri)
+        except Exception as del_exc:
+            logger.warning(
+                "[rag] failed to delete orphaned blob storage_uri=%s: %s",
+                attachment.storage_uri,
+                del_exc,
+            )
+
+
+async def ingest_single_session_attachment(
+    *,
+    session_id: str,
+    agent_id: str,
+    user_id: str,
+    file: UploadFile,
+    store=None,
+    storage=None,
+    workspace_id: str | None = None,
+) -> RagSessionAttachment:
+    store = store or get_session_store()
+    storage = storage or get_storage_adapter()
+    workspace_id = workspace_id or _workspace_id_for_user(user_id)
+    current_attachment: RagSessionAttachment | None = None
+    row_created = False
+
+    try:
+        content = await file.read()
+        _validate_upload(file, content)
+
+        resource_id = str(uuid.uuid4())
+        attachment_id = str(uuid.uuid4())
+        filename = file.filename or f"attachment-{attachment_id}.txt"
+        storage_key = (
+            f"rag-chat/{workspace_id}/{agent_id}/{session_id}/{resource_id}/{filename}"
+        )
+        storage_uri = await storage.upload_bytes(
+            key=storage_key,
+            content=content,
+            content_type=file.content_type or "application/octet-stream",
+        )
+        now = datetime.now(UTC).isoformat()
+
+        attachment = RagSessionAttachment(
+            attachment_id=attachment_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            owner_id=user_id,
+            workspace_id=workspace_id,
+            resource_id=resource_id,
+            filename=filename,
+            mime_type=file.content_type or "application/octet-stream",
+            byte_size=len(content),
+            storage_uri=storage_uri,
+            state="uploaded",
+            created_at=now,
+            updated_at=now,
+        )
+        current_attachment = attachment
+        await _create_rag_chat_session_attachment(attachment)
+        row_created = True
+
+        await _update_rag_chat_session_attachment(
+            attachment_id=attachment.attachment_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            owner_id=user_id,
+            patch={"state": "processing", "error_details": None},
+        )
+        chunk_count = await ingest_resource_from_bytes(
+            store=store,
+            resource_id=attachment.resource_id,
+            content=content,
+            suffix=Path(filename).suffix.lower(),
+            source_title=filename,
+            source_url=attachment.storage_uri,
+            owner_id=user_id,
+            workspace_id=workspace_id,
+            source_type="session_attachment",
+        )
+        if chunk_count <= 0:
+            raise RagValidationError(
+                "processing_failed",
+                "No extractable text found in the uploaded file.",
+            )
+        attachment.state = "ready"
+        attachment.error_details = None
+        attachment.updated_at = datetime.now(UTC).isoformat()
+        await _update_rag_chat_session_attachment(
+            attachment_id=attachment.attachment_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            owner_id=user_id,
+            patch={"state": "ready", "error_details": None},
+        )
+        return attachment
+    except Exception as exc:
+        if current_attachment is not None:
+            await _mark_session_attachment_failed(
+                attachment=current_attachment,
+                session_id=session_id,
+                agent_id=agent_id,
+                owner_id=user_id,
+                storage=storage,
+                exc=exc,
+                row_created=row_created,
+            )
+        if isinstance(exc, RagValidationError):
+            raise
+        raise RagValidationError(
+            "processing_failed",
+            str(exc) or "Failed to process uploaded file.",
+        ) from exc
+
+
 async def ingest_agent_chat_session_uploads(
     *,
     session_id: str,
@@ -1161,123 +1406,41 @@ async def ingest_agent_chat_session_uploads(
     user_id: str,
     files: list[UploadFile],
 ) -> list[RagSessionAttachment]:
-    attachments: list[RagSessionAttachment] = []
+    if not files:
+        return []
+
     store = get_session_store()
     storage = get_storage_adapter()
     workspace_id = _workspace_id_for_user(user_id)
-    completed_attachment_ids: list[str] = []
-    current_attachment: RagSessionAttachment | None = None
-    current_attachment_row_created: bool = False
+    semaphore = asyncio.Semaphore(_SESSION_ATTACHMENT_INGEST_CONCURRENCY)
 
-    try:
-        for file in files:
-            current_attachment = None
-            current_attachment_row_created = False
-            content = await file.read()
-            _validate_upload(file, content)
-
-            resource_id = str(uuid.uuid4())
-            attachment_id = str(uuid.uuid4())
-            filename = file.filename or f"attachment-{attachment_id}.txt"
-            storage_key = f"rag-chat/{workspace_id}/{agent_id}/{session_id}/{resource_id}/{filename}"
-            storage_uri = await storage.upload_bytes(
-                key=storage_key,
-                content=content,
-                content_type=file.content_type or "application/octet-stream",
-            )
-            now = datetime.now(UTC).isoformat()
-
-            attachment = RagSessionAttachment(
-                attachment_id=attachment_id,
+    async def ingest_one(file: UploadFile) -> RagSessionAttachment:
+        async with semaphore:
+            return await ingest_single_session_attachment(
                 session_id=session_id,
                 agent_id=agent_id,
-                owner_id=user_id,
-                workspace_id=workspace_id,
-                resource_id=resource_id,
-                filename=filename,
-                mime_type=file.content_type or "application/octet-stream",
-                byte_size=len(content),
-                storage_uri=storage_uri,
-                state="uploaded",
-                created_at=now,
-                updated_at=now,
-            )
-            current_attachment = attachment
-            await _create_rag_chat_session_attachment(attachment)
-            current_attachment_row_created = True
-
-            await _update_rag_chat_session_attachment(
-                attachment_id=attachment.attachment_id,
-                session_id=session_id,
-                agent_id=agent_id,
-                owner_id=user_id,
-                patch={"state": "processing", "error_details": None},
-            )
-            await ingest_resource_from_bytes(
+                user_id=user_id,
+                file=file,
                 store=store,
-                resource_id=attachment.resource_id,
-                content=content,
-                suffix=Path(filename).suffix.lower(),
-                source_title=filename,
-                source_url=attachment.storage_uri,
-                owner_id=user_id,
+                storage=storage,
                 workspace_id=workspace_id,
-                source_type="session_attachment",
             )
-            attachment.state = "ready"
-            attachment.error_details = None
-            attachment.updated_at = datetime.now(UTC).isoformat()
-            await _update_rag_chat_session_attachment(
-                attachment_id=attachment.attachment_id,
-                session_id=session_id,
-                agent_id=agent_id,
-                owner_id=user_id,
-                patch={"state": "ready", "error_details": None},
-            )
-            attachments.append(attachment)
-            completed_attachment_ids.append(attachment.attachment_id)
-    except Exception as exc:
-        if current_attachment is not None:
-            if current_attachment_row_created:
-                # Row exists: mark it failed so the UI can display the error, then clean up its blob.
-                current_attachment.state = "failed"
-                current_attachment.error_details = str(exc)
-                current_attachment.updated_at = datetime.now(UTC).isoformat()
-                try:
-                    await _update_rag_chat_session_attachment(
-                        attachment_id=current_attachment.attachment_id,
-                        session_id=session_id,
-                        agent_id=agent_id,
-                        owner_id=user_id,
-                        patch={"state": "failed", "error_details": current_attachment.error_details},
-                    )
-                except Exception as update_exc:
-                    logger.warning(
-                        "[rag] failed to mark session attachment failed attachment_id=%s session_id=%s: %s",
-                        current_attachment.attachment_id,
-                        session_id,
-                        update_exc,
-                    )
-                if current_attachment.storage_uri:
-                    try:
-                        await storage.delete_object(storage_uri=current_attachment.storage_uri)
-                    except Exception as del_exc:
-                        logger.warning(
-                            "[rag] failed to delete blob for failed attachment_id=%s: %s",
-                            current_attachment.attachment_id,
-                            del_exc,
-                        )
-            else:
-                # Row was never created: delete the orphaned blob.
-                if current_attachment.storage_uri:
-                    try:
-                        await storage.delete_object(storage_uri=current_attachment.storage_uri)
-                    except Exception as del_exc:
-                        logger.warning(
-                            "[rag] failed to delete orphaned blob storage_uri=%s: %s",
-                            current_attachment.storage_uri,
-                            del_exc,
-                        )
+
+    results = await asyncio.gather(
+        *[ingest_one(file) for file in files],
+        return_exceptions=True,
+    )
+
+    attachments: list[RagSessionAttachment] = []
+    failures: list[BaseException] = []
+    for result in results:
+        if isinstance(result, BaseException):
+            failures.append(result)
+        else:
+            attachments.append(result)
+
+    if failures:
+        completed_attachment_ids = [attachment.attachment_id for attachment in attachments]
         await _rollback_session_attachments(
             attachment_ids=completed_attachment_ids,
             session_id=session_id,
@@ -1287,12 +1450,13 @@ async def ingest_agent_chat_session_uploads(
             store=store,
             storage=storage,
         )
-        if isinstance(exc, RagValidationError):
-            raise
+        first_failure = failures[0]
+        if isinstance(first_failure, RagValidationError):
+            raise first_failure
         raise RagValidationError(
             "processing_failed",
-            str(exc) or "Failed to process uploaded file.",
-        ) from exc
+            str(first_failure) or "Failed to process uploaded file.",
+        ) from first_failure
 
     return attachments
 
@@ -1327,6 +1491,35 @@ async def list_rag_chat_session_attachments(
         )
         for row in rows
     ]
+
+
+async def delete_rag_chat_session_attachment(
+    *,
+    session_id: str,
+    attachment_id: str,
+    owner_id: str,
+    agent_id: str,
+) -> bool:
+    store = get_session_store()
+    rows = await store.delete_rag_chat_session_attachments_by_ids(
+        attachment_ids=[attachment_id],
+        session_id=session_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+    )
+    if not rows:
+        return False
+    workspace_id = _workspace_id_for_user(owner_id)
+    storage = get_storage_adapter()
+    await _delete_attachment_artifacts(
+        rows=rows,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        store=store,
+        storage=storage,
+        raise_on_error=True,
+    )
+    return True
 
 
 async def delete_rag_chat_session_attachments_and_artifacts(
