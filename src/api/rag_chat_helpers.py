@@ -311,6 +311,22 @@ async def prepare_workspace_rag_chat(
         initial_message=normalized_message,
     )
     timings.session_ms = (time.perf_counter() - t_session) * 1000
+    session_attachments = await list_rag_chat_session_attachments(
+        session_id=chat_session_id,
+        owner_id=user_id,
+        agent_id=None,
+    )
+    session_attachment_resource_ids = [
+        attachment.resource_id
+        for attachment in session_attachments
+        if attachment.state == "ready" and attachment.resource_id
+    ]
+    session_attachment_files = [
+        attachment.filename
+        for attachment in session_attachments
+        if attachment.state == "ready" and attachment.filename
+    ]
+    merged_resource_ids = list(dict.fromkeys(resource_ids + session_attachment_resource_ids))
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
@@ -326,7 +342,7 @@ async def prepare_workspace_rag_chat(
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
-            resource_ids=resource_ids,
+            resource_ids=merged_resource_ids,
             composio_apps=composio_apps,
         )
         allow_web_search = True
@@ -336,9 +352,11 @@ async def prepare_workspace_rag_chat(
 
     t0 = time.perf_counter()
     rag_context, user_memory_context, history = await asyncio.gather(
-        retrieve_context_for_query(
+        retrieve_merged_context_for_agent_chat(
             user_id=user_id,
-            resource_ids=resource_ids,
+            agent_resource_ids=resource_ids,
+            session_attachment_resource_ids=session_attachment_resource_ids,
+            session_attachment_files=session_attachment_files,
             question=normalized_message,
         ),
         get_user_memory_prompt_block(user_id, normalized_message),
@@ -353,13 +371,14 @@ async def prepare_workspace_rag_chat(
         user_memory_context=user_memory_context,
         composio_apps=composio_apps,
         normalized_message=normalized_message,
+        session_attachment_files=session_attachment_files,
         bind_tools=bind_tools,
         composio_user_disabled=(tool_skip_reason == "user_disabled"),
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(
         agent=None,
-        resource_ids=resource_ids,
+        resource_ids=merged_resource_ids,
         rag_context=rag_context,
         chat_session_id=chat_session_id,
         messages=messages,

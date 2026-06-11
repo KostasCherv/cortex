@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 _HTTP_TIMEOUT_SECONDS = 20.0
 
 
+def _agent_id_query_param(agent_id: str | None) -> str:
+    if agent_id is None:
+        return "is.null"
+    return f"eq.{agent_id}"
+
+
 class SupabaseSessionStore:
     """Persist sessions in Supabase PostgREST with strict user scoping."""
 
@@ -1763,7 +1769,7 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
     ) -> list[str]:
         response = await self._request(
             "GET",
@@ -1772,7 +1778,7 @@ class SupabaseSessionStore:
                 "select": "id,resource_id",
                 "session_id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "agent_id": _agent_id_query_param(agent_id),
                 "state": "eq.ready",
                 "order": "created_at.asc",
             },
@@ -1811,7 +1817,7 @@ class SupabaseSessionStore:
         *,
         attachment_id: str,
         session_id: str,
-        agent_id: str,
+        agent_id: str | None,
         owner_id: str,
         patch: dict[str, Any],
     ) -> None:
@@ -1823,7 +1829,7 @@ class SupabaseSessionStore:
             params={
                 "id": f"eq.{attachment_id}",
                 "session_id": f"eq.{session_id}",
-                "agent_id": f"eq.{agent_id}",
+                "agent_id": _agent_id_query_param(agent_id),
                 "owner_id": f"eq.{owner_id}",
             },
             json_body=payload,
@@ -1834,7 +1840,7 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
     ) -> list[dict[str, Any]]:
         response = await self._request(
             "GET",
@@ -1846,7 +1852,7 @@ class SupabaseSessionStore:
                 ),
                 "session_id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "agent_id": _agent_id_query_param(agent_id),
                 "order": "created_at.asc",
             },
         )
@@ -1857,7 +1863,7 @@ class SupabaseSessionStore:
         *,
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
     ) -> list[dict[str, str]]:
         response = await self._request(
             "DELETE",
@@ -1865,7 +1871,7 @@ class SupabaseSessionStore:
             params={
                 "session_id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "agent_id": _agent_id_query_param(agent_id),
             },
             extra_headers={"Prefer": "return=representation"},
         )
@@ -1889,7 +1895,7 @@ class SupabaseSessionStore:
         attachment_ids: list[str],
         session_id: str,
         owner_id: str,
-        agent_id: str,
+        agent_id: str | None,
     ) -> list[dict[str, str]]:
         response = await self._request(
             "DELETE",
@@ -1898,7 +1904,7 @@ class SupabaseSessionStore:
                 "id": f"in.({','.join(attachment_ids)})",
                 "session_id": f"eq.{session_id}",
                 "owner_id": f"eq.{owner_id}",
-                "agent_id": f"eq.{agent_id}",
+                "agent_id": _agent_id_query_param(agent_id),
             },
             extra_headers={"Prefer": "return=representation"},
         )

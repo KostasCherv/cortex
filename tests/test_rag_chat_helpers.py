@@ -203,8 +203,9 @@ async def test_prepare_workspace_respects_composio_false():
 
     with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_session_attachments", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
-         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
          patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
          patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
         mock_mgr.return_value.get_connected_app_names.return_value = ["slack"]
@@ -237,8 +238,9 @@ async def test_prepare_workspace_respects_reference_tool_toggles():
 
     with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_session_attachments", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
-         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
          patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
          patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
         mock_mgr.return_value.get_connected_app_names.return_value = []
@@ -400,9 +402,10 @@ async def test_prepare_workspace_respects_composio_true():
 
     with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_session_attachments", new_callable=AsyncMock, return_value=[]), \
          patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
          patch("src.api.rag_chat_helpers.settings") as mock_settings, \
-         patch("src.api.rag_chat_helpers.retrieve_context_for_query", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
          patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
          patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
         mock_mgr.return_value.get_connected_app_names.return_value = ["slack"]

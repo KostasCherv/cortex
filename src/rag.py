@@ -72,7 +72,7 @@ class RagResource:
 class RagSessionAttachment:
     attachment_id: str
     session_id: str
-    agent_id: str
+    agent_id: str | None
     owner_id: str
     workspace_id: str
     resource_id: str
@@ -1149,7 +1149,7 @@ async def list_ready_rag_chat_session_attachment_resource_ids(
     *,
     session_id: str,
     owner_id: str,
-    agent_id: str,
+    agent_id: str | None,
 ) -> list[str]:
     return await get_session_store().list_ready_rag_chat_session_attachment_resource_ids(
         session_id=session_id,
@@ -1166,7 +1166,7 @@ async def _update_rag_chat_session_attachment(
     *,
     attachment_id: str,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     owner_id: str,
     patch: dict[str, object],
 ) -> None:
@@ -1219,7 +1219,7 @@ async def _rollback_session_attachments(
     *,
     attachment_ids: list[str],
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     owner_id: str,
     workspace_id: str,
     store,
@@ -1249,7 +1249,7 @@ async def _mark_session_attachment_failed(
     *,
     attachment: RagSessionAttachment,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     owner_id: str,
     storage,
     exc: Exception,
@@ -1294,10 +1294,14 @@ async def _mark_session_attachment_failed(
             )
 
 
+def _session_attachment_storage_scope(agent_id: str | None) -> str:
+    return agent_id or "workspace"
+
+
 async def ingest_single_session_attachment(
     *,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     user_id: str,
     file: UploadFile,
     store=None,
@@ -1318,7 +1322,8 @@ async def ingest_single_session_attachment(
         attachment_id = str(uuid.uuid4())
         filename = file.filename or f"attachment-{attachment_id}.txt"
         storage_key = (
-            f"rag-chat/{workspace_id}/{agent_id}/{session_id}/{resource_id}/{filename}"
+            f"rag-chat/{workspace_id}/{_session_attachment_storage_scope(agent_id)}/"
+            f"{session_id}/{resource_id}/{filename}"
         )
         storage_uri = await storage.upload_bytes(
             key=storage_key,
@@ -1402,7 +1407,7 @@ async def ingest_single_session_attachment(
 async def ingest_agent_chat_session_uploads(
     *,
     session_id: str,
-    agent_id: str,
+    agent_id: str | None,
     user_id: str,
     files: list[UploadFile],
 ) -> list[RagSessionAttachment]:
@@ -1465,7 +1470,7 @@ async def list_rag_chat_session_attachments(
     *,
     session_id: str,
     owner_id: str,
-    agent_id: str,
+    agent_id: str | None,
 ) -> list[RagSessionAttachment]:
     rows = await get_session_store().list_rag_chat_session_attachments(
         session_id=session_id,
@@ -1498,7 +1503,7 @@ async def delete_rag_chat_session_attachment(
     session_id: str,
     attachment_id: str,
     owner_id: str,
-    agent_id: str,
+    agent_id: str | None,
 ) -> bool:
     store = get_session_store()
     rows = await store.delete_rag_chat_session_attachments_by_ids(
@@ -1526,7 +1531,7 @@ async def delete_rag_chat_session_attachments_and_artifacts(
     *,
     session_id: str,
     owner_id: str,
-    agent_id: str,
+    agent_id: str | None,
 ) -> None:
     deleted = await get_session_store().delete_rag_chat_session_attachments(
         session_id=session_id,

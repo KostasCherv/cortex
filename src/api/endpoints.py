@@ -414,6 +414,23 @@ async def _require_agent_chat_session(
         )
 
 
+async def _require_workspace_chat_session(
+    *,
+    session_id: str,
+    user_id: str,
+) -> None:
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=None,
+        user_id=user_id,
+        chat_scope=CHAT_SCOPE_WORKSPACE,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chat session '{session_id}' not found."
+        )
+
+
 async def _files_needing_session_ingest(
     *,
     session_id: str,
@@ -3279,6 +3296,109 @@ async def list_rag_workspace_chat_sessions(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     return {"sessions": sessions}
+
+
+@app.post("/api/rag/chat/sessions", tags=["RAG"])
+async def create_rag_workspace_chat_session(
+    body: CreateRagChatSessionRequest | None = None,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    initial_message = None
+    if body and body.filename:
+        initial_message = f"Attached: {body.filename.strip()}"
+
+    session_id = await create_or_get_workspace_chat_session(
+        user_id=current_user.user_id,
+        session_id=None,
+        initial_message=initial_message,
+    )
+    return {"session_id": session_id, "agent_id": None}
+
+
+@app.get("/api/rag/chat/sessions/{session_id}/attachments", tags=["RAG"])
+async def list_rag_workspace_chat_session_attachments_endpoint(
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _require_workspace_chat_session(
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+    attachments = await list_rag_chat_session_attachments(
+        session_id=session_id,
+        owner_id=current_user.user_id,
+        agent_id=None,
+    )
+    return {
+        "session_id": session_id,
+        "agent_id": None,
+        "attachments": [attachment.to_dict() for attachment in attachments],
+    }
+
+
+@app.post("/api/rag/chat/sessions/{session_id}/attachments", tags=["RAG"])
+async def upload_rag_workspace_chat_session_attachments(
+    session_id: str,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _require_workspace_chat_session(
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+
+    form = await request.form()
+    files = [
+        value
+        for key, value in form.multi_items()
+        if key == "files" and isinstance(value, StarletteUploadFile)
+    ]
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one file is required.")
+
+    try:
+        attachments = await ingest_agent_chat_session_uploads(
+            session_id=session_id,
+            agent_id=None,
+            user_id=current_user.user_id,
+            files=files,
+        )
+    except RagValidationError as exc:
+        _raise_rag_validation_error(exc)
+
+    return {
+        "session_id": session_id,
+        "agent_id": None,
+        "attachments": [attachment.to_dict() for attachment in attachments],
+    }
+
+
+@app.delete(
+    "/api/rag/chat/sessions/{session_id}/attachments/{attachment_id}",
+    tags=["RAG"],
+)
+async def delete_rag_workspace_chat_session_attachment_endpoint(
+    session_id: str,
+    attachment_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await _require_workspace_chat_session(
+        session_id=session_id,
+        user_id=current_user.user_id,
+    )
+
+    deleted = await delete_rag_chat_session_attachment(
+        session_id=session_id,
+        attachment_id=attachment_id,
+        owner_id=current_user.user_id,
+        agent_id=None,
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Attachment '{attachment_id}' not found.",
+        )
+    return {"session_id": session_id, "attachment_id": attachment_id, "deleted": True}
 
 
 @app.get("/api/rag/chat/sessions/{session_id}/messages", tags=["RAG"])

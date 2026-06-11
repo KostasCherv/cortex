@@ -1572,6 +1572,94 @@ def test_delete_rag_agent_chat_session_attachment_returns_deleted():
     )
 
 
+def test_create_rag_workspace_chat_session_returns_new_session_id():
+    with patch(
+        "src.api.endpoints.create_or_get_workspace_chat_session",
+        new=AsyncMock(return_value="chat-new"),
+    ) as mock_create:
+        response = client.post(
+            "/api/rag/chat/sessions",
+            json={"filename": "brief.pdf"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "chat-new", "agent_id": None}
+    mock_create.assert_awaited_once_with(
+        user_id="test-user",
+        session_id=None,
+        initial_message="Attached: brief.pdf",
+    )
+
+
+def test_upload_rag_workspace_chat_session_attachments_ingests_files():
+    mock_attachment = MagicMock()
+    mock_attachment.to_dict.return_value = {
+        "attachment_id": "att-1",
+        "filename": "brief.pdf",
+        "state": "ready",
+    }
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(
+                return_value={
+                    "session_id": "chat-1",
+                    "agent_id": None,
+                    "owner_id": "test-user",
+                }
+            ),
+        ),
+        patch(
+            "src.api.endpoints.ingest_agent_chat_session_uploads",
+            new=AsyncMock(return_value=[mock_attachment]),
+        ) as mock_ingest,
+    ):
+        response = client.post(
+            "/api/rag/chat/sessions/chat-1/attachments",
+            files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["attachments"] == [mock_attachment.to_dict.return_value]
+    mock_ingest.assert_awaited_once_with(
+        session_id="chat-1",
+        agent_id=None,
+        user_id="test-user",
+        files=mock_ingest.await_args.kwargs["files"],
+    )
+
+
+def test_delete_rag_workspace_chat_session_attachment_returns_deleted():
+    with (
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(
+                return_value={
+                    "session_id": "chat-1",
+                    "agent_id": None,
+                    "owner_id": "test-user",
+                }
+            ),
+        ),
+        patch(
+            "src.api.endpoints.delete_rag_chat_session_attachment",
+            new=AsyncMock(return_value=True),
+        ) as mock_delete,
+    ):
+        response = client.delete(
+            "/api/rag/chat/sessions/chat-1/attachments/att-1",
+        )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    mock_delete.assert_awaited_once_with(
+        session_id="chat-1",
+        attachment_id="att-1",
+        owner_id="test-user",
+        agent_id=None,
+    )
+
+
 def test_rag_agent_chat_stream_skips_ingest_without_files():
     async def record_loop(**_kwargs):
         return "Answer", False

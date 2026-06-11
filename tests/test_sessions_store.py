@@ -243,6 +243,22 @@ async def test_store_lists_rag_chat_session_attachments():
     assert request_call.kwargs["params"]["order"] == "created_at.asc"
 
 
+async def test_store_lists_rag_chat_session_attachments_for_workspace_scope():
+    store = object.__new__(SupabaseSessionStore)
+    response = MagicMock()
+    response.json.return_value = []
+    store._request = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+    await store.list_rag_chat_session_attachments(
+        session_id="chat-1",
+        owner_id="user-1",
+        agent_id=None,
+    )
+
+    request_call = store._request.await_args
+    assert request_call.kwargs["params"]["agent_id"] == "is.null"
+
+
 async def test_store_deletes_rag_chat_session_attachments_by_ids():
     store = object.__new__(SupabaseSessionStore)
     response = MagicMock()
