@@ -159,6 +159,7 @@ export type RagChatStreamEvent =
       web_used?: boolean
       web_provider?: string | null
     }
+  | { type: 'status'; message: string }
   | { type: 'chunk'; text: string }
   | { type: 'citations'; citations: RagCitation[] }
   | { type: 'suggestions'; suggestions: string[] }
@@ -347,6 +348,16 @@ export type ItineraryPlannerResponse = {
   new_version?: ItineraryVersion | null
   created_new_version: boolean
   missing_fields: string[]
+}
+
+export type SessionAttachment = {
+  attachment_id: string
+  filename: string
+  mime_type: string
+  byte_size: number
+  state: 'uploaded' | 'processing' | 'ready' | 'failed'
+  error_details?: string | null
+  created_at: string
 }
 
 export type BillingUsageSummary = {

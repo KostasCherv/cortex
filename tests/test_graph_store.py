@@ -70,6 +70,31 @@ def test_ingest_document_writes_document_chunk_and_entity_batches():
     assert any("MERGE (c)-[m:MENTIONS]->(e)" in query for query, _, _ in calls)
 
 
+def test_ingest_document_skips_llm_extraction_for_session_attachments():
+    driver = _fake_driver_with_side_effect(lambda *_args, **_kwargs: [])
+    embed = MagicMock()
+    embed.embed_texts.side_effect = lambda texts: [[0.1] * 4 for _ in texts]
+
+    store = Neo4jGraphStore(driver=driver, embedding_client=embed)
+    store._extract_entities_relations = MagicMock(return_value=([], []))
+    store._heuristic_entities_relations = MagicMock(return_value=([], []))
+
+    ingested = store.ingest_document(
+        document_id="doc-session",
+        source_type="session_attachment",
+        owner_id="u-1",
+        workspace_id="u-1",
+        title="brief.pdf",
+        source_url="supabase://bucket/brief.pdf",
+        text="Session attachment body text.",
+        resource_id="res-session",
+    )
+
+    assert ingested == 1
+    store._extract_entities_relations.assert_not_called()
+    store._heuristic_entities_relations.assert_not_called()
+
+
 def test_ingest_document_caps_llm_extraction_to_max_chunks():
     from src.tools.neo4j_graph_store import _MAX_LLM_EXTRACTION_CHUNKS
 
@@ -103,7 +128,7 @@ def test_query_context_fuses_scores_and_applies_scope_filters():
     seen = {"vector": None}
 
     def side_effect(query, params, database_):
-        if "SEARCH node IN" in query or "db.index.vector.queryNodes" in query:
+        if "MATCH (node:Chunk)" in query and "node.resource_id IN $resource_ids" in query:
             seen["vector"] = params
             return [
                 {
@@ -158,6 +183,37 @@ def test_query_context_fuses_scores_and_applies_scope_filters():
     assert result.chunks[0]["chunk_id"] == "chunk-a"
     assert "openai" in result.entities
     assert "source:A" in result.context
+
+
+def test_query_context_uses_global_search_without_resource_ids():
+    seen = {"global": False}
+
+    def side_effect(query, params, database_):
+        if "SEARCH node IN" in query or "db.index.vector.queryNodes" in query:
+            seen["global"] = True
+            return [
+                {
+                    "chunk_id": "chunk-a",
+                    "text": "Workspace chunk",
+                    "source_url": "https://a.com",
+                    "source_title": "A",
+                    "chunk_index": 0,
+                    "score": 0.5,
+                }
+            ]
+        if "UNWIND $chunk_ids" in query:
+            return [{"chunk_id": "chunk-a", "mentions": [], "neighbors": []}]
+        return []
+
+    driver = _fake_driver_with_side_effect(side_effect)
+    embed = MagicMock()
+    embed.embed_texts.return_value = [[0.2] * 4]
+
+    store = Neo4jGraphStore(driver=driver, embedding_client=embed)
+    result = store.query_context(query="workspace", owner_id="u-1", workspace_id="u-1")
+
+    assert seen["global"] is True
+    assert result.chunks[0]["chunk_id"] == "chunk-a"
 
 
 def test_query_context_excludes_chunks_below_min_cosine(monkeypatch):

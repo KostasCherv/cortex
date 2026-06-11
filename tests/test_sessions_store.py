@@ -81,6 +81,201 @@ async def test_store_lists_rag_chat_sessions_with_batched_latest_messages():
     assert summaries[0]["last_message_preview"] == "Most recent chat"
 
 
+async def test_store_lists_ready_rag_chat_session_attachment_resource_ids():
+    store = object.__new__(SupabaseSessionStore)
+    response = MagicMock()
+    response.json.return_value = [
+        {"id": "att-1", "resource_id": "res-a"},
+        {"id": "att-2", "resource_id": "res-b"},
+    ]
+    store._request = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+    ready_ids = await store.list_ready_rag_chat_session_attachment_resource_ids(
+        session_id="chat-1",
+        owner_id="user-1",
+        agent_id="agent-1",
+    )
+
+    assert ready_ids == ["res-a", "res-b"]
+    store._request.assert_awaited_once()
+    request_call = store._request.await_args
+    assert request_call.args == ("GET", "rag_chat_session_attachments")
+    assert request_call.kwargs["params"] == {
+        "select": "id,resource_id",
+        "session_id": "eq.chat-1",
+        "owner_id": "eq.user-1",
+        "agent_id": "eq.agent-1",
+        "state": "eq.ready",
+        "order": "created_at.asc",
+    }
+
+
+async def test_store_deletes_session_attachments_for_chat_session():
+    store = object.__new__(SupabaseSessionStore)
+    response = MagicMock()
+    response.json.return_value = [
+        {"id": "att-1", "resource_id": "res-a", "storage_uri": "attachments/chat-1/att-1.pdf"},
+        {"id": "att-2", "resource_id": "res-b", "storage_uri": "attachments/chat-1/att-2.pdf"},
+    ]
+    store._request = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+    deleted = await store.delete_rag_chat_session_attachments(
+        session_id="chat-1",
+        owner_id="user-1",
+        agent_id="agent-1",
+    )
+
+    assert deleted == [
+        {
+            "attachment_id": "att-1",
+            "resource_id": "res-a",
+            "storage_uri": "attachments/chat-1/att-1.pdf",
+        },
+        {
+            "attachment_id": "att-2",
+            "resource_id": "res-b",
+            "storage_uri": "attachments/chat-1/att-2.pdf",
+        },
+    ]
+    store._request.assert_awaited_once()
+    request_call = store._request.await_args
+    assert request_call.args == ("DELETE", "rag_chat_session_attachments")
+    assert request_call.kwargs["params"] == {
+        "session_id": "eq.chat-1",
+        "owner_id": "eq.user-1",
+        "agent_id": "eq.agent-1",
+    }
+    assert request_call.kwargs["extra_headers"] == {"Prefer": "return=representation"}
+
+
+async def test_store_creates_rag_chat_session_attachment():
+    store = object.__new__(SupabaseSessionStore)
+    store._request = AsyncMock()  # type: ignore[method-assign]
+
+    await store.create_rag_chat_session_attachment(
+        {
+            "attachment_id": "att-1",
+            "session_id": "chat-1",
+            "agent_id": "agent-1",
+            "owner_id": "user-1",
+            "workspace_id": "ws-1",
+            "resource_id": "res-1",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "byte_size": 123,
+            "storage_uri": "supabase://bucket/key",
+            "state": "uploaded",
+            "error_details": None,
+            "created_at": "2026-06-11T10:00:00+00:00",
+            "updated_at": "2026-06-11T10:00:00+00:00",
+        }
+    )
+
+    store._request.assert_awaited_once_with(
+        "POST",
+        "rag_chat_session_attachments",
+        json_body={
+            "id": "att-1",
+            "session_id": "chat-1",
+            "agent_id": "agent-1",
+            "owner_id": "user-1",
+            "workspace_id": "ws-1",
+            "resource_id": "res-1",
+            "filename": "brief.pdf",
+            "mime_type": "application/pdf",
+            "byte_size": 123,
+            "storage_uri": "supabase://bucket/key",
+            "state": "uploaded",
+            "error_details": None,
+            "created_at": "2026-06-11T10:00:00+00:00",
+            "updated_at": "2026-06-11T10:00:00+00:00",
+        },
+    )
+
+
+async def test_store_updates_rag_chat_session_attachment():
+    store = object.__new__(SupabaseSessionStore)
+    store._request = AsyncMock()  # type: ignore[method-assign]
+
+    await store.update_rag_chat_session_attachment(
+        attachment_id="att-1",
+        session_id="chat-1",
+        agent_id="agent-1",
+        owner_id="user-1",
+        patch={"state": "ready", "error_details": None},
+    )
+
+    store._request.assert_awaited_once()
+    request_call = store._request.await_args
+    assert request_call.args == ("PATCH", "rag_chat_session_attachments")
+    assert request_call.kwargs["params"] == {
+        "id": "eq.att-1",
+        "session_id": "eq.chat-1",
+        "agent_id": "eq.agent-1",
+        "owner_id": "eq.user-1",
+    }
+    assert request_call.kwargs["json_body"]["state"] == "ready"
+    assert request_call.kwargs["json_body"]["error_details"] is None
+    assert "updated_at" in request_call.kwargs["json_body"]
+
+
+async def test_store_lists_rag_chat_session_attachments():
+    store = object.__new__(SupabaseSessionStore)
+    response = MagicMock()
+    response.json.return_value = [
+        {"id": "att-1", "session_id": "chat-1"},
+        {"id": "att-2", "session_id": "chat-1"},
+    ]
+    store._request = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+    rows = await store.list_rag_chat_session_attachments(
+        session_id="chat-1",
+        owner_id="user-1",
+        agent_id="agent-1",
+    )
+
+    assert rows == response.json.return_value
+    request_call = store._request.await_args
+    assert request_call.args == ("GET", "rag_chat_session_attachments")
+    assert request_call.kwargs["params"]["session_id"] == "eq.chat-1"
+    assert request_call.kwargs["params"]["owner_id"] == "eq.user-1"
+    assert request_call.kwargs["params"]["agent_id"] == "eq.agent-1"
+    assert request_call.kwargs["params"]["order"] == "created_at.asc"
+
+
+async def test_store_deletes_rag_chat_session_attachments_by_ids():
+    store = object.__new__(SupabaseSessionStore)
+    response = MagicMock()
+    response.json.return_value = [
+        {"id": "att-1", "resource_id": "res-a", "storage_uri": "supabase://bucket/att-1.pdf"}
+    ]
+    store._request = AsyncMock(return_value=response)  # type: ignore[method-assign]
+
+    deleted = await store.delete_rag_chat_session_attachments_by_ids(
+        attachment_ids=["att-1", "att-2"],
+        session_id="chat-1",
+        owner_id="user-1",
+        agent_id="agent-1",
+    )
+
+    assert deleted == [
+        {
+            "attachment_id": "att-1",
+            "resource_id": "res-a",
+            "storage_uri": "supabase://bucket/att-1.pdf",
+        }
+    ]
+    request_call = store._request.await_args
+    assert request_call.args == ("DELETE", "rag_chat_session_attachments")
+    assert request_call.kwargs["params"] == {
+        "id": "in.(att-1,att-2)",
+        "session_id": "eq.chat-1",
+        "owner_id": "eq.user-1",
+        "agent_id": "eq.agent-1",
+    }
+    assert request_call.kwargs["extra_headers"] == {"Prefer": "return=representation"}
+
+
 def test_session_run_to_dict_includes_langfuse_and_feedback_fields():
     run = SessionRun(
         run_id="r1",

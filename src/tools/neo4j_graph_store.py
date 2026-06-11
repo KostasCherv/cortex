@@ -31,6 +31,7 @@ _NEIGHBOR_COUNT_BONUS = 0.03
 _NEIGHBOR_BONUS_CAP = 0.10
 _MAX_BONUS_MENTIONS = 3
 _MAX_BONUS_NEIGHBORS = 5
+_FAST_INGEST_SOURCE_TYPES = frozenset({"session_attachment"})
 
 
 @dataclass
@@ -319,6 +320,7 @@ class Neo4jGraphStore:
         next_rows: list[dict[str, str]] = []
         mention_rows: list[dict[str, Any]] = []
         relation_rows: list[dict[str, Any]] = []
+        skip_graph_llm = source_type in _FAST_INGEST_SOURCE_TYPES
 
         for idx, chunk_text in enumerate(chunks):
             chunk_id = hashlib.sha1(f"{document_id}:{idx}".encode("utf-8")).hexdigest()  # nosec B324 — chunk ID for graph linking, not a security hash
@@ -348,7 +350,9 @@ class Neo4jGraphStore:
                 }
             )
 
-            if idx < _MAX_LLM_EXTRACTION_CHUNKS:
+            if skip_graph_llm:
+                entities, relations = [], []
+            elif idx < _MAX_LLM_EXTRACTION_CHUNKS:
                 entities, relations = self._extract_entities_relations(chunk_text)
             else:
                 # Keep graph coverage on long documents without paying for LLM extraction
@@ -441,6 +445,138 @@ class Neo4jGraphStore:
 
         return len(chunk_rows)
 
+    def _fetch_resource_scoped_candidates(
+        self,
+        *,
+        query_vec: list[float],
+        owner_id: str,
+        workspace_id: str,
+        run_id: str | None,
+        resource_ids: list[str],
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "embedding": query_vec,
+            "owner_id": owner_id,
+            "workspace_id": workspace_id,
+            "run_id": run_id,
+            "resource_ids": resource_ids,
+            "top_k": top_k,
+        }
+        rows = self._execute(
+            """
+            MATCH (node:Chunk)
+            WHERE node.owner_id = $owner_id
+              AND node.workspace_id = $workspace_id
+              AND ($run_id IS NULL OR node.run_id = $run_id)
+              AND node.resource_id IN $resource_ids
+            RETURN node.id AS chunk_id,
+                   node.document_id AS document_id,
+                   node.resource_id AS resource_id,
+                   node.text AS text,
+                   node.source_url AS source_url,
+                   node.source_title AS source_title,
+                   node.chunk_index AS chunk_index,
+                   vector.similarity.cosine(node.embedding, $embedding) AS score
+            ORDER BY score DESC
+            LIMIT $top_k
+            """,
+            params,
+        )
+        if rows:
+            return rows
+        return self._execute(
+            """
+            MATCH (node:Chunk)
+            WHERE node.owner_id = $owner_id
+              AND node.workspace_id = $workspace_id
+              AND node.resource_id IN $resource_ids
+            RETURN node.id AS chunk_id,
+                   node.document_id AS document_id,
+                   node.resource_id AS resource_id,
+                   node.text AS text,
+                   node.source_url AS source_url,
+                   node.source_title AS source_title,
+                   node.chunk_index AS chunk_index,
+                   vector.similarity.cosine(node.embedding, $embedding) AS score
+            ORDER BY node.chunk_index ASC
+            LIMIT $top_k
+            """,
+            params,
+        )
+
+    def _fetch_global_candidates(
+        self,
+        *,
+        query_vec: list[float],
+        owner_id: str,
+        workspace_id: str,
+        run_id: str | None,
+        candidate_k: int,
+        top_k: int,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "candidate_k": candidate_k,
+            "embedding": query_vec,
+            "owner_id": owner_id,
+            "workspace_id": workspace_id,
+            "run_id": run_id,
+            "top_k": top_k,
+        }
+        try:
+            return self._execute(
+                """
+                MATCH (node:Chunk)
+                SEARCH node IN (
+                  VECTOR INDEX chunk_embedding_index
+                  FOR $embedding
+                  LIMIT $candidate_k
+                )
+                WITH node
+                WHERE node.owner_id = $owner_id
+                  AND node.workspace_id = $workspace_id
+                  AND ($run_id IS NULL OR node.run_id = $run_id)
+                RETURN node.id AS chunk_id,
+                       node.document_id AS document_id,
+                       node.resource_id AS resource_id,
+                       node.text AS text,
+                       node.source_url AS source_url,
+                       node.source_title AS source_title,
+                       node.chunk_index AS chunk_index,
+                       vector.similarity.cosine(node.embedding, $embedding) AS score
+                ORDER BY score DESC
+                LIMIT $top_k
+                """,
+                params,
+            )
+        except VectorStoreError as exc:
+            if (
+                "invalid syntax" not in str(exc).lower()
+                and "search" not in str(exc).lower()
+            ):
+                raise
+            return self._execute(
+                """
+                CALL db.index.vector.queryNodes('chunk_embedding_index', $candidate_k, $embedding)
+                YIELD node, score
+                WHERE node:Chunk
+                  AND node.owner_id = $owner_id
+                  AND node.workspace_id = $workspace_id
+                  AND ($run_id IS NULL OR node.run_id = $run_id)
+                RETURN node.id AS chunk_id,
+                       node.document_id AS document_id,
+                       node.resource_id AS resource_id,
+                       node.text AS text,
+                       node.source_url AS source_url,
+                       node.source_title AS source_title,
+                       node.chunk_index AS chunk_index,
+                       score
+                ORDER BY score DESC
+                LIMIT $top_k
+                """,
+                params,
+            )
+
     def query_context(
         self,
         *,
@@ -458,71 +594,23 @@ class Neo4jGraphStore:
         effective_hops = max(1, min(max_hops or settings.graph_rag_max_hops, 2))
 
         candidate_k = max(12, effective_top_k * 3)
-        params = {
-            "candidate_k": candidate_k,
-            "embedding": query_vec,
-            "owner_id": owner_id,
-            "workspace_id": workspace_id,
-            "run_id": run_id,
-            "resource_ids": resource_ids if resource_ids else None,
-            "top_k": candidate_k,
-        }
-
-        try:
-            candidate_rows = self._execute(
-                """
-                MATCH (node:Chunk)
-                SEARCH node IN (
-                  VECTOR INDEX chunk_embedding_index
-                  FOR $embedding
-                  LIMIT $candidate_k
-                )
-                WITH node
-                WHERE node.owner_id = $owner_id
-                  AND node.workspace_id = $workspace_id
-                  AND ($run_id IS NULL OR node.run_id = $run_id)
-                  AND ($resource_ids IS NULL OR node.resource_id IN $resource_ids)
-                RETURN node.id AS chunk_id,
-                       node.document_id AS document_id,
-                       node.resource_id AS resource_id,
-                       node.text AS text,
-                       node.source_url AS source_url,
-                       node.source_title AS source_title,
-                       node.chunk_index AS chunk_index,
-                       vector.similarity.cosine(node.embedding, $embedding) AS score
-                ORDER BY score DESC
-                LIMIT $top_k
-                """,
-                params,
+        if resource_ids:
+            candidate_rows = self._fetch_resource_scoped_candidates(
+                query_vec=query_vec,
+                owner_id=owner_id,
+                workspace_id=workspace_id,
+                run_id=run_id,
+                resource_ids=resource_ids,
+                top_k=candidate_k,
             )
-        except VectorStoreError as exc:
-            # Compatibility fallback for older Neo4j versions without SEARCH.
-            if (
-                "invalid syntax" not in str(exc).lower()
-                and "search" not in str(exc).lower()
-            ):
-                raise
-            candidate_rows = self._execute(
-                """
-                CALL db.index.vector.queryNodes('chunk_embedding_index', $candidate_k, $embedding)
-                YIELD node, score
-                WHERE node:Chunk
-                  AND node.owner_id = $owner_id
-                  AND node.workspace_id = $workspace_id
-                  AND ($run_id IS NULL OR node.run_id = $run_id)
-                  AND ($resource_ids IS NULL OR node.resource_id IN $resource_ids)
-                RETURN node.id AS chunk_id,
-                       node.document_id AS document_id,
-                       node.resource_id AS resource_id,
-                       node.text AS text,
-                       node.source_url AS source_url,
-                       node.source_title AS source_title,
-                       node.chunk_index AS chunk_index,
-                       score
-                ORDER BY score DESC
-                LIMIT $top_k
-                """,
-                params,
+        else:
+            candidate_rows = self._fetch_global_candidates(
+                query_vec=query_vec,
+                owner_id=owner_id,
+                workspace_id=workspace_id,
+                run_id=run_id,
+                candidate_k=candidate_k,
+                top_k=candidate_k,
             )
 
         if not candidate_rows:
@@ -587,6 +675,23 @@ class Neo4jGraphStore:
                     "neighbors": enrich["neighbors"],
                 }
             )
+
+        if not scored_rows and resource_ids:
+            for row in candidate_rows:
+                scored_rows.append(
+                    {
+                        "chunk_id": row["chunk_id"],
+                        "document_id": row.get("document_id", ""),
+                        "resource_id": row.get("resource_id", ""),
+                        "text": row.get("text", ""),
+                        "source_url": row.get("source_url", ""),
+                        "source_title": row.get("source_title", ""),
+                        "chunk_index": row.get("chunk_index", 0),
+                        "score": float(row.get("score") or 0.0),
+                        "mentions": [],
+                        "neighbors": [],
+                    }
+                )
 
         scored_rows.sort(key=lambda item: item["score"], reverse=True)
         top_rows = scored_rows[:effective_top_k]

@@ -1758,6 +1758,164 @@ class SupabaseSessionStore:
             await self._invalidate_rag_chat_messages_list_cache(owner_id, session_id)
         return bool(rows)
 
+    async def list_ready_rag_chat_session_attachment_resource_ids(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        agent_id: str,
+    ) -> list[str]:
+        response = await self._request(
+            "GET",
+            "rag_chat_session_attachments",
+            params={
+                "select": "id,resource_id",
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "agent_id": f"eq.{agent_id}",
+                "state": "eq.ready",
+                "order": "created_at.asc",
+            },
+        )
+        return [
+            row["resource_id"]
+            for row in response.json()
+            if isinstance(row.get("resource_id"), str) and row["resource_id"]
+        ]
+
+    async def create_rag_chat_session_attachment(self, payload: dict[str, Any]) -> None:
+        await self._request(
+            "POST",
+            "rag_chat_session_attachments",
+            json_body={
+                "id": payload["attachment_id"],
+                "session_id": payload["session_id"],
+                "agent_id": payload["agent_id"],
+                "owner_id": payload["owner_id"],
+                "workspace_id": payload["workspace_id"],
+                "resource_id": payload["resource_id"],
+                "filename": payload["filename"],
+                "mime_type": payload["mime_type"],
+                "byte_size": payload["byte_size"],
+                "storage_uri": payload["storage_uri"],
+                "state": payload["state"],
+                "error_details": payload.get("error_details"),
+                "created_at": payload["created_at"],
+                "updated_at": payload["updated_at"],
+            },
+            extra_headers={"Prefer": "resolution=ignore-duplicates"},
+        )
+
+    async def update_rag_chat_session_attachment(
+        self,
+        *,
+        attachment_id: str,
+        session_id: str,
+        agent_id: str,
+        owner_id: str,
+        patch: dict[str, Any],
+    ) -> None:
+        payload = dict(patch)
+        payload["updated_at"] = datetime.now(UTC).isoformat()
+        await self._request(
+            "PATCH",
+            "rag_chat_session_attachments",
+            params={
+                "id": f"eq.{attachment_id}",
+                "session_id": f"eq.{session_id}",
+                "agent_id": f"eq.{agent_id}",
+                "owner_id": f"eq.{owner_id}",
+            },
+            json_body=payload,
+        )
+
+    async def list_rag_chat_session_attachments(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        agent_id: str,
+    ) -> list[dict[str, Any]]:
+        response = await self._request(
+            "GET",
+            "rag_chat_session_attachments",
+            params={
+                "select": (
+                    "id,session_id,agent_id,owner_id,workspace_id,resource_id,filename,mime_type,"
+                    "byte_size,storage_uri,state,error_details,created_at,updated_at"
+                ),
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "agent_id": f"eq.{agent_id}",
+                "order": "created_at.asc",
+            },
+        )
+        return response.json()
+
+    async def delete_rag_chat_session_attachments(
+        self,
+        *,
+        session_id: str,
+        owner_id: str,
+        agent_id: str,
+    ) -> list[dict[str, str]]:
+        response = await self._request(
+            "DELETE",
+            "rag_chat_session_attachments",
+            params={
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "agent_id": f"eq.{agent_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        return [
+            {
+                "attachment_id": row["id"],
+                "resource_id": row["resource_id"],
+                "storage_uri": row["storage_uri"],
+            }
+            for row in response.json()
+            if (
+                isinstance(row.get("id"), str)
+                and isinstance(row.get("resource_id"), str)
+                and isinstance(row.get("storage_uri"), str)
+            )
+        ]
+
+    async def delete_rag_chat_session_attachments_by_ids(
+        self,
+        *,
+        attachment_ids: list[str],
+        session_id: str,
+        owner_id: str,
+        agent_id: str,
+    ) -> list[dict[str, str]]:
+        response = await self._request(
+            "DELETE",
+            "rag_chat_session_attachments",
+            params={
+                "id": f"in.({','.join(attachment_ids)})",
+                "session_id": f"eq.{session_id}",
+                "owner_id": f"eq.{owner_id}",
+                "agent_id": f"eq.{agent_id}",
+            },
+            extra_headers={"Prefer": "return=representation"},
+        )
+        return [
+            {
+                "attachment_id": row["id"],
+                "resource_id": row["resource_id"],
+                "storage_uri": row["storage_uri"],
+            }
+            for row in response.json()
+            if (
+                isinstance(row.get("id"), str)
+                and isinstance(row.get("resource_id"), str)
+                and isinstance(row.get("storage_uri"), str)
+            )
+        ]
+
     async def update_rag_chat_message_suggestions(
         self,
         *,

@@ -63,6 +63,37 @@ def extract_text_from_bytes(content: bytes, suffix: str) -> str:
     raise RuntimeError(f"Unsupported file type for ingestion: {suffix}")
 
 
+async def ingest_resource_from_bytes(
+    *,
+    store: SupabaseSessionStore,
+    resource_id: str,
+    content: bytes,
+    suffix: str,
+    source_title: str,
+    source_url: str,
+    owner_id: str,
+    workspace_id: str,
+    source_type: str = "resource_upload",
+) -> int:
+    # ``store`` is kept for compatibility with existing call sites.
+    del store
+    # Parsing PDF/DOCX and chunking can be CPU-bound; keep this off the
+    # main event loop so concurrent API streams remain responsive.
+    text = await asyncio.to_thread(extract_text_from_bytes, content, suffix)
+    graph_store = Neo4jGraphStore()
+    return await asyncio.to_thread(
+        graph_store.ingest_document,
+        document_id=resource_id,
+        source_type=source_type,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        title=source_title,
+        source_url=source_url,
+        text=text,
+        resource_id=resource_id,
+    )
+
+
 async def ingest_resource_from_locator(
     *,
     store: SupabaseSessionStore,
@@ -71,24 +102,17 @@ async def ingest_resource_from_locator(
     owner_id: str,
     workspace_id: str,
 ) -> int:
-    # ``store`` is kept for compatibility with existing call sites.
-    del store
     content, suffix = await read_locator_bytes(file_locator)
-    # Parsing PDF/DOCX and chunking can be CPU-bound; keep this off the
-    # main event loop so concurrent API streams remain responsive.
-    text = await asyncio.to_thread(extract_text_from_bytes, content, suffix)
     source_title = Path(urlparse(file_locator).path).name or resource_id
-    graph_store = Neo4jGraphStore()
-    return await asyncio.to_thread(
-        graph_store.ingest_document,
-        document_id=resource_id,
-        source_type="resource_upload",
+    return await ingest_resource_from_bytes(
+        store=store,
+        resource_id=resource_id,
+        content=content,
+        suffix=suffix,
+        source_title=source_title,
+        source_url=file_locator,
         owner_id=owner_id,
         workspace_id=workspace_id,
-        title=source_title,
-        source_url=file_locator,
-        text=text,
-        resource_id=resource_id,
     )
 
 

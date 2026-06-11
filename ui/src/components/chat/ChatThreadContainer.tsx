@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { SendHorizontal, Square } from 'lucide-react'
+import { Paperclip, SendHorizontal, Square, X } from 'lucide-react'
 import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import type { RagChatMessage } from '@/types'
+import type { RagChatMessage, SessionAttachment } from '@/types'
 import type { ChatTransport } from './transports'
 import { getStopEditState, replaceLastEditableUserMessage } from './chatThreadState'
 import { ToolMenuButton } from './ToolMenuButton'
 import { defaultToolConfig } from './toolConfig'
 import type { ToolConfig } from './toolConfig'
+
+const ACCEPTED_MIME = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/plain',
+  'text/markdown',
+].join(',')
 
 type Props = {
   transport: ChatTransport
@@ -24,6 +31,12 @@ type Props = {
   subtitle?: string
   emptyState: string
   resourceLabel?: string
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function CitationMarker({ citation, index }: { citation: RagChatMessage['citations'][number]; index: number }) {
@@ -113,6 +126,33 @@ function CitationMarkers({ citations }: { citations: RagChatMessage['citations']
   )
 }
 
+function AttachmentShelf({ attachments }: { attachments: SessionAttachment[] }) {
+  if (attachments.length === 0) return null
+  return (
+    <div className="mx-6 mb-3 flex flex-wrap gap-2 max-md:mx-4">
+      {attachments.map((a) => (
+        <div
+          key={a.attachment_id}
+          className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-1"
+        >
+          <Paperclip size={11} className="shrink-0 text-muted-foreground" />
+          <span className="max-w-[120px] truncate text-[11px] text-foreground">{a.filename}</span>
+          <Badge
+            variant="outline"
+            className={cn('text-[10px] px-1 py-0 h-4', {
+              'border-green-500/40 text-green-600': a.state === 'ready',
+              'border-destructive/40 text-destructive': a.state === 'failed',
+              'border-muted-foreground/30 text-muted-foreground': a.state === 'processing' || a.state === 'uploaded',
+            })}
+          >
+            {a.state}
+          </Badge>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ChatThreadContainer({
   transport,
   accessToken,
@@ -129,17 +169,21 @@ export function ChatThreadContainer({
   const [input, setInput] = useState('')
   const [chatting, setChatting] = useState(false)
   const [streamingText, setStreamingText] = useState('')
+  const [streamingStatus, setStreamingStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [toolConfig, setToolConfig] = useState<ToolConfig>(() => defaultToolConfig())
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [sessionAttachments, setSessionAttachments] = useState<SessionAttachment[]>([])
 
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
   const currentTransportKeyRef = useRef(transport.key)
   const chatAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // Tracks whether the last user+assistant exchange in `messages` has been persisted server-side.
   // Set to true in onDone; reset to false when a new send begins.
   const lastExchangePersistedRef = useRef(false)
@@ -163,6 +207,8 @@ export function ChatThreadContainer({
     setLatestSuggestions([])
     setEditingMessageId(null)
     setToolConfig(defaultToolConfig())
+    setPendingFiles([])
+    setSessionAttachments([])
   }, [transport.key])
 
   useEffect(() => {
@@ -180,8 +226,18 @@ export function ChatThreadContainer({
         setSessionId(res.session_id)
         setMessages(res.messages)
         setError(null)
-        // Messages loaded from server are persisted
         lastExchangePersistedRef.current = true
+
+        if (transport.loadSessionAttachments) {
+          try {
+            const attachments = await transport.loadSessionAttachments(res.session_id, accessToken)
+            if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
+              setSessionAttachments(attachments)
+            }
+          } catch {
+            // attachment list failure is non-fatal
+          }
+        }
       } catch (err) {
         if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
           setError(err instanceof Error ? err.message : 'Failed to load chat session.')
@@ -198,6 +254,7 @@ export function ChatThreadContainer({
         lastExchangePersistedRef.current = false
         setSessionId(null)
         setMessages([])
+        setSessionAttachments([])
       }
       return
     }
@@ -218,6 +275,9 @@ export function ChatThreadContainer({
     const requestId = ++messagesRequestRef.current
     lastExchangePersistedRef.current = false
 
+    const filesToSend = [...pendingFiles]
+    setPendingFiles([])
+
     if (!opts?.skipOptimisticAppend) {
       const optimisticUserMessage: RagChatMessage = {
         message_id: `tmp-user-${requestId}`,
@@ -225,7 +285,9 @@ export function ChatThreadContainer({
         agent_id: null,
         owner_id: '',
         role: 'user',
-        content: question,
+        content: filesToSend.length > 0
+          ? `${question}\n\n📎 ${filesToSend.map((f) => f.name).join(', ')}`
+          : question,
         citations: [],
         created_at: new Date().toISOString(),
       }
@@ -234,6 +296,7 @@ export function ChatThreadContainer({
 
     setInput('')
     setStreamingText('')
+    setStreamingStatus(null)
     setChatting(true)
     setError(null)
     setLatestSuggestions([])
@@ -273,10 +336,16 @@ export function ChatThreadContainer({
           setSessionId(nextSessionId)
           if (!sessionId) onSessionActivated(nextSessionId)
         },
+        onStatus: (message) => {
+          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
+          if (controller.signal.aborted) return
+          setStreamingStatus(message)
+        },
         onChunk: (textChunk) => {
           if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
           if (controller.signal.aborted) return
           accumulated += textChunk
+          setStreamingStatus(null)
           setStreamingText((prev) => prev + textChunk)
         },
         onCitations: (citations) => {
@@ -312,6 +381,7 @@ export function ChatThreadContainer({
           setSessionId(finalSessionId)
           setMessages((prev) => [...prev, assistantMessage])
           setStreamingText('')
+          setStreamingStatus(null)
           lastExchangePersistedRef.current = true
           onSessionsChanged()
         },
@@ -320,13 +390,15 @@ export function ChatThreadContainer({
           if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
           setError(streamError)
           setStreamingText('')
+          setStreamingStatus(null)
         },
-      }, toolConfig)
+      }, toolConfig, filesToSend.length > 0 ? filesToSend : undefined)
     } catch (err) {
       if (controller.signal.aborted) return
       if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
         setError(err instanceof Error ? err.message : 'Chat failed.')
         setStreamingText('')
+        setStreamingStatus(null)
       }
     } finally {
       if (chatAbortRef.current === controller) chatAbortRef.current = null
@@ -426,13 +498,17 @@ export function ChatThreadContainer({
             <div className="flex gap-2 items-start">
               <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
               <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
-                <ChatMarkdown content={streamingText || 'Thinking...'} />
+                <ChatMarkdown content={streamingText || streamingStatus || 'Thinking...'} />
               </div>
             </div>
           )}
           <div ref={bottomRef} />
         </div>
       </ScrollArea>
+
+      {sessionAttachments.length > 0 && (
+        <AttachmentShelf attachments={sessionAttachments} />
+      )}
 
       {error && <p role="alert" className="mx-6 mb-2 shrink-0 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-xs text-destructive max-md:mx-4">{error}</p>}
 
@@ -454,7 +530,60 @@ export function ChatThreadContainer({
             </Button>
           </div>
         )}
+
+        {pendingFiles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {pendingFiles.map((file, i) => (
+              <div
+                key={`${file.name}-${i}`}
+                className="flex items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-2 py-1 text-[11px]"
+              >
+                <Paperclip size={10} className="shrink-0 text-muted-foreground" />
+                <span className="max-w-[120px] truncate text-foreground">{file.name}</span>
+                <span className="text-muted-foreground">({formatBytes(file.size)})</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${file.name}`}
+                  className="ml-0.5 rounded text-muted-foreground hover:text-foreground"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-2 items-end">
+          {transport.supportsFileUpload && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_MIME}
+                className="hidden"
+                onChange={(e) => {
+                  const selected = Array.from(e.target.files ?? [])
+                  if (selected.length > 0) {
+                    setPendingFiles((prev) => [...prev, ...selected])
+                  }
+                  e.target.value = ''
+                }}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="shrink-0"
+                aria-label="Attach files"
+                disabled={chatting}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip size={15} />
+              </Button>
+            </>
+          )}
           <ToolMenuButton
             toolConfig={toolConfig}
             onToggle={(id, enabled) =>
@@ -499,7 +628,7 @@ export function ChatThreadContainer({
             <Button
               size="icon"
               onClick={() => void (editingMessageId ? submitEdit() : send())}
-              disabled={!input.trim()}
+              disabled={!input.trim() && pendingFiles.length === 0}
               aria-label={editingMessageId ? 'Update and resend' : 'Send message'}
             >
               <SendHorizontal size={15} />

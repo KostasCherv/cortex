@@ -1,6 +1,7 @@
 """Tests for FastAPI endpoints (src/api/endpoints.py)"""
 
 import asyncio
+from io import BytesIO
 import json
 import time
 from contextlib import contextmanager
@@ -9,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 import pytest
+from starlette.datastructures import Headers, UploadFile as StarletteUploadFile
 
 from src.api.endpoints import app
 from src.auth import AuthenticatedUser, get_authenticated_user
@@ -1104,6 +1106,21 @@ async def _collect_stream(stream):
     return events
 
 
+def _fake_prepared_chat(*, session_id: str = "chat-1", resource_ids: list[str] | None = None):
+    return SimpleNamespace(
+        agent=MagicMock(system_instructions="Keep it concise."),
+        resource_ids=resource_ids or ["res-1"],
+        rag_context=MagicMock(context="Relevant context.", chunks=[]),
+        chat_session_id=session_id,
+        messages=[],
+        bind_tools=True,
+        tool_skip_reason=None,
+        composio_apps=[],
+        allow_web_search=True,
+        reference_tools={},
+    )
+
+
 
 def test_rag_chat_calls_agent_loop():
     mock_agent = MagicMock()
@@ -1190,6 +1207,415 @@ def test_rag_chat_stream_calls_agent_loop():
     assert end_workflow.call_args.args[0] is trace_ctx
     assert end_workflow.call_args.kwargs["status"] == "success"
     assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
+
+
+def test_rag_agent_chat_with_upload_rejects_invalid_file_type():
+    with (
+        patch("src.api.endpoints._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(return_value=_fake_prepared_chat()),
+        ),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            data={"message": "Use this file"},
+            files={"files": ("payload.exe", b"binary", "application/octet-stream")},
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.text
+
+
+def test_rag_agent_chat_rejects_malformed_json_with_structured_validation_error():
+    response = client.post(
+        "/api/rag/agents/agent-1/chat",
+        content='{"message": ',
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["type"] == "json_invalid"
+    assert detail[0]["loc"] == ["body", 12]
+
+
+def test_rag_agent_chat_rejects_malformed_multipart_tools_with_structured_validation_error():
+    response = client.post(
+        "/api/rag/agents/agent-1/chat",
+        data={"message": "Hello", "tools": '{"web": '},
+        files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["type"] == "json_invalid"
+    assert detail[0]["loc"] == ["body", "tools"]
+
+
+def test_rag_agent_chat_rejects_schema_invalid_multipart_tools_with_structured_validation_error():
+    response = client.post(
+        "/api/rag/agents/agent-1/chat",
+        data={"message": "Hello", "tools": '{"unknown_field": true}'},
+        files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["type"] == "value_error"
+    assert detail[0]["loc"] == ["body", "tools"]
+
+
+def test_rag_agent_chat_stream_uploads_files_before_running_loop():
+    call_order: list[str] = []
+
+    async def record_ingest(**_kwargs):
+        call_order.append("ingest")
+        return []
+
+    async def record_loop(**_kwargs):
+        call_order.append("loop")
+        return "Answer", False
+
+    with (
+        patch("src.api.endpoints._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(
+                side_effect=[
+                    _fake_prepared_chat(resource_ids=["agent-res-1"]),
+                    _fake_prepared_chat(resource_ids=["agent-res-1", "session-res-1"]),
+                ]
+            ),
+        ) as mock_prepare,
+        patch(
+            "src.api.endpoints.ingest_agent_chat_session_uploads",
+            new=AsyncMock(side_effect=record_ingest),
+        ) as mock_ingest,
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            data={"message": "Use this PDF"},
+            files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    mock_ingest.assert_awaited_once()
+    assert mock_prepare.await_count == 2
+    mock_loop.assert_awaited_once()
+    assert call_order == ["ingest", "loop"]
+
+
+def test_rag_agent_chat_uploads_files_before_running_loop():
+    call_order: list[str] = []
+
+    async def record_ingest(**_kwargs):
+        call_order.append("ingest")
+        return []
+
+    async def record_loop(**_kwargs):
+        call_order.append("loop")
+        return "Answer", False
+
+    with (
+        patch("src.api.endpoints._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(
+                side_effect=[
+                    _fake_prepared_chat(resource_ids=["agent-res-1"]),
+                    _fake_prepared_chat(resource_ids=["agent-res-1", "session-res-1"]),
+                ]
+            ),
+        ) as mock_prepare,
+        patch(
+            "src.api.endpoints.ingest_agent_chat_session_uploads",
+            new=AsyncMock(side_effect=record_ingest),
+        ) as mock_ingest,
+        patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
+        patch("src.api.endpoints.enqueue_memory_refresh", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
+        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            data={"message": "Use this PDF"},
+            files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 200
+    mock_ingest.assert_awaited_once()
+    assert mock_prepare.await_count == 2
+    mock_loop.assert_awaited_once()
+    assert call_order == ["ingest", "loop"]
+
+
+def test_rag_agent_chat_upload_validation_ends_workflow_before_400():
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
+
+    with (
+        patch("src.api.endpoints._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(return_value=_fake_prepared_chat(resource_ids=["agent-res-1"])),
+        ),
+        patch(
+            "src.api.endpoints.ingest_agent_chat_session_uploads",
+            new=AsyncMock(side_effect=RagValidationError("unsupported_type", "Unsupported file type.")),
+        ),
+        patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.endpoints.end_workflow_run", end_workflow),
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            data={"message": "Use this PDF"},
+            files={"files": ("brief.pdf", b"%PDF-1.4", "application/pdf")},
+        )
+
+    assert response.status_code == 400
+    end_workflow.assert_called_once()
+    assert end_workflow.call_args.args[0] is trace_ctx
+    assert end_workflow.call_args.kwargs["status"] == "error"
+
+
+def test_rag_chat_session_attachments_returns_scoped_attachments():
+    mock_agent = MagicMock()
+    mock_attachment = MagicMock()
+    mock_attachment.to_dict.return_value = {
+        "attachment_id": "att-1",
+        "session_id": "chat-1",
+        "resource_id": "res-1",
+        "filename": "brief.pdf",
+        "state": "ready",
+    }
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(
+                return_value={
+                    "session_id": "chat-1",
+                    "agent_id": "agent-1",
+                    "owner_id": "test-user",
+                }
+            ),
+        ),
+        patch(
+            "src.api.endpoints.list_rag_chat_session_attachments",
+            new=AsyncMock(return_value=[mock_attachment]),
+        ) as mock_list,
+    ):
+        response = client.get("/api/rag/agents/agent-1/chat/sessions/chat-1/attachments")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "session_id": "chat-1",
+        "agent_id": "agent-1",
+        "attachments": [mock_attachment.to_dict.return_value],
+    }
+    mock_list.assert_awaited_once_with(
+        session_id="chat-1",
+        owner_id="test-user",
+        agent_id="agent-1",
+    )
+
+
+def test_rag_chat_session_attachments_returns_404_for_unknown_session():
+    mock_agent = MagicMock()
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.list_rag_chat_session_attachments", new=AsyncMock()) as mock_list,
+    ):
+        response = client.get("/api/rag/agents/agent-1/chat/sessions/chat-404/attachments")
+
+    assert response.status_code == 404
+    mock_list.assert_not_awaited()
+
+
+def test_rag_chat_session_delete_cleans_up_attachments_before_session_delete():
+    mock_agent = MagicMock()
+    call_order: list[str] = []
+
+    async def cleanup(**_kwargs):
+        call_order.append("cleanup")
+        return None
+
+    async def delete_session(*_args, **_kwargs):
+        call_order.append("delete")
+        return True
+
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.endpoints.get_rag_chat_session",
+            new=AsyncMock(
+                return_value={
+                    "session_id": "chat-1",
+                    "agent_id": "agent-1",
+                    "owner_id": "test-user",
+                }
+            ),
+        ),
+        patch(
+            "src.api.endpoints.delete_rag_chat_session_attachments_and_artifacts",
+            new=AsyncMock(side_effect=cleanup),
+        ) as mock_cleanup,
+        patch("src.api.endpoints.delete_rag_chat_session", new=AsyncMock(side_effect=delete_session)),
+    ):
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/chat-1")
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": "chat-1", "deleted": True}
+    mock_cleanup.assert_awaited_once_with(
+        session_id="chat-1",
+        owner_id="test-user",
+        agent_id="agent-1",
+    )
+    assert call_order == ["cleanup", "delete"]
+
+
+def test_rag_chat_session_delete_returns_404_for_unknown_session_before_cleanup():
+    mock_agent = MagicMock()
+    with (
+        patch("src.api.endpoints.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch("src.api.endpoints.get_rag_chat_session", new=AsyncMock(return_value=None)),
+        patch("src.api.endpoints.delete_rag_chat_session_attachments_and_artifacts", new=AsyncMock()) as mock_cleanup,
+        patch("src.api.endpoints.delete_rag_chat_session", new=AsyncMock()) as mock_delete,
+    ):
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/chat-404")
+
+    assert response.status_code == 404
+    mock_cleanup.assert_not_awaited()
+    mock_delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_agent_chat_session_uploads_does_not_create_workspace_rag_resources():
+    from src.rag import ingest_agent_chat_session_uploads
+
+    file = StarletteUploadFile(
+        file=BytesIO(b"%PDF-1.4 session attachment"),
+        filename="brief.pdf",
+        headers=Headers({"content-type": "application/pdf"}),
+    )
+    mock_store = MagicMock()
+    mock_store.create_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_store.update_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_store.delete_rag_chat_session_attachments_by_ids = AsyncMock(return_value=[])
+    mock_storage = MagicMock()
+    mock_storage.upload_bytes = AsyncMock(return_value="supabase://bucket/session/brief.pdf")
+    mock_storage.create_signed_download_url = AsyncMock(return_value="https://signed.example/brief.pdf")
+
+    with (
+        patch("src.rag.create_resource_and_ingest", new=AsyncMock(side_effect=AssertionError("workspace resource path should not be used"))),
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
+        patch("src.rag.ingest_resource_from_bytes", new=AsyncMock(return_value=None)) as mock_ingest,
+    ):
+        attachments = await ingest_agent_chat_session_uploads(
+            session_id="chat-1",
+            agent_id="agent-1",
+            user_id="test-user",
+            files=[file],
+        )
+
+    assert len(attachments) == 1
+    assert attachments[0].session_id == "chat-1"
+    assert attachments[0].state == "ready"
+    mock_storage.upload_bytes.assert_awaited_once()
+    mock_ingest.assert_awaited_once()
+    mock_store.create_rag_chat_session_attachment.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ingest_agent_chat_session_uploads_cleans_up_earlier_files_when_later_file_fails():
+    from src.rag import ingest_agent_chat_session_uploads
+
+    files = [
+        StarletteUploadFile(
+            file=BytesIO(b"%PDF-1.4 first"),
+            filename="first.pdf",
+            headers=Headers({"content-type": "application/pdf"}),
+        ),
+        StarletteUploadFile(
+            file=BytesIO(b"%PDF-1.4 second"),
+            filename="second.pdf",
+            headers=Headers({"content-type": "application/pdf"}),
+        ),
+    ]
+    mock_store = MagicMock()
+    mock_store.create_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_store.update_rag_chat_session_attachment = AsyncMock(return_value=None)
+    mock_store.delete_rag_chat_session_attachments_by_ids = AsyncMock(
+        return_value=[
+            {
+                "attachment_id": "att-1",
+                "resource_id": "res-1",
+                "storage_uri": "supabase://bucket/first.pdf",
+            },
+        ]
+    )
+    mock_storage = MagicMock()
+    mock_storage.upload_bytes = AsyncMock(
+        side_effect=[
+            "supabase://bucket/first.pdf",
+            "supabase://bucket/second.pdf",
+        ]
+    )
+    mock_storage.delete_object = AsyncMock()
+
+    with (
+        patch("src.rag.get_session_store", return_value=mock_store),
+        patch("src.rag.get_storage_adapter", return_value=mock_storage),
+        patch(
+            "src.rag.ingest_resource_from_bytes",
+            new=AsyncMock(side_effect=[None, RuntimeError("second failed")]),
+        ),
+        patch("src.rag.delete_resource_artifacts", new=AsyncMock()) as mock_delete_artifacts,
+        patch("src.rag.uuid.uuid4", side_effect=["res-1", "att-1", "res-2", "att-2"]),
+    ):
+        with pytest.raises(RagValidationError) as exc_info:
+            await ingest_agent_chat_session_uploads(
+                session_id="chat-1",
+                agent_id="agent-1",
+                user_id="test-user",
+                files=files,
+            )
+
+    assert exc_info.value.code == "processing_failed"
+    # Only the completed first attachment should be rolled back.
+    mock_store.delete_rag_chat_session_attachments_by_ids.assert_awaited_once_with(
+        attachment_ids=["att-1"],
+        session_id="chat-1",
+        owner_id="test-user",
+        agent_id="agent-1",
+    )
+    # First attachment artifacts cleaned up via rollback.
+    mock_delete_artifacts.assert_any_await(
+        store=mock_store,
+        resource_id="res-1",
+        owner_id="test-user",
+        workspace_id="test-user",
+    )
+    # Both blobs deleted: first.pdf via rollback, second.pdf directly (failed attachment blob cleanup).
+    deleted_uris = [call.kwargs["storage_uri"] for call in mock_storage.delete_object.await_args_list]
+    assert "supabase://bucket/first.pdf" in deleted_uris
+    assert "supabase://bucket/second.pdf" in deleted_uris
+    # Failed attachment row preserved with state=failed (not deleted).
+    update_calls = mock_store.update_rag_chat_session_attachment.await_args_list
+    failed_updates = [c for c in update_calls if c.kwargs.get("patch", {}).get("state") == "failed"]
+    assert len(failed_updates) == 1
+    assert failed_updates[0].kwargs["attachment_id"] == "att-2"
 
 
 def test_workspace_rag_chat_calls_agent_loop():

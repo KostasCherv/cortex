@@ -12,6 +12,9 @@ When the user enables arXiv, use search_papers first, then download_paper and re
 Behavioural guidelines:
 - Prefer retrieved document context for questions about the user's uploaded files.
 - When tool results are available, ground your answer in them; do not fabricate data.
+{% if session_attachment_files %}
+- This chat session already has uploaded files attached: {{ session_attachment_files | join(', ') }}. Treat them as available for this conversation; do not ask the user to upload again unless retrieval failed or they want a different file.
+{% endif %}
 {% if system_instructions and system_instructions != 'None' %}
 
 Additional instructions: {{ system_instructions }}

@@ -18,6 +18,7 @@ from src.prompts.registry import prompt_registry
 from src.rag_engine import (
     RagQueryResult,
     delete_resource_artifacts,
+    ingest_resource_from_bytes,
     ingest_resource_from_locator,
     query_resource_context,
 )
@@ -56,6 +57,42 @@ class RagResource:
             "resource_id": self.resource_id,
             "owner_id": self.owner_id,
             "workspace_id": self.workspace_id,
+            "filename": self.filename,
+            "mime_type": self.mime_type,
+            "byte_size": self.byte_size,
+            "storage_uri": self.storage_uri,
+            "state": self.state,
+            "error_details": self.error_details,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+
+@dataclass
+class RagSessionAttachment:
+    attachment_id: str
+    session_id: str
+    agent_id: str
+    owner_id: str
+    workspace_id: str
+    resource_id: str
+    filename: str
+    mime_type: str
+    byte_size: int
+    storage_uri: str
+    state: str = "uploaded"
+    error_details: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def to_dict(self) -> dict:
+        return {
+            "attachment_id": self.attachment_id,
+            "session_id": self.session_id,
+            "agent_id": self.agent_id,
+            "owner_id": self.owner_id,
+            "workspace_id": self.workspace_id,
+            "resource_id": self.resource_id,
             "filename": self.filename,
             "mime_type": self.mime_type,
             "byte_size": self.byte_size,
@@ -1018,3 +1055,298 @@ async def list_workspace_ready_resource_ids(user_id: str) -> list[str]:
         for row in rows
         if _normalize_state(str(row.get("state", ""))) == "ready"
     ]
+
+
+async def list_ready_rag_chat_session_attachment_resource_ids(
+    *,
+    session_id: str,
+    owner_id: str,
+    agent_id: str,
+) -> list[str]:
+    return await get_session_store().list_ready_rag_chat_session_attachment_resource_ids(
+        session_id=session_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+    )
+
+
+async def _create_rag_chat_session_attachment(attachment: RagSessionAttachment) -> None:
+    await get_session_store().create_rag_chat_session_attachment(attachment.to_dict())
+
+
+async def _update_rag_chat_session_attachment(
+    *,
+    attachment_id: str,
+    session_id: str,
+    agent_id: str,
+    owner_id: str,
+    patch: dict[str, object],
+) -> None:
+    await get_session_store().update_rag_chat_session_attachment(
+        attachment_id=attachment_id,
+        session_id=session_id,
+        agent_id=agent_id,
+        owner_id=owner_id,
+        patch=patch,
+    )
+
+
+async def _delete_attachment_artifacts(
+    *,
+    rows: list[dict[str, str]],
+    owner_id: str,
+    workspace_id: str,
+    store,
+    storage,
+    raise_on_error: bool = False,
+) -> None:
+    errors: list[str] = []
+    for row in rows:
+        resource_id = row.get("resource_id")
+        if isinstance(resource_id, str) and resource_id:
+            try:
+                await delete_resource_artifacts(
+                    store=store,
+                    resource_id=resource_id,
+                    owner_id=owner_id,
+                    workspace_id=workspace_id,
+                )
+            except Exception as exc:
+                msg = f"artifacts resource_id={resource_id}: {exc}"
+                logger.warning("[rag] failed to delete session attachment %s owner_id=%s", msg, owner_id)
+                errors.append(msg)
+        storage_uri = row.get("storage_uri")
+        if isinstance(storage_uri, str) and storage_uri:
+            try:
+                await storage.delete_object(storage_uri=storage_uri)
+            except Exception as exc:
+                msg = f"object storage_uri={storage_uri}: {exc}"
+                logger.warning("[rag] failed to delete session attachment %s owner_id=%s", msg, owner_id)
+                errors.append(msg)
+    if raise_on_error and errors:
+        raise RuntimeError(f"Failed to delete {len(errors)} artifact(s) for owner_id={owner_id}")
+
+
+async def _rollback_session_attachments(
+    *,
+    attachment_ids: list[str],
+    session_id: str,
+    agent_id: str,
+    owner_id: str,
+    workspace_id: str,
+    store,
+    storage,
+) -> None:
+    if not attachment_ids:
+        return
+    rows = await store.delete_rag_chat_session_attachments_by_ids(
+        attachment_ids=attachment_ids,
+        session_id=session_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+    )
+    await _delete_attachment_artifacts(
+        rows=rows,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        store=store,
+        storage=storage,
+    )
+
+
+async def ingest_agent_chat_session_uploads(
+    *,
+    session_id: str,
+    agent_id: str,
+    user_id: str,
+    files: list[UploadFile],
+) -> list[RagSessionAttachment]:
+    attachments: list[RagSessionAttachment] = []
+    store = get_session_store()
+    storage = get_storage_adapter()
+    workspace_id = _workspace_id_for_user(user_id)
+    completed_attachment_ids: list[str] = []
+    current_attachment: RagSessionAttachment | None = None
+    current_attachment_row_created: bool = False
+
+    try:
+        for file in files:
+            current_attachment = None
+            current_attachment_row_created = False
+            content = await file.read()
+            _validate_upload(file, content)
+
+            resource_id = str(uuid.uuid4())
+            attachment_id = str(uuid.uuid4())
+            filename = file.filename or f"attachment-{attachment_id}.txt"
+            storage_key = f"rag-chat/{workspace_id}/{agent_id}/{session_id}/{resource_id}/{filename}"
+            storage_uri = await storage.upload_bytes(
+                key=storage_key,
+                content=content,
+                content_type=file.content_type or "application/octet-stream",
+            )
+            now = datetime.now(UTC).isoformat()
+
+            attachment = RagSessionAttachment(
+                attachment_id=attachment_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                owner_id=user_id,
+                workspace_id=workspace_id,
+                resource_id=resource_id,
+                filename=filename,
+                mime_type=file.content_type or "application/octet-stream",
+                byte_size=len(content),
+                storage_uri=storage_uri,
+                state="uploaded",
+                created_at=now,
+                updated_at=now,
+            )
+            current_attachment = attachment
+            await _create_rag_chat_session_attachment(attachment)
+            current_attachment_row_created = True
+
+            await _update_rag_chat_session_attachment(
+                attachment_id=attachment.attachment_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                owner_id=user_id,
+                patch={"state": "processing", "error_details": None},
+            )
+            await ingest_resource_from_bytes(
+                store=store,
+                resource_id=attachment.resource_id,
+                content=content,
+                suffix=Path(filename).suffix.lower(),
+                source_title=filename,
+                source_url=attachment.storage_uri,
+                owner_id=user_id,
+                workspace_id=workspace_id,
+                source_type="session_attachment",
+            )
+            attachment.state = "ready"
+            attachment.error_details = None
+            attachment.updated_at = datetime.now(UTC).isoformat()
+            await _update_rag_chat_session_attachment(
+                attachment_id=attachment.attachment_id,
+                session_id=session_id,
+                agent_id=agent_id,
+                owner_id=user_id,
+                patch={"state": "ready", "error_details": None},
+            )
+            attachments.append(attachment)
+            completed_attachment_ids.append(attachment.attachment_id)
+    except Exception as exc:
+        if current_attachment is not None:
+            if current_attachment_row_created:
+                # Row exists: mark it failed so the UI can display the error, then clean up its blob.
+                current_attachment.state = "failed"
+                current_attachment.error_details = str(exc)
+                current_attachment.updated_at = datetime.now(UTC).isoformat()
+                try:
+                    await _update_rag_chat_session_attachment(
+                        attachment_id=current_attachment.attachment_id,
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        owner_id=user_id,
+                        patch={"state": "failed", "error_details": current_attachment.error_details},
+                    )
+                except Exception as update_exc:
+                    logger.warning(
+                        "[rag] failed to mark session attachment failed attachment_id=%s session_id=%s: %s",
+                        current_attachment.attachment_id,
+                        session_id,
+                        update_exc,
+                    )
+                if current_attachment.storage_uri:
+                    try:
+                        await storage.delete_object(storage_uri=current_attachment.storage_uri)
+                    except Exception as del_exc:
+                        logger.warning(
+                            "[rag] failed to delete blob for failed attachment_id=%s: %s",
+                            current_attachment.attachment_id,
+                            del_exc,
+                        )
+            else:
+                # Row was never created: delete the orphaned blob.
+                if current_attachment.storage_uri:
+                    try:
+                        await storage.delete_object(storage_uri=current_attachment.storage_uri)
+                    except Exception as del_exc:
+                        logger.warning(
+                            "[rag] failed to delete orphaned blob storage_uri=%s: %s",
+                            current_attachment.storage_uri,
+                            del_exc,
+                        )
+        await _rollback_session_attachments(
+            attachment_ids=completed_attachment_ids,
+            session_id=session_id,
+            agent_id=agent_id,
+            owner_id=user_id,
+            workspace_id=workspace_id,
+            store=store,
+            storage=storage,
+        )
+        if isinstance(exc, RagValidationError):
+            raise
+        raise RagValidationError(
+            "processing_failed",
+            str(exc) or "Failed to process uploaded file.",
+        ) from exc
+
+    return attachments
+
+
+async def list_rag_chat_session_attachments(
+    *,
+    session_id: str,
+    owner_id: str,
+    agent_id: str,
+) -> list[RagSessionAttachment]:
+    rows = await get_session_store().list_rag_chat_session_attachments(
+        session_id=session_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+    )
+    return [
+        RagSessionAttachment(
+            attachment_id=row["id"],
+            session_id=row["session_id"],
+            agent_id=row["agent_id"],
+            owner_id=row["owner_id"],
+            workspace_id=row["workspace_id"],
+            resource_id=row["resource_id"],
+            filename=row["filename"],
+            mime_type=row["mime_type"],
+            byte_size=row["byte_size"],
+            storage_uri=row["storage_uri"],
+            state=row.get("state", "uploaded"),
+            error_details=row.get("error_details"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+        for row in rows
+    ]
+
+
+async def delete_rag_chat_session_attachments_and_artifacts(
+    *,
+    session_id: str,
+    owner_id: str,
+    agent_id: str,
+) -> None:
+    deleted = await get_session_store().delete_rag_chat_session_attachments(
+        session_id=session_id,
+        owner_id=owner_id,
+        agent_id=agent_id,
+    )
+    workspace_id = _workspace_id_for_user(owner_id)
+    storage = get_storage_adapter()
+    await _delete_attachment_artifacts(
+        rows=deleted,
+        owner_id=owner_id,
+        workspace_id=workspace_id,
+        store=get_session_store(),
+        storage=storage,
+        raise_on_error=True,
+    )

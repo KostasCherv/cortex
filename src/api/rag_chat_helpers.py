@@ -25,6 +25,8 @@ from src.rag import (
     create_or_get_workspace_chat_session,
     get_agent_for_chat,
     list_chat_messages as list_rag_chat_messages,
+    list_rag_chat_session_attachments,
+    list_ready_rag_chat_session_attachment_resource_ids,
     list_workspace_ready_resource_ids,
     retrieve_context_for_query,
 )
@@ -97,6 +99,7 @@ def build_agent_messages(
     user_memory_context: str,
     composio_apps: list[str],
     normalized_message: str,
+    session_attachment_files: list[str] | None = None,
     bind_tools: bool = True,
     composio_user_disabled: bool = False,
 ) -> list[BaseMessage]:
@@ -108,6 +111,7 @@ def build_agent_messages(
         {
             "system_instructions": system_instructions,
             "rag_context": rag_context,
+            "session_attachment_files": session_attachment_files or [],
             "user_memory_context": user_memory_context,
             # Pass empty apps when not bound so the template's {% if composio_apps %}
             # block never fires; composio_user_disabled then controls whether the
@@ -167,6 +171,24 @@ def should_bind_composio_tools(
     return True, "default_bind"
 
 
+async def ensure_agent_chat_session_id(
+    *,
+    agent_id: str,
+    user_id: str,
+    session_id: str | None,
+    initial_message: str | None,
+) -> str | None:
+    agent_bundle = await get_agent_for_chat(agent_id, user_id)
+    if agent_bundle is None:
+        return None
+    return await create_or_get_chat_session(
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        initial_message=initial_message,
+    )
+
+
 async def prepare_agent_rag_chat(
     *,
     agent_id: str,
@@ -190,6 +212,22 @@ async def prepare_agent_rag_chat(
         initial_message=normalized_message,
     )
     timings.session_ms = (time.perf_counter() - t_session) * 1000
+    session_attachments = await list_rag_chat_session_attachments(
+        session_id=chat_session_id,
+        owner_id=user_id,
+        agent_id=agent_id,
+    )
+    session_attachment_resource_ids = [
+        attachment.resource_id
+        for attachment in session_attachments
+        if attachment.state == "ready" and attachment.resource_id
+    ]
+    session_attachment_files = [
+        attachment.filename
+        for attachment in session_attachments
+        if attachment.state == "ready" and attachment.filename
+    ]
+    merged_resource_ids = list(dict.fromkeys(resource_ids + session_attachment_resource_ids))
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
@@ -205,7 +243,7 @@ async def prepare_agent_rag_chat(
     else:
         bind_tools, tool_skip_reason = should_bind_composio_tools(
             message=normalized_message,
-            resource_ids=resource_ids,
+            resource_ids=merged_resource_ids,
             composio_apps=composio_apps,
         )
         allow_web_search = True
@@ -215,7 +253,7 @@ async def prepare_agent_rag_chat(
 
     retrieve_task = retrieve_context_for_query(
         user_id=user_id,
-        resource_ids=resource_ids,
+        resource_ids=merged_resource_ids,
         question=normalized_message,
     )
     memory_task = get_user_memory_prompt_block(user_id, normalized_message)
@@ -234,13 +272,14 @@ async def prepare_agent_rag_chat(
         user_memory_context=user_memory_context,
         composio_apps=composio_apps,
         normalized_message=normalized_message,
+        session_attachment_files=session_attachment_files,
         bind_tools=bind_tools,
         composio_user_disabled=(tool_skip_reason == "user_disabled"),
     )
     timings.prepare_ms = (time.perf_counter() - t0) * 1000
     return RagChatPrepared(
         agent=agent,
-        resource_ids=resource_ids,
+        resource_ids=merged_resource_ids,
         rag_context=rag_context,
         chat_session_id=chat_session_id,
         messages=messages,
@@ -356,8 +395,9 @@ def schedule_deferred_suggestions(
     session_id: str,
     owner_id: str,
     agent_id: str | None,
+    force: bool = False,
 ) -> None:
-    if not settings.rag_suggestions_deferred:
+    if not force and not settings.rag_suggestions_deferred:
         return
 
     async def _run() -> None:

@@ -258,6 +258,134 @@ async def test_prepare_workspace_respects_reference_tool_toggles():
 
 
 @pytest.mark.asyncio
+async def test_prepare_agent_merges_session_attachment_resource_ids():
+    from src.api.rag_chat_helpers import prepare_agent_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from unittest.mock import AsyncMock, patch
+
+    agent = MagicMock(system_instructions="system")
+    rag_context = MagicMock(context="", chunks=[])
+
+    with patch(
+        "src.api.rag_chat_helpers.get_agent_for_chat",
+        new_callable=AsyncMock,
+        return_value=(agent, ["agent-res-1"]),
+    ), patch(
+        "src.api.rag_chat_helpers.create_or_get_chat_session",
+        new_callable=AsyncMock,
+        return_value="sess-1",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+        new_callable=AsyncMock,
+        return_value=[
+            MagicMock(resource_id="attachment-res-1", filename="brief.pdf", state="ready"),
+            MagicMock(resource_id="attachment-res-2", filename="notes.txt", state="ready"),
+        ],
+    ) as mock_list_attachments, patch(
+        "src.api.rag_chat_helpers.get_composio_toolset_manager"
+    ) as mock_mgr, patch(
+        "src.api.rag_chat_helpers.retrieve_context_for_query",
+        new_callable=AsyncMock,
+        return_value=rag_context,
+    ) as mock_retrieve, patch(
+        "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_messages",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+
+        result = await prepare_agent_rag_chat(
+            agent_id="agent-1",
+            user_id="user-1",
+            normalized_message="What changed?",
+            session_id=None,
+            timings=RagChatTimings(),
+        )
+
+    assert result is not None
+    assert result.resource_ids == [
+        "agent-res-1",
+        "attachment-res-1",
+        "attachment-res-2",
+    ]
+    mock_list_attachments.assert_awaited_once_with(
+        session_id="sess-1",
+        owner_id="user-1",
+        agent_id="agent-1",
+    )
+    mock_retrieve.assert_awaited_once_with(
+        user_id="user-1",
+        resource_ids=["agent-res-1", "attachment-res-1", "attachment-res-2"],
+        question="What changed?",
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_ids():
+    from src.api.rag_chat_helpers import prepare_agent_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.api.endpoints import RagChatTools
+    from unittest.mock import AsyncMock, patch
+
+    agent = MagicMock(system_instructions="system")
+    rag_context = MagicMock(context="", chunks=[])
+    tools = RagChatTools(web_search=False, composio=False)
+
+    with patch(
+        "src.api.rag_chat_helpers.get_agent_for_chat",
+        new_callable=AsyncMock,
+        return_value=(agent, ["shared-res", "agent-res-1"]),
+    ), patch(
+        "src.api.rag_chat_helpers.create_or_get_chat_session",
+        new_callable=AsyncMock,
+        return_value="sess-1",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+        new_callable=AsyncMock,
+        return_value=[
+            MagicMock(resource_id="shared-res", filename="shared.pdf", state="ready"),
+            MagicMock(resource_id="attachment-res-1", filename="brief.pdf", state="ready"),
+        ],
+    ), patch(
+        "src.api.rag_chat_helpers.get_composio_toolset_manager"
+    ) as mock_mgr, patch(
+        "src.api.rag_chat_helpers.retrieve_context_for_query",
+        new_callable=AsyncMock,
+        return_value=rag_context,
+    ) as mock_retrieve, patch(
+        "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_messages",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = ["slack"]
+
+        result = await prepare_agent_rag_chat(
+            agent_id="agent-1",
+            user_id="user-1",
+            normalized_message="What changed?",
+            session_id=None,
+            timings=RagChatTimings(),
+            tools=tools,
+        )
+
+    assert result is not None
+    assert result.resource_ids == ["shared-res", "agent-res-1", "attachment-res-1"]
+    mock_retrieve.assert_awaited_once_with(
+        user_id="user-1",
+        resource_ids=["shared-res", "agent-res-1", "attachment-res-1"],
+        question="What changed?",
+    )
+
+
+@pytest.mark.asyncio
 async def test_prepare_workspace_respects_composio_true():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings

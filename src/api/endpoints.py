@@ -21,6 +21,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import (
@@ -31,14 +32,19 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from langchain_core.runnables import Runnable
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from src.tools.arxiv_mcp import (
     ARXIV_MCP_TOOL_NAMES,
     arxiv_mcp_tools_context,
     ensure_arxiv_mcp_available,
 )
-from src.tools.general import GENERAL_WEB_TOOL_NAMES, build_agent_tools, should_mark_web_used
+from src.tools.general import (
+    GENERAL_WEB_TOOL_NAMES,
+    build_agent_tools,
+    should_mark_web_used,
+)
 from src.tools.registry import create_rag_chat_tools_model, is_arxiv_mcp_enabled
 
 from src.graph.graph import build_graph
@@ -111,6 +117,7 @@ from src.rag import (
     append_chat_message,
     delete_last_exchange,
     delete_chat_session as delete_rag_chat_session,
+    delete_rag_chat_session_attachments_and_artifacts,
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
     create_or_get_workspace_chat_session,
@@ -120,9 +127,11 @@ from src.rag import (
     get_agent_for_chat,
     get_chat_session as get_rag_chat_session,
     get_resource_status,
+    ingest_agent_chat_session_uploads,
     link_resources as link_rag_resources,
     list_agents as list_rag_agents_records,
     list_chat_messages as list_rag_chat_messages,
+    list_rag_chat_session_attachments,
     list_chat_sessions as list_rag_chat_sessions,
     list_resources as list_rag_resources_records,
     list_workspace_ready_resource_ids,
@@ -408,6 +417,77 @@ def _raise_planner_validation_error(exc: PlannerValidationError) -> None:
     )
 
 
+async def _parse_rag_chat_request(
+    request: Request,
+) -> tuple[RagChatRequest, list[UploadFile]]:
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        files = [
+            value
+            for key, value in form.multi_items()
+            if key == "files" and isinstance(value, StarletteUploadFile)
+        ]
+        tools_value = form.get("tools")
+        if isinstance(tools_value, str) and tools_value:
+            try:
+                parsed_tools = json.loads(tools_value)
+            except json.JSONDecodeError as exc:
+                raise RequestValidationError(
+                    [
+                        {
+                            "type": "json_invalid",
+                            "loc": ("body", "tools"),
+                            "msg": "JSON decode error",
+                            "input": tools_value,
+                            "ctx": {"error": exc.msg},
+                        }
+                    ]
+                ) from exc
+            try:
+                tools = RagChatTools.model_validate(parsed_tools)
+            except ValidationError as exc:
+                raise RequestValidationError(
+                    [
+                        {
+                            "type": "value_error",
+                            "loc": ("body", "tools"),
+                            "msg": "Invalid tools schema",
+                            "input": tools_value,
+                            "ctx": {"error": str(exc)},
+                        }
+                    ]
+                ) from exc
+        else:
+            tools = RagChatTools()
+        payload = {
+            "message": form.get("message"),
+            "session_id": form.get("session_id"),
+            "tools": tools,
+        }
+    else:
+        files = []
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError as exc:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "json_invalid",
+                        "loc": ("body", exc.pos),
+                        "msg": "JSON decode error",
+                        "input": {},
+                        "ctx": {"error": exc.msg},
+                    }
+                ]
+            ) from exc
+
+    try:
+        return RagChatRequest.model_validate(payload), files
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+
+
 def _raise_itinerary_validation_error(exc: ItineraryPlannerValidationError) -> None:
     status_by_code = {
         "itinerary_message_required": 400,
@@ -571,7 +651,9 @@ def _build_wikipedia_citations(results: object) -> list[dict]:
         citations.append(
             {
                 "source_title": title,
-                "source_url": f"https://en.wikipedia.org/wiki/{page_slug}" if page_slug else None,
+                "source_url": (
+                    f"https://en.wikipedia.org/wiki/{page_slug}" if page_slug else None
+                ),
                 "chunk_id": f"wikipedia-{index + 1}",
                 "text": str(row.get("extract") or ""),
             }
@@ -586,10 +668,15 @@ def _build_open_library_citations(results: object) -> list[dict]:
     for index, row in enumerate(results):
         if not isinstance(row, dict):
             continue
-        text_parts = [str(row.get("authors") or "").strip(), str(row.get("year") or "").strip()]
+        text_parts = [
+            str(row.get("authors") or "").strip(),
+            str(row.get("year") or "").strip(),
+        ]
         citations.append(
             {
-                "source_title": str(row.get("title") or f"Open Library result {index + 1}"),
+                "source_title": str(
+                    row.get("title") or f"Open Library result {index + 1}"
+                ),
                 "source_url": str(row.get("url") or "") or None,
                 "chunk_id": f"open-library-{index + 1}",
                 "text": "\n".join(part for part in text_parts if part),
@@ -616,23 +703,44 @@ def _build_arxiv_tool_citations(
         for index, row in enumerate(_iter_nested_dicts(structured)):
             looks_like_paper = any(
                 key in row
-                for key in ("paper_id", "arxiv_id", "entry_id", "title", "abstract", "summary", "pdf_url", "abs_url")
+                for key in (
+                    "paper_id",
+                    "arxiv_id",
+                    "entry_id",
+                    "title",
+                    "abstract",
+                    "summary",
+                    "pdf_url",
+                    "abs_url",
+                )
             )
             if not looks_like_paper:
                 continue
             candidate_id = str(
-                row.get("paper_id") or row.get("arxiv_id") or row.get("id") or row.get("entry_id") or ""
+                row.get("paper_id")
+                or row.get("arxiv_id")
+                or row.get("id")
+                or row.get("entry_id")
+                or ""
             ).strip()
             if candidate_id and candidate_id in seen_ids:
                 continue
             if candidate_id:
                 seen_ids.add(candidate_id)
-            title = str(row.get("title") or (f"arXiv:{candidate_id}" if candidate_id else f"arXiv result {index + 1}"))
-            url = (
-                str(row.get("abs_url") or row.get("pdf_url") or "")
-                or (f"https://arxiv.org/abs/{candidate_id}" if candidate_id else None)
+            title = str(
+                row.get("title")
+                or (
+                    f"arXiv:{candidate_id}"
+                    if candidate_id
+                    else f"arXiv result {index + 1}"
+                )
             )
-            text = str(row.get("abstract") or row.get("summary") or row.get("content") or "")
+            url = str(row.get("abs_url") or row.get("pdf_url") or "") or (
+                f"https://arxiv.org/abs/{candidate_id}" if candidate_id else None
+            )
+            text = str(
+                row.get("abstract") or row.get("summary") or row.get("content") or ""
+            )
             citations.append(
                 {
                     "source_title": title,
@@ -667,7 +775,9 @@ def _build_arxiv_tool_citations(
     ]
 
 
-def _build_tool_citations(tool_name: str, tool_args: dict, raw_result: object) -> list[dict]:
+def _build_tool_citations(
+    tool_name: str, tool_args: dict, raw_result: object
+) -> list[dict]:
     content, artifact = _normalize_tool_result(raw_result)
     if tool_name in GENERAL_WEB_TOOL_NAMES:
         results = None
@@ -702,7 +812,9 @@ class AgentLoopResult:
         yield self.web_used
 
 
-def _coerce_agent_loop_result(result: AgentLoopResult | tuple[str, bool]) -> AgentLoopResult:
+def _coerce_agent_loop_result(
+    result: AgentLoopResult | tuple[str, bool],
+) -> AgentLoopResult:
     if isinstance(result, AgentLoopResult):
         return result
     answer, web_used = result
@@ -1372,7 +1484,9 @@ async def _stream_followup(
     yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
 
     # Generate suggestions before persisting so they are stored with the turn
-    suggestions = await _generate_suggestions(question, loop_result.answer, rag_combined)
+    suggestions = await _generate_suggestions(
+        question, loop_result.answer, rag_combined
+    )
 
     # Record turns in conversation history
     user_turn = ConversationTurn(role="user", content=question, run_id=run_id)
@@ -2139,10 +2253,11 @@ async def rag_link_resources(
 @app.post("/api/rag/agents/{agent_id}/chat", tags=["RAG"])
 async def rag_chat_with_agent(
     agent_id: str,
-    body: RagChatRequest,
+    request: Request,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     from src.api.rag_chat_helpers import (
+        ensure_agent_chat_session_id,
         prepare_agent_rag_chat,
         rag_json_response,
         resolve_suggestions,
@@ -2150,28 +2265,58 @@ async def rag_chat_with_agent(
     )
     from src.api.rag_chat_timing import RagChatTimings
 
-    await _consume_usage_or_429(
-        current_user.user_id,
-        UsageIncrement(total_questions=1),
-    )
+    body, files = await _parse_rag_chat_request(request)
 
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(total_questions=1),
+    )
+
     timings = RagChatTimings()
     wall_start = time.perf_counter()
 
-    with start_workflow_run(entrypoint="rag_chat", query=normalized_message) as trace_ctx:
+    with start_workflow_run(
+        entrypoint="rag_chat", query=normalized_message
+    ) as trace_ctx:
         try:
-            prepared = await prepare_agent_rag_chat(
-                agent_id=agent_id,
-                user_id=current_user.user_id,
-                normalized_message=normalized_message,
-                session_id=body.session_id,
-                timings=timings,
-                tools=body.tools,
-            )
+            if files:
+                chat_session_id = await ensure_agent_chat_session_id(
+                    agent_id=agent_id,
+                    user_id=current_user.user_id,
+                    session_id=body.session_id,
+                    initial_message=normalized_message,
+                )
+                if chat_session_id is None:
+                    raise HTTPException(
+                        status_code=404, detail=f"Agent '{agent_id}' not found."
+                    )
+                await ingest_agent_chat_session_uploads(
+                    session_id=chat_session_id,
+                    agent_id=agent_id,
+                    user_id=current_user.user_id,
+                    files=files,
+                )
+                prepared = await prepare_agent_rag_chat(
+                    agent_id=agent_id,
+                    user_id=current_user.user_id,
+                    normalized_message=normalized_message,
+                    session_id=chat_session_id,
+                    timings=timings,
+                    tools=body.tools,
+                )
+            else:
+                prepared = await prepare_agent_rag_chat(
+                    agent_id=agent_id,
+                    user_id=current_user.user_id,
+                    normalized_message=normalized_message,
+                    session_id=body.session_id,
+                    timings=timings,
+                    tools=body.tools,
+                )
             if prepared is None:
                 logger.warning(
                     "[rag_api] agent chat request failed because agent was not found agent_id=%s user_id=%s",
@@ -2190,27 +2335,37 @@ async def rag_chat_with_agent(
 
             try:
                 t_loop = time.perf_counter()
-                loop_result = _coerce_agent_loop_result(await _run_agent_loop(
-                    messages=prepared.messages,
-                    metadata={"agent_id": agent_id, "user_id": current_user.user_id},
-                    bind_tools=prepared.bind_tools,
-                    allow_web_search=prepared.allow_web_search,
-                    reference_tools=prepared.reference_tools,
-                ))
+                loop_result = _coerce_agent_loop_result(
+                    await _run_agent_loop(
+                        messages=prepared.messages,
+                        metadata={
+                            "agent_id": agent_id,
+                            "user_id": current_user.user_id,
+                        },
+                        bind_tools=prepared.bind_tools,
+                        allow_web_search=prepared.allow_web_search,
+                        reference_tools=prepared.reference_tools,
+                    )
+                )
                 timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
             except Exception as exc:
-                logger.exception("[rag_api] agent chat loop failed agent_id=%s", agent_id)
+                logger.exception(
+                    "[rag_api] agent chat loop failed agent_id=%s", agent_id
+                )
                 raise HTTPException(
                     status_code=503,
                     detail={"code": "agent_loop_error", "error": str(exc)},
                 ) from exc
 
-            suggestions = await resolve_suggestions(
-                query=normalized_message,
-                answer=loop_result.answer,
-                context=prepared.rag_context.context or "",
-                timings=timings,
-            )
+            if files:
+                suggestions = []
+            else:
+                suggestions = await resolve_suggestions(
+                    query=normalized_message,
+                    answer=loop_result.answer,
+                    context=prepared.rag_context.context or "",
+                    timings=timings,
+                )
 
             t_persist = time.perf_counter()
             user_msg = RagChatMessage(
@@ -2255,6 +2410,7 @@ async def rag_chat_with_agent(
                 session_id=prepared.chat_session_id,
                 owner_id=current_user.user_id,
                 agent_id=agent_id,
+                force=bool(files),
             )
             timings.persist_ms = (time.perf_counter() - t_persist) * 1000
 
@@ -2284,30 +2440,35 @@ async def rag_chat_with_agent(
             )
         except Exception as exc:
             end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+            if isinstance(exc, RagValidationError):
+                _raise_rag_validation_error(exc)
             raise
 
 
 @app.post("/api/rag/agents/{agent_id}/chat/stream", tags=["RAG"])
 async def rag_chat_with_agent_stream(
     agent_id: str,
-    body: RagChatRequest,
+    request: Request,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     from src.api.rag_chat_helpers import (
+        ensure_agent_chat_session_id,
         prepare_agent_rag_chat,
         resolve_suggestions,
         schedule_deferred_suggestions,
     )
     from src.api.rag_chat_timing import RagChatTimings
 
-    await _consume_usage_or_429(
-        current_user.user_id,
-        UsageIncrement(total_questions=1),
-    )
+    body, files = await _parse_rag_chat_request(request)
 
     normalized_message = body.message.strip()
     if not normalized_message:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    await _consume_usage_or_429(
+        current_user.user_id,
+        UsageIncrement(total_questions=1),
+    )
 
     timings = RagChatTimings()
     stream_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -2323,46 +2484,92 @@ async def rag_chat_with_agent_stream(
             with start_workflow_run(
                 entrypoint="rag_chat_stream", query=normalized_message
             ) as trace_ctx:
-                prepared = await prepare_agent_rag_chat(
-                    agent_id=agent_id,
-                    user_id=current_user.user_id,
-                    normalized_message=normalized_message,
-                    session_id=body.session_id,
-                    timings=timings,
-                    tools=body.tools,
-                )
+                if files:
+                    chat_session_id = await ensure_agent_chat_session_id(
+                        agent_id=agent_id,
+                        user_id=current_user.user_id,
+                        session_id=body.session_id,
+                        initial_message=normalized_message,
+                    )
+                    if chat_session_id is None:
+                        raise HTTPException(
+                            status_code=404, detail=f"Agent '{agent_id}' not found."
+                        )
+                    yield f"data: {json.dumps({'type': 'session', 'session_id': chat_session_id})}\n\n"
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Processing attachment…'})}\n\n"
+                    await ingest_agent_chat_session_uploads(
+                        session_id=chat_session_id,
+                        agent_id=agent_id,
+                        user_id=current_user.user_id,
+                        files=files,
+                    )
+                    yield f"data: {json.dumps({'type': 'status', 'message': 'Preparing document context…'})}\n\n"
+                    prepared = await prepare_agent_rag_chat(
+                        agent_id=agent_id,
+                        user_id=current_user.user_id,
+                        normalized_message=normalized_message,
+                        session_id=chat_session_id,
+                        timings=timings,
+                        tools=body.tools,
+                    )
+                else:
+                    prepared = await prepare_agent_rag_chat(
+                        agent_id=agent_id,
+                        user_id=current_user.user_id,
+                        normalized_message=normalized_message,
+                        session_id=body.session_id,
+                        timings=timings,
+                        tools=body.tools,
+                    )
+                    if prepared is None:
+                        raise HTTPException(
+                            status_code=404, detail=f"Agent '{agent_id}' not found."
+                        )
+                    yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
                 if prepared is None:
-                    raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+                    raise HTTPException(
+                        status_code=404, detail=f"Agent '{agent_id}' not found."
+                    )
                 citations = _build_rag_citations(prepared.rag_context.chunks)
-                yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
                 loop_task = asyncio.create_task(
                     _run_agent_loop(
                         messages=prepared.messages,
-                        metadata={"agent_id": agent_id, "user_id": current_user.user_id},
+                        metadata={
+                            "agent_id": agent_id,
+                            "user_id": current_user.user_id,
+                        },
                         on_event=on_event,
                         bind_tools=prepared.bind_tools,
                         allow_web_search=prepared.allow_web_search,
                         reference_tools=prepared.reference_tools,
                     )
                 )
+                last_heartbeat = time.perf_counter()
                 while not loop_task.done():
                     try:
-                        event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                        event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
                         yield f"data: {json.dumps(event)}\n\n"
+                        last_heartbeat = time.perf_counter()
                     except asyncio.TimeoutError:
-                        pass
+                        if time.perf_counter() - last_heartbeat >= 10.0:
+                            yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
+                            last_heartbeat = time.perf_counter()
                 while not event_queue.empty():
                     event = event_queue.get_nowait()
                     yield f"data: {json.dumps(event)}\n\n"
                 loop_result = _coerce_agent_loop_result(loop_task.result())
                 if loop_result.web_used:
                     yield f"data: {json.dumps({'type': 'web_used', 'provider': settings.web_search_provider})}\n\n"
-                suggestions = await resolve_suggestions(
-                    query=normalized_message,
-                    answer=loop_result.answer,
-                    context=prepared.rag_context.context or "",
-                    timings=timings,
-                )
+                if files:
+                    suggestions = []
+                else:
+                    suggestions = await resolve_suggestions(
+                        query=normalized_message,
+                        answer=loop_result.answer,
+                        context=prepared.rag_context.context or "",
+                        timings=timings,
+                    )
                 user_msg = RagChatMessage(
                     message_id=str(uuid.uuid4()),
                     session_id=prepared.chat_session_id,
@@ -2405,6 +2612,7 @@ async def rag_chat_with_agent_stream(
                     session_id=prepared.chat_session_id,
                     owner_id=current_user.user_id,
                     agent_id=agent_id,
+                    force=bool(files),
                 )
                 end_workflow_run(
                     trace_ctx,
@@ -2424,7 +2632,9 @@ async def rag_chat_with_agent_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             if trace_ctx is not None:
-                end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+                end_workflow_run(
+                    trace_ctx, status="error", error=_workflow_error_text(exc)
+                )
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
 
     return StreamingResponse(
@@ -2475,6 +2685,40 @@ async def list_rag_agent_chat_session_messages(
     }
 
 
+@app.get(
+    "/api/rag/agents/{agent_id}/chat/sessions/{session_id}/attachments", tags=["RAG"]
+)
+async def list_rag_agent_chat_session_attachments_endpoint(
+    agent_id: str,
+    session_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    agent_bundle = await get_agent_for_chat(agent_id, current_user.user_id)
+    if agent_bundle is None:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
+
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chat session '{session_id}' not found."
+        )
+
+    attachments = await list_rag_chat_session_attachments(
+        session_id=session_id,
+        owner_id=current_user.user_id,
+        agent_id=agent_id,
+    )
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "attachments": [attachment.to_dict() for attachment in attachments],
+    }
+
+
 @app.patch("/api/rag/agents/{agent_id}/chat/sessions/{session_id}", tags=["RAG"])
 async def update_rag_agent_chat_session_title(
     agent_id: str,
@@ -2515,6 +2759,21 @@ async def delete_rag_agent_chat_session(
     if agent_bundle is None:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
 
+    session = await get_rag_chat_session(
+        session_id=session_id,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    if session is None:
+        raise HTTPException(
+            status_code=404, detail=f"Chat session '{session_id}' not found."
+        )
+
+    await delete_rag_chat_session_attachments_and_artifacts(
+        session_id=session_id,
+        owner_id=current_user.user_id,
+        agent_id=agent_id,
+    )
     deleted = await delete_rag_chat_session(
         session_id=session_id,
         agent_id=agent_id,
@@ -2593,13 +2852,15 @@ async def rag_chat_workspace(
             )
             try:
                 t_loop = time.perf_counter()
-                loop_result = _coerce_agent_loop_result(await _run_agent_loop(
-                    messages=prepared.messages,
-                    metadata={"user_id": current_user.user_id},
-                    bind_tools=prepared.bind_tools,
-                    allow_web_search=prepared.allow_web_search,
-                    reference_tools=prepared.reference_tools,
-                ))
+                loop_result = _coerce_agent_loop_result(
+                    await _run_agent_loop(
+                        messages=prepared.messages,
+                        metadata={"user_id": current_user.user_id},
+                        bind_tools=prepared.bind_tools,
+                        allow_web_search=prepared.allow_web_search,
+                        reference_tools=prepared.reference_tools,
+                    )
+                )
                 timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
             except Exception as exc:
                 logger.exception(
@@ -2737,6 +2998,7 @@ async def rag_chat_workspace_stream(
                     prepared.rag_context.context or "", citations
                 )
                 yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
                 loop_task = asyncio.create_task(
                     _run_agent_loop(
                         messages=prepared.messages,
@@ -2747,12 +3009,16 @@ async def rag_chat_workspace_stream(
                         reference_tools=prepared.reference_tools,
                     )
                 )
+                last_heartbeat = time.perf_counter()
                 while not loop_task.done():
                     try:
-                        event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                        event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
                         yield f"data: {json.dumps(event)}\n\n"
+                        last_heartbeat = time.perf_counter()
                     except asyncio.TimeoutError:
-                        pass
+                        if time.perf_counter() - last_heartbeat >= 10.0:
+                            yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
+                            last_heartbeat = time.perf_counter()
                 while not event_queue.empty():
                     event = event_queue.get_nowait()
                     yield f"data: {json.dumps(event)}\n\n"
@@ -2831,7 +3097,9 @@ async def rag_chat_workspace_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             if trace_ctx is not None:
-                end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+                end_workflow_run(
+                    trace_ctx, status="error", error=_workflow_error_text(exc)
+                )
             yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
 
     return StreamingResponse(

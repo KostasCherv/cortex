@@ -14,6 +14,7 @@ import type {
   RunFeedbackRequest,
   SavedPRD,
   SavedPRDListResponse,
+  SessionAttachment,
   SessionRunStreamEvent,
   SessionDetail,
   SessionSummary,
@@ -725,6 +726,7 @@ export async function chatWithRagAgent(
 type RagAgentChatStreamOptions = {
   signal?: AbortSignal
   onSession: (sessionId: string) => void
+  onStatus?: (message: string) => void
   onChunk: (text: string) => void
   onCitations: (citations: RagCitation[]) => void
   onSuggestions?: (suggestions: string[]) => void
@@ -774,15 +776,31 @@ export async function streamRagAgentChat(
   accessToken: string | null,
   options: RagAgentChatStreamOptions,
   tools?: Record<string, boolean>,
+  files?: File[],
 ): Promise<void> {
+  let body: BodyInit
+  const headers: Record<string, string> = {
+    Accept: 'text/event-stream',
+    ...authHeaders(accessToken) as Record<string, string>,
+  }
+
+  if (files && files.length > 0) {
+    const form = new FormData()
+    form.append('message', message)
+    if (sessionId) form.append('session_id', sessionId)
+    if (tools) form.append('tools', JSON.stringify(tools))
+    for (const file of files) form.append('files', file)
+    body = form
+    // Let the browser set Content-Type with boundary for multipart
+  } else {
+    headers['Content-Type'] = 'application/json'
+    body = JSON.stringify({ message, session_id: sessionId, tools })
+  }
+
   const response = await fetch(`${API_BASE}/api/rag/agents/${agentId}/chat/stream`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-      ...authHeaders(accessToken),
-    },
-    body: JSON.stringify({ message, session_id: sessionId, tools }),
+    headers,
+    body,
     signal: options.signal,
   })
 
@@ -800,6 +818,10 @@ export async function streamRagAgentChat(
   const handleEvent = (parsed: RagChatStreamEvent): boolean => {
     if (parsed.type === 'session') {
       options.onSession(parsed.session_id)
+      return false
+    }
+    if (parsed.type === 'status') {
+      options.onStatus?.(parsed.message)
       return false
     }
     if (parsed.type === 'chunk') {
@@ -901,6 +923,10 @@ export async function streamRagWorkspaceChat(
       options.onSession(parsed.session_id)
       return false
     }
+    if (parsed.type === 'status') {
+      options.onStatus?.(parsed.message)
+      return false
+    }
     if (parsed.type === 'chunk') {
       options.onChunk(parsed.text)
       return false
@@ -960,6 +986,21 @@ export async function listRagAgentChatSessions(
     throw new Error(`Failed to list RAG agent chat sessions: ${response.status}`)
   }
   return (await response.json()) as { sessions: RagChatSessionSummary[] }
+}
+
+export async function listRagAgentChatSessionAttachments(
+  agentId: string,
+  sessionId: string,
+  accessToken: string | null,
+): Promise<{ attachments: SessionAttachment[] }> {
+  const response = await fetch(
+    `${API_BASE}/api/rag/agents/${agentId}/chat/sessions/${sessionId}/attachments`,
+    { headers: authHeaders(accessToken) },
+  )
+  if (!response.ok) {
+    throw new Error(`Failed to list session attachments: ${response.status}`)
+  }
+  return (await response.json()) as { attachments: SessionAttachment[] }
 }
 
 export async function listRagWorkspaceChatSessions(

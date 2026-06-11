@@ -1,4 +1,5 @@
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -13,3 +14,12 @@ def reset_provider():
     from src.db import provider
     provider._session_store = None
     provider._storage_adapter = None
+
+
+@pytest.fixture(autouse=True)
+def mock_list_ready_session_attachment_resource_ids():
+    with patch(
+        "src.api.rag_chat_helpers.list_ready_rag_chat_session_attachment_resource_ids",
+        new=AsyncMock(return_value=[]),
+    ):
+        yield
