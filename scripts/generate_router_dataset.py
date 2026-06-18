@@ -49,7 +49,8 @@ def _expand_seed(message: str, action: str, rag_context: str, n: int) -> list[di
             for v in variants
             if isinstance(v, str) and v.strip()
         ]
-    except Exception:
+    except (httpx.HTTPError, KeyError, json.JSONDecodeError) as exc:
+        print(f"[expand_seed] failed for action={action!r}: {exc}", flush=True)
         return []
 
 
