@@ -27,3 +27,8 @@ node-compile-cache
 .claude
 .opencode
 graphify-out
+data/router_dataset/train.jsonl
+data/router_dataset/held_out.jsonl
+scripts/finetune/router-lora/
+scripts/finetune/router-gguf/
+*.gguf
