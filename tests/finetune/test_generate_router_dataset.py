@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.generate_router_dataset import split_records, write_jsonl
+from scripts.generate_router_dataset import deduplicate_inputs, split_records, write_jsonl
 
 _ACTIONS = [
     "answer_direct", "answer_from_rag", "web_search",
@@ -70,3 +70,40 @@ def test_write_jsonl_creates_parent_dirs(tmp_path: Path):
     nested = tmp_path / "a" / "b" / "out.jsonl"
     write_jsonl(records, nested, keep_meta=False)
     assert nested.exists()
+
+
+def test_deduplicate_inputs_removes_exact_duplicates():
+    inputs = [
+        {"message": "What is AAPL?", "rag_context": ""},
+        {"message": "What is AAPL?", "rag_context": ""},
+        {"message": "Tell me about Tesla", "rag_context": ""},
+    ]
+    result = deduplicate_inputs(inputs)
+    assert len(result) == 2
+
+
+def test_deduplicate_inputs_case_and_whitespace_insensitive():
+    inputs = [
+        {"message": "What is AAPL?", "rag_context": ""},
+        {"message": "  what is aapl?  ", "rag_context": ""},
+    ]
+    result = deduplicate_inputs(inputs)
+    assert len(result) == 1
+
+
+def test_deduplicate_inputs_preserves_first_occurrence():
+    inputs = [
+        {"message": "Hello", "rag_context": "", "action": "answer_direct"},
+        {"message": "Hello", "rag_context": "", "action": "web_search"},
+    ]
+    result = deduplicate_inputs(inputs)
+    assert result[0]["action"] == "answer_direct"
+
+
+def test_deduplicate_inputs_keeps_distinct_rag_context():
+    inputs = [
+        {"message": "Summarise this", "rag_context": "doc A"},
+        {"message": "Summarise this", "rag_context": "doc B"},
+    ]
+    result = deduplicate_inputs(inputs)
+    assert len(result) == 2

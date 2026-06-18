@@ -66,6 +66,23 @@ def generate_inputs(*, variants_per_seed: int = 6) -> list[dict[str, str]]:
     return inputs
 
 
+def deduplicate_inputs(inputs: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop inputs whose (message, rag_context) pair has already been seen.
+
+    Without this, the same message can appear in both train and held-out if
+    _expand_seed happens to regenerate a variant that matches a seed verbatim,
+    or if two seeds produce overlapping paraphrases.
+    """
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict[str, str]] = []
+    for inp in inputs:
+        key = (inp["message"].strip().lower(), inp.get("rag_context", "").strip().lower())
+        if key not in seen:
+            seen.add(key)
+            unique.append(inp)
+    return unique
+
+
 def label_all(inputs: list[dict[str, str]]) -> list[dict]:
     """Label all inputs; silently drop validation failures."""
     records: list[dict] = []
@@ -122,7 +139,9 @@ def write_jsonl(records: list[dict], path: Path, *, keep_meta: bool) -> None:
 def main(*, variants_per_seed: int = 6) -> None:
     print("Step 1/4: Expanding seeds...")
     inputs = generate_inputs(variants_per_seed=variants_per_seed)
-    print(f"  {len(inputs)} inputs total")
+    before = len(inputs)
+    inputs = deduplicate_inputs(inputs)
+    print(f"  {len(inputs)} inputs ({before - len(inputs)} duplicates removed)")
 
     print("Step 2/4: Labelling with teacher model (this takes a while)...")
     records = label_all(inputs)
@@ -135,6 +154,8 @@ def main(*, variants_per_seed: int = 6) -> None:
 
     print("Step 4/4: Writing JSONL...")
     write_jsonl(train, TRAIN_PATH, keep_meta=False)
+    for r in held_out:
+        r["_verified"] = False
     write_jsonl(held_out, HELD_OUT_PATH, keep_meta=True)
     print(f"  -> {TRAIN_PATH}")
     print(f"  -> {HELD_OUT_PATH}")
