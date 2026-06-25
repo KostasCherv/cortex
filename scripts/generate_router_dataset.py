@@ -9,9 +9,13 @@ import random
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 
 from scripts.finetune.action_seeds import ACTION_SEEDS
 from scripts.finetune.label_inputs import label_input
+from src.llm.output_parsers import extract_json_candidate
+
+load_dotenv()
 
 OUTPUT_DIR = Path("data/router_dataset")
 TRAIN_PATH = OUTPUT_DIR / "train.jsonl"
@@ -41,7 +45,8 @@ def _expand_seed(message: str, action: str, rag_context: str, n: int) -> list[di
     try:
         resp = httpx.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload, timeout=120)
         resp.raise_for_status()
-        variants = json.loads(resp.json()["message"]["content"])
+        content = resp.json()["message"]["content"]
+        variants = json.loads(extract_json_candidate(content))
         if not isinstance(variants, list):
             return []
         return [
@@ -89,7 +94,11 @@ def label_all(inputs: list[dict[str, str]]) -> list[dict]:
     for i, inp in enumerate(inputs, 1):
         if i % 50 == 0:
             print(f"  labelling {i}/{len(inputs)}...")
-        record = label_input(message=inp["message"], rag_context=inp.get("rag_context", ""))
+        record = label_input(
+            message=inp["message"],
+            rag_context=inp.get("rag_context", ""),
+            ollama_model=TEACHER_MODEL,
+        )
         if record is not None:
             record["_action_label"] = inp.get("action", "")
             records.append(record)

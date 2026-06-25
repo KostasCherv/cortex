@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -27,19 +27,26 @@ def push_to_hub(
     repo_id: str,
     private: bool = True,
 ) -> None:
-    """Push train + held-out splits to HF Hub as a DatasetDict."""
+    """Push train + held-out to HF Hub as two configs.
+
+    The two files have different schemas (train is messages-only; held_out also
+    carries action_label + verified for scoring), so they are pushed as separate
+    configs rather than splits of a single config -- a DatasetDict requires all
+    splits to share identical features. The train data uses config_name="default"
+    so that load_dataset(repo)["train"] resolves without passing a config name
+    (the training notebook depends on this).
+    """
     train_records = _load_jsonl(train_path)
     held_out_records = _load_jsonl(held_out_path)
 
-    dataset_dict = DatasetDict(
-        {
-            "train": Dataset.from_list(train_records),
-            "held_out": Dataset.from_list(held_out_records),
-        }
-    )
-    dataset_dict.push_to_hub(repo_id, private=private)
+    train_ds = Dataset.from_list(train_records)
+    held_out_ds = Dataset.from_list(held_out_records)
+
+    train_ds.push_to_hub(repo_id, config_name="default", split="train", private=private)
+    held_out_ds.push_to_hub(repo_id, config_name="held_out", split="held_out", private=private)
     print(
-        f"Pushed {len(train_records)} train + {len(held_out_records)} held-out rows to {repo_id}"
+        f"Pushed {len(train_records)} train (config=default) + "
+        f"{len(held_out_records)} held-out (config=held_out) rows to {repo_id}"
     )
 
 
