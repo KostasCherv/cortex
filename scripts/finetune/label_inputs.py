@@ -8,10 +8,10 @@ import os
 import httpx
 
 from scripts.finetune.router_prompt import ROUTER_SYSTEM_PROMPT, build_training_record, format_user_turn
+from scripts.finetune.teacher_client import call_teacher
 from src.errors import StructuredOutputParseError, StructuredOutputValidationError
 from src.llm.output_parsers import parse_chat_action_json
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_TEACHER_MODEL = os.getenv("TEACHER_MODEL", "qwen3:30b")
 
 
@@ -26,24 +26,16 @@ def label_input(
     """Call teacher at temp=0, validate output, return a training record or None."""
     user_turn = format_user_turn(message=message, rag_context=rag_context, history=history)
 
-    payload = {
-        "model": ollama_model,
-        "messages": [
-            {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_turn},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.0},
-    }
-
     try:
-        response = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/chat",
-            json=payload,
+        raw = call_teacher(
+            messages=[
+                {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_turn},
+            ],
+            model=ollama_model,
+            temperature=0.0,
             timeout=timeout,
         )
-        response.raise_for_status()
-        raw = response.json()["message"]["content"]
     except (httpx.HTTPError, KeyError):
         return None
 

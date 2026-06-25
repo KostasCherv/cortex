@@ -6,13 +6,16 @@ from __future__ import annotations
 import json
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
+from tqdm import tqdm
 
 from scripts.finetune.action_seeds import ACTION_SEEDS
 from scripts.finetune.label_inputs import label_input
+from scripts.finetune.teacher_client import call_teacher
 from src.llm.output_parsers import extract_json_candidate
 
 load_dotenv()
@@ -21,8 +24,10 @@ OUTPUT_DIR = Path("data/router_dataset")
 TRAIN_PATH = OUTPUT_DIR / "train.jsonl"
 HELD_OUT_PATH = OUTPUT_DIR / "held_out.jsonl"
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 TEACHER_MODEL = os.getenv("TEACHER_MODEL", "qwen3:30b")
+# Number of concurrent teacher requests (HTTP is I/O-bound; the backend may still
+# serialize on a single GPU, so keep this modest).
+TEACHER_CONCURRENCY = max(1, int(os.getenv("TEACHER_CONCURRENCY", "4")))
 
 _EXPAND_SYSTEM = (
     "You are a data augmentation assistant. Generate {n} realistic paraphrases "
@@ -32,20 +37,16 @@ _EXPAND_SYSTEM = (
 
 
 def _expand_seed(message: str, action: str, rag_context: str, n: int) -> list[dict[str, str]]:
-    payload = {
-        "model": TEACHER_MODEL,
-        "messages": [
-            {"role": "system", "content": _EXPAND_SYSTEM.format(n=n, action=action)},
-            {"role": "user", "content": f"Seed: {message}\nRAG context: {rag_context or 'none'}"},
-        ],
-        "stream": False,
-        "options": {"temperature": 0.7},
-        "format": "json",
-    }
     try:
-        resp = httpx.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload, timeout=120)
-        resp.raise_for_status()
-        content = resp.json()["message"]["content"]
+        content = call_teacher(
+            messages=[
+                {"role": "system", "content": _EXPAND_SYSTEM.format(n=n, action=action)},
+                {"role": "user", "content": f"Seed: {message}\nRAG context: {rag_context or 'none'}"},
+            ],
+            model=TEACHER_MODEL,
+            temperature=0.7,
+            json_mode=True,
+        )
         variants = json.loads(extract_json_candidate(content))
         if not isinstance(variants, list):
             return []
@@ -60,14 +61,23 @@ def _expand_seed(message: str, action: str, rag_context: str, n: int) -> list[di
 
 
 def generate_inputs(*, variants_per_seed: int = 6) -> list[dict[str, str]]:
-    """Expand all seeds into the full input list."""
-    inputs: list[dict[str, str]] = []
-    for action, seeds in ACTION_SEEDS.items():
-        for seed in seeds:
-            inputs.append({**seed, "action": action})
-            inputs.extend(
-                _expand_seed(seed["message"], action, seed.get("rag_context", ""), variants_per_seed)
+    """Expand all seeds (concurrently) into the full input list."""
+    seed_tasks = [(seed, action) for action, seeds in ACTION_SEEDS.items() for seed in seeds]
+
+    # Always keep the verbatim seeds, regardless of expansion success.
+    inputs: list[dict[str, str]] = [{**seed, "action": action} for seed, action in seed_tasks]
+
+    with ThreadPoolExecutor(max_workers=TEACHER_CONCURRENCY) as pool:
+        futures = [
+            pool.submit(
+                _expand_seed, seed["message"], action, seed.get("rag_context", ""), variants_per_seed
             )
+            for seed, action in seed_tasks
+        ]
+        for fut in tqdm(
+            as_completed(futures), total=len(futures), desc="Expanding seeds", unit="seed"
+        ):
+            inputs.extend(fut.result())
     return inputs
 
 
@@ -88,20 +98,29 @@ def deduplicate_inputs(inputs: list[dict[str, str]]) -> list[dict[str, str]]:
     return unique
 
 
+def _label_one(inp: dict[str, str]) -> dict | None:
+    """Label a single input, tagging the source action on success."""
+    record = label_input(
+        message=inp["message"],
+        rag_context=inp.get("rag_context", ""),
+        ollama_model=TEACHER_MODEL,
+    )
+    if record is not None:
+        record["_action_label"] = inp.get("action", "")
+    return record
+
+
 def label_all(inputs: list[dict[str, str]]) -> list[dict]:
-    """Label all inputs; silently drop validation failures."""
+    """Label all inputs concurrently; silently drop validation failures."""
     records: list[dict] = []
-    for i, inp in enumerate(inputs, 1):
-        if i % 50 == 0:
-            print(f"  labelling {i}/{len(inputs)}...")
-        record = label_input(
-            message=inp["message"],
-            rag_context=inp.get("rag_context", ""),
-            ollama_model=TEACHER_MODEL,
-        )
-        if record is not None:
-            record["_action_label"] = inp.get("action", "")
-            records.append(record)
+    with ThreadPoolExecutor(max_workers=TEACHER_CONCURRENCY) as pool:
+        futures = [pool.submit(_label_one, inp) for inp in inputs]
+        for fut in tqdm(
+            as_completed(futures), total=len(futures), desc="Labelling", unit="ex"
+        ):
+            record = fut.result()
+            if record is not None:
+                records.append(record)
     return records
 
 
@@ -146,6 +165,7 @@ def write_jsonl(records: list[dict], path: Path, *, keep_meta: bool) -> None:
 
 
 def main(*, variants_per_seed: int = 6) -> None:
+    print(f"Teacher: {TEACHER_MODEL} (concurrency={TEACHER_CONCURRENCY})")
     print("Step 1/4: Expanding seeds...")
     inputs = generate_inputs(variants_per_seed=variants_per_seed)
     before = len(inputs)
