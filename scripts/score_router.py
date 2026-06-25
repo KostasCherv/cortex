@@ -11,6 +11,8 @@ before treating any number as a real accuracy signal.
 from __future__ import annotations
 
 import json
+import statistics
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -134,14 +136,33 @@ def main() -> None:
     for cfg in MODELS:
         provider, model_name = cfg["provider"], cfg["model"]
         scored = []
+        latencies_ms: list[float] = []
         for record in records:
+            start = time.perf_counter()
             predicted = _infer_action(
                 record["messages"], provider=provider, model=model_name
             )
+            latencies_ms.append((time.perf_counter() - start) * 1000)
             scored.append({"action_label": record.get("action_label", ""), "predicted": predicted})
         accuracy = compute_accuracy(scored)
         print(format_results(f"{provider}/{model_name}", accuracy, verified_fraction=verified_fraction))
+        print(format_latency(latencies_ms))
         print()
+
+
+def format_latency(latencies_ms: list[float]) -> str:
+    """Summarize per-call latency (mean / median / p95 / min / max) in ms."""
+    if not latencies_ms:
+        return "  latency: n/a"
+    ordered = sorted(latencies_ms)
+    p95 = ordered[min(len(ordered) - 1, int(round(0.95 * (len(ordered) - 1))))]
+    return (
+        "  latency (ms/call): "
+        f"mean {statistics.mean(latencies_ms):.0f}  "
+        f"median {statistics.median(latencies_ms):.0f}  "
+        f"p95 {p95:.0f}  "
+        f"min {ordered[0]:.0f}  max {ordered[-1]:.0f}"
+    )
 
 
 if __name__ == "__main__":
