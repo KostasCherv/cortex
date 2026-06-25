@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import statistics
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -147,7 +147,30 @@ def main() -> None:
         accuracy = compute_accuracy(scored)
         print(format_results(f"{provider}/{model_name}", accuracy, verified_fraction=verified_fraction))
         print(format_latency(latencies_ms))
+        print(format_confusion(scored))
         print()
+
+
+def format_confusion(scored: list[dict[str, str | None]]) -> str:
+    """For each true label that has misses, show the predicted-class distribution."""
+    by_label: dict[str, Counter] = defaultdict(Counter)
+    for r in scored:
+        label = str(r.get("action_label", ""))
+        predicted = r.get("predicted")
+        by_label[label][predicted if predicted is not None else "<parse_fail>"] += 1
+
+    lines = ["  confusion (true -> predicted, classes with misses only):"]
+    any_errors = False
+    for label in sorted(by_label):
+        counts = by_label[label]
+        if all(pred == label for pred in counts):
+            continue
+        any_errors = True
+        dist = ", ".join(f"{pred}:{n}" for pred, n in counts.most_common())
+        lines.append(f"    {label:<24} -> {dist}")
+    if not any_errors:
+        lines.append("    (none)")
+    return "\n".join(lines)
 
 
 def format_latency(latencies_ms: list[float]) -> str:
