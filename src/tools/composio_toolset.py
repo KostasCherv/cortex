@@ -40,6 +40,7 @@ class ComposioToolsetManager:
     def __init__(self, *, api_key: str) -> None:
         self._api_key = api_key
         self._app_names: list[str] = []
+        self._initialized = False
         self._router_cache: dict[str, _RouterSessionCache] = {}
 
     def _build_client(self) -> Composio:
@@ -106,6 +107,7 @@ class ComposioToolsetManager:
     async def initialize(self) -> None:
         try:
             self._app_names = self._get_connected_slugs_for_user(settings.composio_user_id)
+            self._initialized = True
             if not self._app_names:
                 logger.info("[composio] No active connected toolkits found — tool-calling disabled.")
                 return
@@ -115,10 +117,12 @@ class ComposioToolsetManager:
                 ", ".join(self._app_names),
             )
         except Exception as exc:
+            self._initialized = False
             raise ComposioError(f"Composio tool discovery failed: {exc}") from exc
 
     async def shutdown(self) -> None:
         self._app_names = []
+        self._initialized = False
         self._router_cache.clear()
 
     @asynccontextmanager
@@ -130,7 +134,10 @@ class ComposioToolsetManager:
             yield []
             return
         try:
-            slugs = await asyncio.to_thread(self._get_connected_slugs_for_user, user_id)
+            if self._initialized and user_id == settings.composio_user_id:
+                slugs = list(self._app_names)
+            else:
+                slugs = await asyncio.to_thread(self._get_connected_slugs_for_user, user_id)
             if not slugs:
                 yield []
                 return

@@ -366,6 +366,34 @@ uv run ruff check src
 uv run mypy src
 ```
 
+## Local benchmarking
+
+Cortex includes a local-first k6 harness in [`load-tests/`](load-tests/README.md) for bottleneck discovery before production-like validation.
+
+Typical flow:
+
+```bash
+mkdir -p reports/benchmarks
+
+k6 run \
+  --summary-export reports/benchmarks/health-summary.json \
+  load-tests/health.js
+
+uv run python scripts/render_k6_report.py \
+  --summary-json reports/benchmarks/health-summary.json \
+  --scenario health \
+  --environment local-dev \
+  --target "20 req/s for 1 minute" \
+  --output reports/benchmarks/health-report.md
+```
+
+Additional scenarios:
+
+- `load-tests/agent_chat.js` for authenticated agent chat pressure
+- `load-tests/research.js` for research queue admission pressure
+
+Local benchmark numbers are not production-capacity claims. Use them to find bottlenecks, tighten thresholds, and prepare the same scenarios for a production-like environment later.
+
 ## Model evaluation
 
 The repo includes a standalone summarize-only comparison script at `src/evals/model_comparison.py`.
