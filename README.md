@@ -370,6 +370,19 @@ uv run mypy src
 
 Cortex includes a local-first k6 harness in [`load-tests/`](load-tests/README.md) for bottleneck discovery before production-like validation.
 
+For live benchmark dashboards, there is also a separate opt-in local observability stack:
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
+
+That stack provisions:
+
+- Prometheus on `http://localhost:9090`
+- Grafana on `http://localhost:3000`
+
+and is intentionally benchmark-only in this phase.
+
 Typical flow:
 
 ```bash

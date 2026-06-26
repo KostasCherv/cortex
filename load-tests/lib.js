@@ -48,8 +48,14 @@ export function buildOptions({
   p95Ms,
   maxErrorRate,
 }) {
+  const testId = optionalEnv("BENCHMARK_TEST_ID", "local-adhoc");
   return {
     summaryTrendStats: ["avg", "med", "p(95)", "p(99)", "max"],
+    tags: {
+      testid: testId,
+      scenario: scenario,
+      environment: "local-dev",
+    },
     thresholds: {
       http_req_failed: [`rate<${maxErrorRate}`],
       http_req_duration: [`p(95)<${p95Ms}`],
