@@ -22,6 +22,8 @@ import time
 import uuid
 from pathlib import Path
 
+from src.benchmarking.rag_chat import coerce_agent_loop_benchmark_result
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -149,32 +151,39 @@ async def benchmark_integration(
         print("prepare failed: agent not found")
         return
     t_loop = time.perf_counter()
-    answer = await _run_agent_loop(
+    result = await _run_agent_loop(
         messages=prepared.messages,
         metadata={"bench": True},
         bind_tools=prepared.bind_tools,
     )
+    answer = coerce_agent_loop_benchmark_result(result)
     timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
     suggestions = await resolve_suggestions(
         query=message,
-        answer=answer,
+        answer=answer.answer,
         context=prepared.rag_context.context or "",
         timings=timings,
     )
     timings.total_ms = (time.perf_counter() - wall_start) * 1000
-    print(f"\n=== integration prepare+loop ===")
+    print("\n=== integration prepare+loop ===")
     print(f"  wall_s={timings.total_ms/1000:.3f}")
     print(f"  prepare_ms={timings.prepare_ms:.0f} session_ms={timings.session_ms:.0f}")
     print(f"  agent_loop_ms={timings.agent_loop_ms:.0f} suggestions_ms={timings.suggestions_ms:.0f}")
     print(f"  tools_bound={timings.tools_bound} tool_skip_reason={timings.tool_skip_reason}")
-    print(f"  suggestions_count={len(suggestions)} answer_chars={len(answer)}")
+    print(f"  suggestions_count={len(suggestions)} answer_chars={answer.answer_chars}")
 
 
 async def benchmark_direct_llm(*, bind_tools: bool, message: str) -> None:
     """Time _run_agent_loop only (no Supabase), for A/B on tool binding."""
     from src.api.rag_chat_helpers import build_agent_messages, should_bind_composio_tools
     from src.api.endpoints import _run_agent_loop
-    from src.tools.composio_toolset import get_composio_toolset_manager
+    from src.tools.composio_toolset import get_composio_toolset_manager, initialize_composio_toolset
+
+    should_initialize_composio = bind_tools is not False and os.environ.get(
+        "COMPOSIO_ENABLED", "true"
+    ).lower() in ("1", "true", "yes")
+    if should_initialize_composio:
+        await initialize_composio_toolset()
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     use_tools, reason = should_bind_composio_tools(
@@ -195,11 +204,12 @@ async def benchmark_direct_llm(*, bind_tools: bool, message: str) -> None:
         normalized_message=message,
     )
     t0 = time.perf_counter()
-    answer = await _run_agent_loop(messages=messages, metadata={"bench": True}, bind_tools=use_tools)
+    result = await _run_agent_loop(messages=messages, metadata={"bench": True}, bind_tools=use_tools)
+    answer = coerce_agent_loop_benchmark_result(result)
     wall_s = time.perf_counter() - t0
-    print(f"\n=== direct _run_agent_loop ===")
+    print("\n=== direct _run_agent_loop ===")
     print(f"  wall_s={wall_s:.3f}  bind_tools={use_tools}  reason={reason}")
-    print(f"  answer_chars={len(answer)}")
+    print(f"  answer_chars={answer.answer_chars}")
 
 
 def main() -> None:
