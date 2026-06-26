@@ -40,13 +40,36 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         if langsmith_endpoint:
             os.environ["LANGSMITH_ENDPOINT"] = str(langsmith_endpoint)
 
+    return _build_chat_model(
+        provider,
+        model_name="",
+        base_url="",
+        temperature=temperature,
+        common_kwargs=common_kwargs,
+    )
+
+
+def _build_chat_model(
+    provider: str,
+    *,
+    model_name: str,
+    base_url: str,
+    temperature: float,
+    common_kwargs: dict,
+) -> BaseChatModel:
+    """Construct a chat model for the given provider.
+
+    model_name/base_url override the provider's default settings field when
+    non-empty (used by get_router_llm's fallback resolution); get_llm always
+    passes empty strings so it keeps reading directly from settings.
+    """
     if provider == "openai":
         if not settings.openai_api_key:
             raise ConfigurationError("OPENAI_API_KEY is not set.")
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=settings.openai_model,
+            model=model_name or settings.openai_model,
             temperature=temperature,
             api_key=settings.openai_api_key,  # type: ignore[arg-type]
             **common_kwargs,
@@ -58,7 +81,7 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=settings.openrouter_model,
+            model=model_name or settings.openrouter_model,
             temperature=temperature,
             api_key=settings.openrouter_api_key,  # type: ignore[arg-type]
             base_url="https://openrouter.ai/api/v1",
@@ -69,9 +92,9 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         from langchain_ollama import ChatOllama
 
         return ChatOllama(
-            model=settings.ollama_model,
+            model=model_name or settings.ollama_model,
             temperature=temperature,
-            base_url=settings.ollama_base_url,
+            base_url=base_url or settings.ollama_base_url,
             **common_kwargs,
         )
 
@@ -79,7 +102,7 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=settings.lmstudio_model,
+            model=model_name or settings.lmstudio_model,
             temperature=temperature,
             base_url=settings.lmstudio_base_url,
             api_key="lm-studio",
@@ -88,4 +111,37 @@ def get_llm(temperature: float = 0.2) -> BaseChatModel:
 
     raise ConfigurationError(
         f"Unknown LLM_PROVIDER '{provider}'. Choose 'openai', 'ollama', 'openrouter', or 'lmstudio'."
+    )
+
+
+def get_router_llm(temperature: float | None = None) -> BaseChatModel:
+    """Return a chat model for the fast action-routing decision.
+
+    Resolves router-specific settings (router_llm_provider, router_*_model,
+    router_ollama_base_url) and falls back to the main llm_provider config
+    for any field left unset, so the router can be introduced without
+    requiring new environment variables.
+    """
+    provider = (settings.router_llm_provider or settings.llm_provider).lower()
+    resolved_temperature = (
+        temperature if temperature is not None else settings.router_temperature
+    )
+    common_kwargs = {
+        "tags": build_trace_tags(["llm", "router"]),
+        "metadata": build_trace_metadata({"provider": provider, "role": "router"}),
+    }
+
+    model_name = {
+        "openai": settings.router_openai_model,
+        "openrouter": settings.router_openrouter_model,
+        "ollama": settings.router_ollama_model,
+        "lmstudio": settings.router_lmstudio_model,
+    }.get(provider, "")
+
+    return _build_chat_model(
+        provider,
+        model_name=model_name,
+        base_url=settings.router_ollama_base_url,
+        temperature=resolved_temperature,
+        common_kwargs=common_kwargs,
     )

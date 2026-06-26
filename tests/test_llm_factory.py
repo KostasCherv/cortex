@@ -82,3 +82,82 @@ def test_get_llm_unknown_provider_raises():
             ConfigurationError, match="groq.*openai.*ollama.*openrouter"
         ):
             get_llm()
+
+
+def test_get_router_llm_falls_back_to_main_provider_when_unset():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "ollama"
+        mock_settings.ollama_model = "llama3.2"
+        mock_settings.ollama_base_url = "http://localhost:11434"
+        mock_settings.router_llm_provider = ""
+        mock_settings.router_ollama_model = ""
+        mock_settings.router_ollama_base_url = ""
+        mock_settings.router_temperature = 0.0
+
+        from src.llm.factory import get_router_llm
+
+        llm = get_router_llm()
+        assert llm is not None
+        assert llm.model == "llama3.2"
+
+
+def test_get_router_llm_uses_router_specific_provider_when_set():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "openai"
+        mock_settings.openai_api_key = "sk-test"
+        mock_settings.openai_model = "gpt-4o-mini"
+        mock_settings.router_llm_provider = "ollama"
+        mock_settings.router_ollama_model = "router-qwen2.5-3b"
+        mock_settings.router_ollama_base_url = ""
+        mock_settings.ollama_base_url = "http://localhost:11434"
+        mock_settings.router_temperature = 0.0
+
+        from src.llm.factory import get_router_llm
+
+        llm = get_router_llm()
+        assert llm is not None
+        assert llm.model == "router-qwen2.5-3b"
+
+
+def test_get_router_llm_respects_router_temperature_default():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "ollama"
+        mock_settings.ollama_model = "llama3.2"
+        mock_settings.ollama_base_url = "http://localhost:11434"
+        mock_settings.router_llm_provider = ""
+        mock_settings.router_ollama_model = ""
+        mock_settings.router_ollama_base_url = ""
+        mock_settings.router_temperature = 0.0
+
+        from src.llm.factory import get_router_llm
+
+        llm = get_router_llm()
+        assert llm.temperature == 0.0
+
+
+def test_get_router_llm_unknown_provider_raises():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "openai"
+        mock_settings.router_llm_provider = "groq"
+
+        from src.llm.factory import get_router_llm
+
+        with pytest.raises(
+            ConfigurationError, match="groq.*openai.*ollama.*openrouter"
+        ):
+            get_router_llm()
+
+
+def test_get_llm_unaffected_by_router_settings():
+    with patch("src.llm.factory.settings") as mock_settings:
+        mock_settings.llm_provider = "openai"
+        mock_settings.openai_api_key = "sk-test"
+        mock_settings.openai_model = "gpt-4o-mini"
+        mock_settings.router_llm_provider = "ollama"
+        mock_settings.router_ollama_model = "router-qwen2.5-3b"
+        mock_settings.router_temperature = 0.0
+
+        from src.llm.factory import get_llm
+
+        llm = get_llm()
+        assert llm.model_name == "gpt-4o-mini"

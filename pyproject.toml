@@ -42,6 +42,8 @@ dependencies = [
     "langchain-tavily>=0.2.18",
     "arxiv-mcp-server>=0.5.0",
     "langchain-mcp-adapters>=0.2.2",
+    "datasets>=2.20",
+    "huggingface-hub>=0.23",
 ]
 
 [project.optional-dependencies]

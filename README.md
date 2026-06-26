@@ -22,6 +22,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Orchestration: `LangGraph`
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
 - LLM and agent layer: `LangChain`, `DSPy`, `OpenAI`, `OpenRouter`, `Ollama`
+- Model fine-tuning: `Unsloth` (LoRA/QLoRA), `Hugging Face` (`datasets`, `Hub`), `Qwen2.5-3B-Instruct` router, GGUF + `Ollama` serving
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
 - Market data tools: `Alpha Vantage MCP`, `yfinance`
 - Retrieval and reranking: `Neo4j` (GraphRAG), `Cohere`
@@ -440,6 +441,42 @@ print(prediction.summaries)
 ```bash
 uv run pytest tests/test_dspy_optimizer.py -v
 ```
+
+## Router fine-tuning (experimental)
+
+Cortex can offload the chat action-classification step to a small router model instead of the main "brain" model. The router is a compact base model (Qwen2.5-3B-Instruct) **fine-tuned with LoRA/QLoRA via [Unsloth](https://github.com/unslothai/unsloth)**, then exported to GGUF and served through Ollama. This path is **opt-in and inert by default** — it does not change any existing chat behavior unless explicitly enabled.
+
+> **Note:** This "router" is a fine-tuned intent classifier and is distinct from the ReAct-lite chat routing described above. They share the word "router" but are unrelated.
+
+### Enable the live router
+
+Set in `.env` (all default to off / fall back to the main model):
+
+- `ROUTER_ENABLED=true` — turn on the live router LLM call (default `false`)
+- `ROUTER_LLM_PROVIDER` — provider override (`ollama|openai|openrouter|lmstudio`); empty falls back to `LLM_PROVIDER`
+- `ROUTER_OLLAMA_MODEL` / `ROUTER_OPENAI_MODEL` / `ROUTER_OPENROUTER_MODEL` / `ROUTER_LMSTUDIO_MODEL` — per-provider model overrides; empty falls back to the main model
+
+### Training pipeline
+
+`scripts/finetune/pipeline.sh` orchestrates the data + training + activation loop around the GPU-only training step:
+
+```bash
+# 1. Regenerate the dataset (teacher labelling) and push to the HF Hub
+scripts/finetune/pipeline.sh prepare
+
+# 2. Manual GPU step: run scripts/finetune/train_unsloth.ipynb on Kaggle/Colab.
+#    It pushes the LoRA adapter + GGUF to the Hub.
+
+# 3. Download the trained GGUF, register it with Ollama, and score it
+scripts/finetune/pipeline.sh activate
+
+# Re-run held-out scoring only
+scripts/finetune/pipeline.sh score
+```
+
+- `prepare` expands the action seed bank (`scripts/finetune/action_seeds.py`), labels inputs with a teacher model (Pydantic-validated), splits into stratified train/held-out sets, and pushes to the HF Hub (default `kostascherv/cortex-router-dataset`).
+- `score` reports per-class accuracy, latency, and a confusion matrix vs the teacher labels.
+- Defaults (`DATASET_REPO`, `GGUF_REPO`, `GGUF_FILENAME`, `OLLAMA_MODEL`) and the teacher backend (`TEACHER_API`, `TEACHER_MODEL`, `TEACHER_BASE_URL`) are overridable via environment variables.
 
 ## Best practices implemented
 

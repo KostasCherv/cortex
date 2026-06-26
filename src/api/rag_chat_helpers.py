@@ -16,6 +16,15 @@ from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from src.api.rag_chat_timing import RagChatTimings
+from src.errors import StructuredOutputError
+from src.llm.factory import get_router_llm
+from src.llm.output_parsers import (
+    ChatActionDecisionPayload,
+    build_validation_retry_prompt,
+    parse_chat_action_json,
+)
+from src.llm.text_utils import extract_llm_text
+from src.observability.langsmith import start_step_span
 from src.prompts.registry import prompt_registry
 from src.config import settings
 from src.rag import (
@@ -90,6 +99,7 @@ class RagChatPrepared:
     composio_apps: list[str]
     allow_web_search: bool = True
     reference_tools: dict[str, bool] = field(default_factory=default_reference_tool_flags)
+    router_decision: ChatActionDecisionPayload | None = None
 
 
 def build_agent_messages(
@@ -170,6 +180,110 @@ def should_bind_composio_tools(
 
     # Linked documents do not disable Composio — tools stay bound whenever apps are connected.
     return True, "default_bind"
+
+
+_ROUTER_ACTION_SYSTEM_PROMPT = """You are a chat routing assistant. Given a user message and optional context, \
+output ONLY a JSON object with no markdown fences or explanation.
+
+JSON schema:
+{
+  "action": "answer_direct" | "answer_from_rag" | "web_search" | "asset_price" | "search_finance_tools" | "ask_clarifying",
+  "reason": "one sentence explaining the routing decision",
+  "query": "search query — required for web_search and search_finance_tools, empty string otherwise",
+  "symbols": ["TICKER"] — required list for asset_price, empty list otherwise,
+  "currency": "ISO currency code if relevant, empty string otherwise"
+}
+
+Routing rules:
+- answer_direct: question answerable from general knowledge, no live data or documents needed
+- answer_from_rag: question about uploaded documents or the knowledge base
+- web_search: needs current or live information (news, recent events, live prices)
+- asset_price: user wants current price or quote for a specific stock or crypto (symbols required)
+- search_finance_tools: user needs financial ratios, statements, or structured data via a tool (query required)
+- ask_clarifying: message is too ambiguous, incomplete, or multi-intent to route confidently"""
+
+_ROUTER_ACTION_SCHEMA = None
+
+
+def _get_router_action_schema() -> str:
+    global _ROUTER_ACTION_SCHEMA
+    if _ROUTER_ACTION_SCHEMA is None:
+        import json
+
+        _ROUTER_ACTION_SCHEMA = json.dumps(
+            ChatActionDecisionPayload.model_json_schema(), indent=2
+        )
+    return _ROUTER_ACTION_SCHEMA
+
+
+def _format_router_user_turn(*, message: str, rag_context: str) -> str:
+    if rag_context.strip():
+        context_line = f"Available RAG context: yes — {rag_context.strip()}"
+    else:
+        context_line = "Available RAG context: no"
+    return f"User message: {message.strip()}\n{context_line}"
+
+
+async def classify_chat_action(
+    *,
+    message: str,
+    rag_context: str = "",
+) -> ChatActionDecisionPayload | None:
+    """Classify a chat message into a router action using the fast router LLM.
+
+    Returns None if routing is disabled or the router call/parse fails after
+    one repair attempt — callers must treat None as "no router opinion,
+    fall back to existing behavior unchanged". This call never raises and
+    never affects the existing chat flow; it is purely additive plumbing
+    until the router's decision is wired into actual behavior.
+    """
+    if not settings.router_enabled:
+        return None
+
+    user_turn = _format_router_user_turn(message=message, rag_context=rag_context)
+    prompt = f"{_ROUTER_ACTION_SYSTEM_PROMPT}\n\n{user_turn}"
+
+    try:
+        llm = get_router_llm()
+        with start_step_span(
+            name="rag_chat.classify_chat_action.llm_invoke",
+            run_type="llm",
+            node_name="classify_chat_action",
+            inputs={"prompt": prompt},
+            tags=["rag_chat", "router"],
+        ):
+            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=3.0)
+        raw_text = extract_llm_text(response)
+    except Exception as exc:
+        logger.warning("[rag_chat] router LLM call failed: %s", exc)
+        return None
+
+    try:
+        return parse_chat_action_json(raw_text)
+    except StructuredOutputError as exc:
+        repair_prompt = build_validation_retry_prompt(
+            schema_text=_get_router_action_schema(),
+            invalid_response=raw_text,
+            validation_error=exc,
+        )
+        try:
+            with start_step_span(
+                name="rag_chat.classify_chat_action.llm_repair",
+                run_type="llm",
+                node_name="classify_chat_action",
+                inputs={"prompt": repair_prompt},
+                tags=["rag_chat", "router", "repair"],
+            ):
+                repair_response = await asyncio.wait_for(
+                    llm.ainvoke(repair_prompt), timeout=3.0
+                )
+            repair_text = extract_llm_text(repair_response)
+            return parse_chat_action_json(repair_text)
+        except Exception as repair_exc:
+            logger.warning(
+                "[rag_chat] router decision parse failed after repair: %s", repair_exc
+            )
+            return None
 
 
 async def ensure_agent_chat_session_id(
@@ -261,10 +375,12 @@ async def prepare_agent_rag_chat(
     )
     memory_task = get_user_memory_prompt_block(user_id, normalized_message)
     history_task = list_rag_chat_messages(chat_session_id, user_id)
-    rag_context, user_memory_context, history = await asyncio.gather(
+    router_task = classify_chat_action(message=normalized_message)
+    rag_context, user_memory_context, history, router_decision = await asyncio.gather(
         retrieve_task,
         memory_task,
         history_task,
+        router_task,
     )
     history = trim_chat_history(history)
 
@@ -291,6 +407,7 @@ async def prepare_agent_rag_chat(
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
         reference_tools=reference_tools,
+        router_decision=router_decision,
     )
 
 
@@ -351,7 +468,7 @@ async def prepare_workspace_rag_chat(
     timings.tool_skip_reason = tool_skip_reason
 
     t0 = time.perf_counter()
-    rag_context, user_memory_context, history = await asyncio.gather(
+    rag_context, user_memory_context, history, router_decision = await asyncio.gather(
         retrieve_merged_context_for_agent_chat(
             user_id=user_id,
             agent_resource_ids=resource_ids,
@@ -361,6 +478,7 @@ async def prepare_workspace_rag_chat(
         ),
         get_user_memory_prompt_block(user_id, normalized_message),
         list_rag_chat_messages(chat_session_id, user_id),
+        classify_chat_action(message=normalized_message),
     )
     history = trim_chat_history(history)
 
@@ -387,6 +505,7 @@ async def prepare_workspace_rag_chat(
         composio_apps=composio_apps,
         allow_web_search=allow_web_search,
         reference_tools=reference_tools,
+        router_decision=router_decision,
     )
 
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.api.rag_chat_helpers import (
+    classify_chat_action,
     should_bind_composio_tools,
     trim_chat_history,
 )
@@ -421,3 +422,116 @@ async def test_prepare_workspace_respects_composio_true():
         assert result.bind_tools is True
         assert result.allow_web_search is True
         assert result.tool_skip_reason is None
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_returns_none_when_router_disabled():
+    from unittest.mock import patch
+
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings:
+        mock_settings.router_enabled = False
+        result = await classify_chat_action(message="what's the weather")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_parses_valid_response():
+    from unittest.mock import AsyncMock, patch
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(
+            content='{"action": "answer_direct", "reason": "greeting"}'
+        )
+    )
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings, patch(
+        "src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm
+    ):
+        mock_settings.router_enabled = True
+        result = await classify_chat_action(message="hello")
+        assert result is not None
+        assert result.action == "answer_direct"
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_repairs_invalid_json_once():
+    from unittest.mock import AsyncMock, patch
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content="not json"),
+            MagicMock(
+                content='{"action": "web_search", "reason": "needs current info", "query": "latest news"}'
+            ),
+        ]
+    )
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings, patch(
+        "src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm
+    ):
+        mock_settings.router_enabled = True
+        result = await classify_chat_action(message="what's the latest news")
+        assert result is not None
+        assert result.action == "web_search"
+        assert mock_llm.ainvoke.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_returns_none_after_failed_repair():
+    from unittest.mock import AsyncMock, patch
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(content="not json"),
+            MagicMock(content="still not json"),
+        ]
+    )
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings, patch(
+        "src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm
+    ):
+        mock_settings.router_enabled = True
+        result = await classify_chat_action(message="hello")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_returns_none_on_llm_exception():
+    from unittest.mock import AsyncMock, patch
+
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("ollama unreachable"))
+    with patch("src.api.rag_chat_helpers.settings") as mock_settings, patch(
+        "src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm
+    ):
+        mock_settings.router_enabled = True
+        result = await classify_chat_action(message="hello")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_router_decision_none_when_disabled():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from unittest.mock import AsyncMock, patch
+
+    with patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new_callable=AsyncMock, return_value=[]), \
+         patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new_callable=AsyncMock, return_value="sess-1"), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_session_attachments", new_callable=AsyncMock, return_value=[]), \
+         patch("src.api.rag_chat_helpers.get_composio_toolset_manager") as mock_mgr, \
+         patch("src.api.rag_chat_helpers.settings") as mock_settings, \
+         patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new_callable=AsyncMock, return_value=MagicMock(context="", chunks=[])), \
+         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new_callable=AsyncMock, return_value=""), \
+         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new_callable=AsyncMock, return_value=[]):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        mock_settings.composio_enabled = True
+        mock_settings.rag_chat_max_history_messages = 10
+        mock_settings.router_enabled = False
+        mock_settings.rag_chat_conditional_tools = True
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="hello",
+            session_id=None,
+            timings=RagChatTimings(),
+        )
+        assert result.router_decision is None
