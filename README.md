@@ -527,3 +527,7 @@ scripts/finetune/pipeline.sh score
 - Auth-scoped session boundaries for data isolation across users.
 - Stream-first API design for long-running AI workflows.
 - Structured observability across orchestration nodes and dependency calls.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

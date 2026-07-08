@@ -32,3 +32,8 @@ data/router_dataset/held_out.jsonl
 scripts/finetune/router-lora/
 scripts/finetune/router-gguf/
 *.gguf
+
+# dev-session artifacts
+.deepeval/
+.archon/
+test_results_artifact.txt

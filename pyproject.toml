@@ -2,6 +2,7 @@
 name = "cortex"
 version = "0.1.0"
 description = "Cortex — multi-step research and RAG orchestration with LangGraph, Tavily, and LLMs"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "dspy[optuna]>=2.5.0",
