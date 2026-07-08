@@ -158,7 +158,7 @@ export const workspaceChatTransport: ChatTransport = {
   deleteAttachment: async (sessionId, attachmentId, accessToken) => {
     await deleteRagWorkspaceChatSessionAttachment(sessionId, attachmentId, accessToken)
   },
-  streamMessage: async (message, sessionId, accessToken, callbacks, tools, _files) => {
+  streamMessage: async (message, sessionId, accessToken, callbacks, tools) => {
     await streamRagWorkspaceChat(message, sessionId, accessToken, {
       signal: callbacks.signal,
       onSession: callbacks.onSession,
