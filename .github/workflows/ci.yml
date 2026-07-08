@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --extra dev
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Typecheck (non-blocking)
+        run: uv run mypy src || true
+      - name: Test
+        run: uv run python -m pytest tests/ -q
+
+  ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npx eslint src --max-warnings=0
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.app.json
+      - name: Test
+        run: npx vitest run
+
+  docker:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [backend, ui]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t cortex:${{ github.sha }} .
