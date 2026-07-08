@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -28,16 +27,13 @@ from src.observability.langsmith import start_step_span
 from src.prompts.registry import prompt_registry
 from src.config import settings
 from src.rag import (
-    RagChatMessage,
-    append_chat_message,
     create_or_get_chat_session,
     create_or_get_workspace_chat_session,
     get_agent_for_chat,
     list_chat_messages as list_rag_chat_messages,
     list_rag_chat_session_attachments,
-    list_ready_rag_chat_session_attachment_resource_ids,
+    list_ready_rag_chat_session_attachment_resource_ids,  # noqa: F401 - patched by tests/conftest.py
     list_workspace_ready_resource_ids,
-    retrieve_context_for_query,
     retrieve_merged_context_for_agent_chat,
 )
 from src.rag_engine import RagQueryResult

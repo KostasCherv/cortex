@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import dspy
 import pytest
@@ -12,7 +11,6 @@ import pytest
 from src.prompts.dspy_optimizer import (
     DspyPromptOptimizer,
     FollowupAnswerModule,
-    OptimizedPrompt,
     OptimizationResult,
     RagChatSystemModule,
     ReportModule,
