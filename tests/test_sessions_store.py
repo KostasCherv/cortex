@@ -190,6 +190,7 @@ async def test_store_creates_rag_chat_session_attachment():
             "created_at": "2026-06-11T10:00:00+00:00",
             "updated_at": "2026-06-11T10:00:00+00:00",
         },
+        extra_headers={"Prefer": "resolution=ignore-duplicates"},
     )
 
 

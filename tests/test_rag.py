@@ -183,7 +183,10 @@ async def test_suggest_chat_session_title_uses_llm_result():
     mock_llm = MagicMock()
     mock_llm.invoke.return_value = type("R", (), {"content": "Pricing policy comparison"})()
 
-    with patch("src.llm.factory.get_llm", return_value=mock_llm):
+    with (
+        patch("src.rag.settings.rag_chat_title_llm_background", False),
+        patch("src.llm.factory.get_llm", return_value=mock_llm),
+    ):
         assert (
             await suggest_chat_session_title("Compare pricing policy docs")
             == "Pricing policy comparison"

@@ -135,7 +135,7 @@ def test_render_k6_report_cli_writes_markdown(tmp_path: Path):
         capture_output=True,
         text=True,
         check=False,
-        cwd="/Users/kostas/Dev/research_agent/.worktrees/codex-local-benchmark",
+        cwd=Path(__file__).resolve().parents[1],
     )
 
     assert result.returncode == 0

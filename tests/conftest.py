@@ -23,3 +23,18 @@ def mock_list_ready_session_attachment_resource_ids():
         new=AsyncMock(return_value=[]),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def mock_list_session_attachments():
+    with (
+        patch(
+            "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.endpoints.list_rag_chat_session_attachments",
+            new=AsyncMock(return_value=[]),
+        ),
+    ):
+        yield
