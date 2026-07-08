@@ -20,6 +20,14 @@ jobs:
       - name: Typecheck (non-blocking)
         run: uv run mypy src || true
       - name: Test
+        env:
+          # Dummy values so config "is this configured?" checks pass; no real
+          # network calls are made in the mocked test suite (see auth.py /
+          # supabase_store.py — invalid tokens fail parsing before any
+          # request reaches these URLs).
+          SUPABASE_URL: https://example.com
+          SUPABASE_SECRET_KEY: dummy-secret-key-for-ci
+          SUPABASE_JWKS_URL: https://example.com/auth/v1/.well-known/jwks.json
         run: uv run python -m pytest tests/ -q
 
   ui:
