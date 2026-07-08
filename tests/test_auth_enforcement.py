@@ -70,22 +70,6 @@ PROTECTED_ENDPOINTS: list[tuple[str, str]] = [
     ("PATCH", f"/api/rag/chat/sessions/{_UUID}"),
     ("DELETE", f"/api/rag/chat/sessions/{_UUID}"),
     ("DELETE", f"/api/rag/chat/sessions/{_UUID}/last-exchange"),
-    # --- Planner (PRD) ---
-    ("POST", "/api/planner/prd"),
-    ("GET", "/api/planner/prd/plans"),
-    ("GET", f"/api/planner/prd/plans/{_UUID}"),
-    ("DELETE", f"/api/planner/prd/plans/{_UUID}"),
-    # --- Planner chat ---
-    ("POST", "/api/planner/chat"),
-    ("GET", f"/api/planner/chat/{_UUID}/messages"),
-    ("DELETE", f"/api/planner/chat/{_UUID}/last"),
-    # --- Itinerary ---
-    ("POST", "/api/itinerary/sessions"),
-    ("GET", "/api/itinerary/sessions"),
-    ("GET", f"/api/itinerary/sessions/{_UUID}"),
-    ("PATCH", f"/api/itinerary/sessions/{_UUID}"),
-    ("DELETE", f"/api/itinerary/sessions/{_UUID}"),
-    ("POST", f"/api/itinerary/sessions/{_UUID}/messages"),
 ]
 
 

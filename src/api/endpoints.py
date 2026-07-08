@@ -25,14 +25,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import (
-    AIMessage,
     BaseMessage,
-    HumanMessage,
-    SystemMessage,
     ToolMessage,
 )
 from langchain_core.runnables import Runnable
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from src.tools.arxiv_mcp import (
@@ -84,31 +81,7 @@ from src.tools.composio_toolset import (
 from src.llm.factory import get_llm
 from src.llm.text_utils import extract_llm_text
 from src.api.rag_chat_helpers import build_agent_messages
-from src.prompts.registry import prompt_registry
 from src import outbox
-from src.planner import (
-    PlannerValidationError,
-    SavedPRD,
-    SavedPRDListResponse,
-    delete_saved_prd,
-    generate_prd,
-    get_saved_prd,
-    list_saved_prds,
-    save_prd,
-)
-from src.itinerary import (
-    ItineraryPlannerResponse,
-    ItineraryPlannerValidationError,
-    ItinerarySessionDetail,
-    ItinerarySessionListResponse,
-    ItinerarySessionSummary,
-    create_itinerary_session,
-    delete_itinerary_session,
-    get_itinerary_session_detail,
-    list_itinerary_sessions,
-    process_itinerary_session_message,
-    rename_itinerary_session,
-)
 from src.rag import (
     CHAT_SCOPE_AGENT,
     CHAT_SCOPE_WORKSPACE,
@@ -135,8 +108,6 @@ from src.rag import (
     list_rag_chat_session_attachments,
     list_chat_sessions as list_rag_chat_sessions,
     list_resources as list_rag_resources_records,
-    list_workspace_ready_resource_ids,
-    retrieve_context_for_query,
     suggest_agent_definition as suggest_rag_agent_definition,
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
@@ -152,8 +123,6 @@ from src.storage import ensure_rag_storage_ready
 from src.billing.application import BillingService, UsageIncrement
 from src.billing.domain import BillingSyncError, QuotaExceededError
 from src.billing.interfaces.http import build_billing_service, usage_summary_to_response
-from src.api.planner_chat import router as planner_chat_router
-from src.planner_graph.thread_store import planner_thread_store
 from src.user_memory import (
     delete_user_memory,
     enqueue_memory_refresh,
@@ -209,7 +178,6 @@ _inngest_fast_api.serve(
         dispatch_outbox_cron,
     ],
 )
-app.include_router(planner_chat_router)
 
 
 @app.on_event("startup")
@@ -252,15 +220,6 @@ async def validate_session_store_configuration() -> None:
             logger.warning(
                 "[startup] Redis is configured but unreachable — caching disabled for this run."
             )
-
-    async def _evict_planner_threads_periodically() -> None:
-        while True:
-            await asyncio.sleep(600)  # every 10 minutes
-            count = planner_thread_store.evict_expired()
-            if count > 0:
-                logger.info("[planner] Evicted %d expired planner threads.", count)
-
-    asyncio.ensure_future(_evict_planner_threads_periodically())
 
     if settings.composio_enabled:
         try:
@@ -335,22 +294,6 @@ class RagAgentDraftRequest(BaseModel):
     prompt: str
 
 
-class PRDRequest(BaseModel):
-    prompt: str
-
-
-class ItinerarySessionCreateRequest(BaseModel):
-    message: str | None = None
-
-
-class ItinerarySessionMessageRequest(BaseModel):
-    message: str
-
-
-class ItinerarySessionUpdateRequest(BaseModel):
-    title: str
-
-
 class RagAgentUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -382,11 +325,6 @@ class InternalBenchmarkAgentLoopRequest(BaseModel):
     rag_context: str = "Sample document context for benchmarking."
     user_memory_context: str = ""
     system_instructions: str = "Keep answers brief."
-
-
-class PlannerChatRequest(BaseModel):
-    message: str
-    thread_id: str | None = None
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -483,17 +421,6 @@ def _raise_rag_validation_error(exc: RagValidationError) -> None:
     )
 
 
-def _raise_planner_validation_error(exc: PlannerValidationError) -> None:
-    status_by_code = {
-        "planner_prompt_required": 400,
-        "planner_generation_failed": 502,
-    }
-    raise HTTPException(
-        status_code=status_by_code.get(exc.code, 400),
-        detail={"code": exc.code, "message": str(exc)},
-    )
-
-
 async def _parse_rag_chat_request(
     request: Request,
 ) -> tuple[RagChatRequest, list[UploadFile]]:
@@ -563,18 +490,6 @@ async def _parse_rag_chat_request(
         return RagChatRequest.model_validate(payload), files
     except ValidationError as exc:
         raise RequestValidationError(exc.errors()) from exc
-
-
-def _raise_itinerary_validation_error(exc: ItineraryPlannerValidationError) -> None:
-    status_by_code = {
-        "itinerary_message_required": 400,
-        "itinerary_session_not_found": 404,
-        "itinerary_generation_failed": 502,
-    }
-    raise HTTPException(
-        status_code=status_by_code.get(exc.code, 400),
-        detail={"code": exc.code, "message": str(exc)},
-    )
 
 
 _billing_service: BillingService | None = None
@@ -2170,136 +2085,6 @@ async def rag_create_agent(
     return {"agent": agent.to_dict()}
 
 
-@app.post("/api/planner/prd", tags=["Planner"])
-async def generate_prd_plan(
-    body: PRDRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedPRD:
-    try:
-        response = await generate_prd(body.prompt)
-        return await save_prd(current_user.user_id, body.prompt, response)
-    except PlannerValidationError as exc:
-        _raise_planner_validation_error(exc)
-        raise AssertionError("unreachable")
-
-
-@app.get("/api/planner/prd/plans", tags=["Planner"])
-async def list_prd_history(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedPRDListResponse:
-    plans = await list_saved_prds(current_user.user_id)
-    return SavedPRDListResponse(plans=plans)
-
-
-@app.get("/api/planner/prd/plans/{plan_id}", tags=["Planner"])
-async def get_prd_history_detail(
-    plan_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> SavedPRD:
-    plan = await get_saved_prd(current_user.user_id, plan_id)
-    if plan is None:
-        raise HTTPException(status_code=404, detail=f"Saved PRD '{plan_id}' not found.")
-    return plan
-
-
-@app.delete("/api/planner/prd/plans/{plan_id}", tags=["Planner"])
-async def delete_prd_plan(
-    plan_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> dict:
-    deleted = await delete_saved_prd(current_user.user_id, plan_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Saved PRD '{plan_id}' not found.")
-    return {"plan_id": plan_id, "deleted": True}
-
-
-@app.post("/api/itinerary/sessions", tags=["Itinerary"])
-async def create_itinerary_planner_session(
-    body: ItinerarySessionCreateRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> ItinerarySessionSummary | ItineraryPlannerResponse:
-    session = await create_itinerary_session(current_user.user_id)
-    if body.message and body.message.strip():
-        try:
-            return await process_itinerary_session_message(
-                session.session_id,
-                current_user.user_id,
-                body.message,
-            )
-        except ItineraryPlannerValidationError as exc:
-            _raise_itinerary_validation_error(exc)
-            raise AssertionError("unreachable")
-    return session
-
-
-@app.get("/api/itinerary/sessions", tags=["Itinerary"])
-async def list_itinerary_planner_sessions(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> ItinerarySessionListResponse:
-    return await list_itinerary_sessions(current_user.user_id)
-
-
-@app.get("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
-async def get_itinerary_planner_session_detail(
-    session_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> ItinerarySessionDetail:
-    session = await get_itinerary_session_detail(session_id, current_user.user_id)
-    if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Itinerary session '{session_id}' not found."
-        )
-    return session
-
-
-@app.patch("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
-async def patch_itinerary_planner_session(
-    session_id: str,
-    body: ItinerarySessionUpdateRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> dict[str, str]:
-    try:
-        renamed = await rename_itinerary_session(
-            session_id, current_user.user_id, body.title
-        )
-    except ItineraryPlannerValidationError as exc:
-        _raise_itinerary_validation_error(exc)
-        raise AssertionError("unreachable")
-    if not renamed:
-        raise HTTPException(
-            status_code=404, detail=f"Itinerary session '{session_id}' not found."
-        )
-    return {"session_id": session_id, "title": body.title.strip()}
-
-
-@app.delete("/api/itinerary/sessions/{session_id}", tags=["Itinerary"])
-async def remove_itinerary_planner_session(
-    session_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> dict[str, object]:
-    deleted = await delete_itinerary_session(session_id, current_user.user_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Itinerary session '{session_id}' not found."
-        )
-    return {"session_id": session_id, "deleted": True}
-
-
-@app.post("/api/itinerary/sessions/{session_id}/messages", tags=["Itinerary"])
-async def post_itinerary_planner_message(
-    session_id: str,
-    body: ItinerarySessionMessageRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-) -> ItineraryPlannerResponse:
-    try:
-        return await process_itinerary_session_message(
-            session_id,
-            current_user.user_id,
-            body.message,
-        )
-    except ItineraryPlannerValidationError as exc:
-        _raise_itinerary_validation_error(exc)
-        raise AssertionError("unreachable")
 
 
 @app.post("/api/rag/agents/draft", tags=["RAG"])
