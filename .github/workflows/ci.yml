@@ -8,6 +8,7 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -18,6 +19,8 @@ jobs:
       - name: Lint
         run: uv run ruff check src tests
       - name: Typecheck (non-blocking)
+        # 38 pre-existing errors as of this workflow's introduction; tighten
+        # once the backlog is cleared instead of blocking every PR on it.
         run: uv run mypy src || true
       - name: Test
         env:
@@ -32,6 +35,7 @@ jobs:
 
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: ui
@@ -53,6 +57,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.ref == 'refs/heads/main'
     needs: [backend, ui]
     steps:
