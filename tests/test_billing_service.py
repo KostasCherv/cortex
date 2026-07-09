@@ -4,8 +4,7 @@ from datetime import date
 
 import pytest
 
-from src.billing.application.service import BillingService, UsageIncrement
-from src.billing.domain.models import DailyUsage, Plan, UserSubscription
+from src.billing import BillingService, DailyUsage, Plan, UsageIncrement, UserSubscription
 
 
 class _FakeSubscriptions:
