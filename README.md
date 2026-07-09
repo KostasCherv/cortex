@@ -8,6 +8,19 @@ Production-grade AI research and RAG orchestration platform built with LangGraph
 
 Cortex runs multi-step web research workflows, streams progress in real time, generates structured reports, and supports grounded follow-up chat over retrieved sources. Chat now uses a ReAct-lite router so the model decides whether to answer directly, use local RAG context, search the web, fetch a URL, or ask a clarifying question. It also includes a reliable asynchronous ingestion pipeline for user-uploaded RAG resources.
 
+## Quickstart
+
+Cortex isn't a single-container app — it needs an LLM provider key, Neo4j (for GraphRAG), and Supabase for auth/sessions, so there's no honest "one command and you're running" path. The fastest realistic route:
+
+```bash
+uv sync && cp .env.example .env   # fill in an LLM_PROVIDER key at minimum
+docker compose up -d              # Redis + Neo4j support services
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload   # API on :8000
+cd ui && npm install && npm run dev             # UI on :5173
+```
+
+See [Run locally](#run-locally) below for the full setup, including Inngest (background jobs) and the exact env vars each provider needs.
+
 ## Signature capabilities
 
 - Stateful LangGraph orchestration with explicit routing for success, empty, and failure paths.
@@ -103,6 +116,14 @@ flowchart LR
 - URLs in the message or history are treated as available context, not as an automatic fetch.
 - Direct URL fetching happens only when the router decides inspecting that resource is necessary.
 - The same routing behavior is used across agent chat, workspace chat, and both streaming and non-streaming endpoints.
+
+## Architecture decisions
+
+**Transactional outbox for ingestion, not a direct call.** Uploading a resource, queuing its ingestion job, and publishing the "please ingest" event all happen in one atomic Supabase RPC (resource + job + outbox row). A separate dispatcher then claims outbox rows and publishes to Inngest, retrying on failure. This avoids the classic dual-write failure mode — an ingestion job existing with no event ever published because the process crashed between "write to DB" and "call the queue" — without needing distributed transactions across Postgres and Inngest.
+
+**A small fine-tuned router instead of always asking the main model.** Chat action classification (answer directly vs. RAG vs. web search vs. fetch a URL vs. ask a clarifying question) is cheap, high-frequency, and doesn't need frontier-model reasoning. Cortex can offload it to a Qwen2.5-3B-Instruct model fine-tuned with LoRA/QLoRA (see [Router fine-tuning](#router-fine-tuning-experimental)) instead of paying a full LLM call's latency and cost for every turn just to pick a branch. It's opt-in and scored against the teacher model's labels before being trusted.
+
+**Explicit success/empty/failure routing in the research graph, not one linear pipeline.** Each stage of the research flow (search, retrieve, memory context, rerank, summarize) can fail or come back empty in a way that's meaningfully different from a full failure — an empty search result set shouldn't produce the same UI state as a crashed LLM call. The LangGraph routes these as distinct edges (`abort`, `empty`, `continue`) so the UI and downstream nodes can react appropriately instead of every non-happy-path collapsing into a generic error.
 
 ## Run locally
 
