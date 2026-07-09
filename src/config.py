@@ -215,6 +215,9 @@ class Settings(BaseSettings):
         default="",
         description="Secret token required to call POST /internal/dispatch-outbox. Set a strong random value in prod.",
     )
+    sentry_dsn: str = Field(
+        default="", description="Sentry DSN for error tracking; empty disables it"
+    )
 
     # Supabase
     supabase_url: str = Field(default="", description="Supabase project URL")

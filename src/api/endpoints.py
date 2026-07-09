@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import inngest.fast_api as _inngest_fast_api
+import sentry_sdk
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -74,6 +75,13 @@ async def _lifespan(app: FastAPI):
     yield
     await _shutdown_background_clients()
 
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+    )
 
 app = FastAPI(
     title="Cortex API",

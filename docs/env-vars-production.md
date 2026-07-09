@@ -49,6 +49,8 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `LANGFUSE_SECRET_KEY` | yes | |
 | `LANGFUSE_ENV` | no | `prod` |
 | `LANGFUSE_RELEASE` | no | Git SHA or semver, e.g. `v1.2.3` |
+| `SENTRY_DSN` | yes | Error tracking; unset disables it entirely |
+| `RATE_LIMIT_DEFAULT` | no | Per-IP request limit, e.g. `60/minute` (default) |
 
 ### Variables that must NOT be set in production
 
