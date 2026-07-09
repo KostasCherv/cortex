@@ -197,7 +197,7 @@ def test_rag_chat_prepared_has_allow_web_search():
 async def test_prepare_workspace_respects_composio_false():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(web_search=True, composio=False)
@@ -226,7 +226,7 @@ async def test_prepare_workspace_respects_composio_false():
 async def test_prepare_workspace_respects_reference_tool_toggles():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(
@@ -333,7 +333,7 @@ async def test_prepare_agent_merges_session_attachment_resource_ids():
 async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_ids():
     from src.api.rag_chat_helpers import prepare_agent_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     agent = MagicMock(system_instructions="system")
@@ -396,7 +396,7 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
 async def test_prepare_workspace_respects_composio_true():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(web_search=True, composio=True)
