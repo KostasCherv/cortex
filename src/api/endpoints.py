@@ -1,6 +1,7 @@
 """FastAPI application — /health, /research (SSE), and session endpoints."""
 
 import logging
+from contextlib import asynccontextmanager
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import (
@@ -62,10 +63,18 @@ def _configure_application_logging() -> None:
     logger.info("[startup] Application logging configured at level=%s", level_name)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    await _startup()
+    yield
+    await _shutdown()
+
+
 app = FastAPI(
     title="Cortex API",
     description="Multi-step LangGraph research orchestration with SSE streaming.",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 app.add_middleware(
@@ -96,8 +105,7 @@ app.include_router(rag_agents_router)
 app.include_router(rag_chat_router)
 
 
-@app.on_event("startup")
-async def validate_session_store_configuration() -> None:
+async def _startup() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     _configure_application_logging()
     if not settings.cohere_api_key:
@@ -157,8 +165,7 @@ async def validate_session_store_configuration() -> None:
     )
 
 
-@app.on_event("shutdown")
-async def shutdown_background_clients() -> None:
+async def _shutdown() -> None:
     """Stop long-lived background clients gracefully."""
     await shutdown_composio_toolset()
 
