@@ -65,9 +65,10 @@ def _configure_application_logging() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    await _startup()
+    """Run startup checks, yield control, then shut down background clients."""
+    await _run_startup_checks()
     yield
-    await _shutdown()
+    await _shutdown_background_clients()
 
 
 app = FastAPI(
@@ -105,7 +106,7 @@ app.include_router(rag_agents_router)
 app.include_router(rag_chat_router)
 
 
-async def _startup() -> None:
+async def _run_startup_checks() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     _configure_application_logging()
     if not settings.cohere_api_key:
@@ -165,7 +166,7 @@ async def _startup() -> None:
     )
 
 
-async def _shutdown() -> None:
+async def _shutdown_background_clients() -> None:
     """Stop long-lived background clients gracefully."""
     await shutdown_composio_toolset()
 

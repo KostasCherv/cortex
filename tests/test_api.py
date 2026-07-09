@@ -708,7 +708,7 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(endpoints._startup())
+        asyncio.run(endpoints._run_startup_checks())
         mock_init.assert_not_called()
         mock_storage_ready.assert_not_awaited()
 
@@ -722,7 +722,7 @@ def test_startup_validation_configures_application_logging():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(endpoints._startup())
+        asyncio.run(endpoints._run_startup_checks())
 
     mock_configure_logging.assert_called_once()
 
@@ -735,7 +735,7 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(endpoints._startup())
+        asyncio.run(endpoints._run_startup_checks())
         mock_init.assert_called_once()
         mock_storage_ready.assert_awaited_once()
 
@@ -752,7 +752,7 @@ def test_startup_validation_fails_when_arxiv_mcp_is_unavailable():
         ),
     ):
         with pytest.raises(RuntimeError, match="arxiv-mcp-server missing"):
-            asyncio.run(endpoints._startup())
+            asyncio.run(endpoints._run_startup_checks())
 
 
 
