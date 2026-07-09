@@ -59,7 +59,7 @@ evals = [
 ]
 finetune = [
     "datasets>=2.20",
-    "huggingface-hub>=0.23",
+    "huggingface-hub>=1.23.0",
 ]
 
 [build-system]
