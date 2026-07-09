@@ -79,8 +79,13 @@ async def _lifespan(app: FastAPI):
 if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
+        # Tracing is already covered by LangFuse/LangSmith; Sentry here is
+        # error-capture only.
         traces_sample_rate=0.0,
         send_default_pii=False,
+        # Stack-trace locals can hold user research queries, chat messages,
+        # and RAG document content — don't ship them to Sentry.
+        include_local_variables=False,
     )
 
 app = FastAPI(
