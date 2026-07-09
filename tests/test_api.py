@@ -2007,7 +2007,7 @@ def test_rag_list_resources_returns_payload():
     mock_resource = MagicMock()
     mock_resource.to_dict.return_value = {"resource_id": "r-1", "state": "ready"}
     with patch(
-        "src.api.endpoints.list_rag_resources_records",
+        "src.api.routers.rag_resources.list_rag_resources_records",
         new=AsyncMock(return_value=[mock_resource]),
     ):
         response = client.get("/api/rag/resources")
@@ -2018,7 +2018,7 @@ def test_rag_list_resources_returns_payload():
 
 def test_rag_upload_maps_validation_errors():
     with patch(
-        "src.api.endpoints.create_resource_and_ingest",
+        "src.api.routers.rag_resources.create_resource_and_ingest",
         new=AsyncMock(side_effect=RagValidationError("unsupported_type", "Unsupported file type.")),
     ):
         response = client.post(
@@ -2038,7 +2038,7 @@ def test_rag_upload_dispatches_outbox_after_success():
 
     with (
         patch(
-            "src.api.endpoints.create_resource_and_ingest",
+            "src.api.routers.rag_resources.create_resource_and_ingest",
             new=AsyncMock(return_value=(mock_resource, mock_job)),
         ),
         patch("src.outbox.dispatch_outbox_events", new=AsyncMock(return_value=1)) as mock_dispatch,

@@ -9,10 +9,8 @@ from typing import AsyncGenerator
 
 import inngest.fast_api as _inngest_fast_api
 from fastapi import (
-    BackgroundTasks,
     Depends,
     FastAPI,
-    File,
     HTTPException,
     Request,
     UploadFile,
@@ -51,19 +49,15 @@ from src.rag import (
     create_agent as create_rag_agent_record,
     create_or_get_chat_session,
     create_or_get_workspace_chat_session,
-    create_resource_and_ingest,
     delete_agent as delete_rag_agent_record,
-    delete_resource as delete_rag_resource_record,
     get_agent_for_chat,
     get_chat_session as get_rag_chat_session,
-    get_resource_status,
     ingest_agent_chat_session_uploads,
     link_resources as link_rag_resources,
     list_agents as list_rag_agents_records,
     list_chat_messages as list_rag_chat_messages,
     list_rag_chat_session_attachments,
     list_chat_sessions as list_rag_chat_sessions,
-    list_resources as list_rag_resources_records,
     suggest_agent_definition as suggest_rag_agent_definition,
     update_chat_session_title as update_rag_chat_session_title,
     update_agent as update_rag_agent_record,
@@ -83,6 +77,7 @@ from src.user_memory import (
 from src.api.routers.billing import router as billing_router
 from src.api.routers.internal import router as internal_router
 from src.api.routers.memory import router as memory_router
+from src.api.routers.rag_resources import router as rag_resources_router
 from src.api.routers.sessions import router as sessions_router
 from src.api.deps import (
     CreateRagChatSessionRequest,
@@ -152,6 +147,7 @@ app.include_router(internal_router)
 app.include_router(billing_router)
 app.include_router(memory_router)
 app.include_router(sessions_router)
+app.include_router(rag_resources_router)
 
 
 @app.on_event("startup")
@@ -411,57 +407,6 @@ async def health():
 # ---------------------------------------------------------------------------
 # RAG Agent endpoints
 # ---------------------------------------------------------------------------
-
-
-@app.post("/api/rag/resources/upload", tags=["RAG"])
-async def rag_upload_resource(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    try:
-        resource, job = await create_resource_and_ingest(file, current_user.user_id)
-    except RagValidationError as exc:
-        _raise_rag_validation_error(exc)
-    background_tasks.add_task(outbox.dispatch_outbox_events, limit=10)
-    return {
-        "resource": resource.to_dict(),
-        "job": job.to_dict(),
-    }
-
-
-@app.get("/api/rag/resources", tags=["RAG"])
-async def rag_list_resources(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    resources = await list_rag_resources_records(current_user.user_id)
-    return {"resources": [r.to_dict() for r in resources]}
-
-
-@app.delete("/api/rag/resources/{resource_id}", tags=["RAG"])
-async def rag_delete_resource(
-    resource_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    deleted = await delete_rag_resource_record(resource_id, current_user.user_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Resource '{resource_id}' not found."
-        )
-    return {"resource_id": resource_id, "deleted": True}
-
-
-@app.get("/api/rag/resources/{resource_id}/status", tags=["RAG"])
-async def rag_resource_status(
-    resource_id: str,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    status_payload = await get_resource_status(resource_id, current_user.user_id)
-    if not status_payload:
-        raise HTTPException(
-            status_code=404, detail=f"Resource '{resource_id}' not found."
-        )
-    return status_payload
 
 
 @app.post("/api/rag/agents", tags=["RAG"])
