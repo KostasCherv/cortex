@@ -15,7 +15,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra evals
       - name: Lint
         run: uv run ruff check src tests
       - name: Typecheck (non-blocking)

@@ -21,10 +21,10 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 
 - Orchestration: `LangGraph`
 - API and streaming: `FastAPI`, `Uvicorn`, Server-Sent Events (SSE)
-- LLM and agent layer: `LangChain`, `DSPy`, `OpenAI`, `OpenRouter`, `Ollama`
-- Model fine-tuning: `Unsloth` (LoRA/QLoRA), `Hugging Face` (`datasets`, `Hub`), `Qwen2.5-3B-Instruct` router, GGUF + `Ollama` serving
+- LLM and agent layer: `LangChain`, `DSPy` (optional `evals` extra), `OpenAI`, `OpenRouter`, `Ollama`
+- Model fine-tuning (optional `finetune` extra): `Unsloth` (LoRA/QLoRA), `Hugging Face` (`datasets`, `Hub`), `Qwen2.5-3B-Instruct` router, GGUF + `Ollama` serving
 - Web research and parsing: `Tavily`, `httpx`, `BeautifulSoup`
-- Market data tools: `Alpha Vantage MCP`, `yfinance`
+- Market data tools: `Alpha Vantage MCP`
 - Retrieval and reranking: `Neo4j` (GraphRAG), `Cohere`
 - Async jobs and event delivery: `Inngest`, transactional outbox dispatcher
 - Auth, sessions, and storage: `Supabase` (Postgres, Auth, Storage)
@@ -32,7 +32,7 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization)
+- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
 
 ## Architecture
 
@@ -138,7 +138,7 @@ Relevant LLM settings:
 
 Asset pricing settings:
 
-- `ASSET_PRICE_PROVIDER=alphavantage_mcp|yfinance`
+- `ASSET_PRICE_PROVIDER=alphavantage_mcp`
 - `ALPHA_VANTAGE_API_KEY` for the default Alpha Vantage MCP-backed market data provider
 - `ALPHA_VANTAGE_MCP_TOOL_REFRESH_SECONDS` to control how often the in-memory MCP tool catalog is refreshed
 - Optional `ALPHA_VANTAGE_MCP_URL` to override the full remote MCP URL directly
@@ -409,6 +409,8 @@ Local benchmark numbers are not production-capacity claims. Use them to find bot
 
 ## Model evaluation
 
+Requires the `evals` optional extra (`uv sync --extra evals`) for `pandas` and `deepeval`.
+
 The repo includes a standalone summarize-only comparison script at `src/evals/model_comparison.py`.
 
 - Loads sample cases from `src/evals/golden_set.json`
@@ -423,6 +425,8 @@ uv run python3 src/evals/model_comparison.py
 ```
 
 ### Prompt optimization with DSPy
+
+Requires the `evals` optional extra (`uv sync --extra evals`) for `dspy`.
 
 Cortex uses [DSPy](https://dspy.ai) to algorithmically optimize prompt templates against the golden set — replacing manual prompt tweaking with reproducible, metric-driven iteration.
 
@@ -484,6 +488,8 @@ uv run pytest tests/test_dspy_optimizer.py -v
 ```
 
 ## Router fine-tuning (experimental)
+
+Requires the `finetune` optional extra (`uv sync --extra finetune`) for `datasets` and `huggingface-hub`.
 
 Cortex can offload the chat action-classification step to a small router model instead of the main "brain" model. The router is a compact base model (Qwen2.5-3B-Instruct) **fine-tuned with LoRA/QLoRA via [Unsloth](https://github.com/unslothai/unsloth)**, then exported to GGUF and served through Ollama. This path is **opt-in and inert by default** — it does not change any existing chat behavior unless explicitly enabled.
 
