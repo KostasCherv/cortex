@@ -4,6 +4,7 @@ Pure code motion from ``src/api/endpoints.py`` — no logic changes.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
@@ -54,6 +55,10 @@ class RagChatRequest(BaseModel):
 
 class CreateRagChatSessionRequest(BaseModel):
     filename: str | None = None
+
+
+class UpdateSessionTitleRequest(BaseModel):
+    title: str
 
 
 # ---------------------------------------------------------------------------
@@ -579,3 +584,33 @@ async def _run_agent_loop(
                 tool_map=tool_map,
                 composio_stream=True,
             )
+
+
+async def _generate_suggestions(query: str, answer: str, context: str) -> list[str]:
+    """Generate 2-3 follow-up question suggestions based on the Q&A."""
+    try:
+        llm = get_llm(temperature=0.7)
+        prompt = (
+            f"Based on this question and answer, generate exactly 3 concise follow-up questions "
+            f"a user might ask. Return ONLY a numbered list (1. ... 2. ... 3. ...), no preamble.\n\n"
+            f"Question: {query}\n\n"
+            f"Answer: {answer[:1000]}\n\n"
+            f"Context topics: {context[:500]}"
+        )
+        result = await llm.ainvoke(prompt)
+        content = extract_llm_text(result.content)
+        lines = content.strip().split("\n")
+        suggestions = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^\s*(\d+[\.\)]\s+|[-*]\s+)", "", line)
+            if line:
+                suggestions.append(line)
+        return suggestions[:3]
+    except Exception as exc:
+        logger.warning(
+            "[suggestions] failed to generate follow-up suggestions: %s", exc
+        )
+        return []

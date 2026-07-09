@@ -27,6 +27,7 @@ from src.rag import AgentDefinitionDraft, RagValidationError
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
 import src.api.deps as deps
+import src.api.routers.sessions as sessions_router_module
 
 client = TestClient(app)
 
@@ -175,7 +176,7 @@ def test_create_session_returns_session_id():
         title="LangGraph basics",
         created_at="2026-01-01T00:00:00+00:00",
     )
-    with patch("src.api.endpoints.create_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.create_session", new=AsyncMock(return_value=mock_session)):
         response = client.post("/sessions", json={"query": "What is LangGraph?"})
     assert response.status_code == 200
     data = response.json()
@@ -186,7 +187,7 @@ def test_create_session_returns_session_id():
 
 def test_get_session_returns_session_state():
     mock_session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         get_resp = client.get("/sessions/session-1")
         assert get_resp.status_code == 200
         data = get_resp.json()
@@ -197,7 +198,7 @@ def test_get_session_returns_session_state():
 
 def test_list_sessions_returns_summaries():
     with patch(
-        "src.api.endpoints.list_sessions",
+        "src.api.routers.sessions.list_sessions",
         new=AsyncMock(
             return_value=[
                 {
@@ -221,14 +222,14 @@ def test_list_sessions_returns_summaries():
 
 
 def test_get_session_returns_404_for_unknown_id():
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=None)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=None)):
         response = client.get("/sessions/does-not-exist")
         assert response.status_code == 404
 
 
 def test_followup_returns_400_when_no_run_exists():
     mock_session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         followup_resp = client.post(
             "/sessions/session-1/followup",
             json={"question": "What did you find?"},
@@ -237,7 +238,7 @@ def test_followup_returns_400_when_no_run_exists():
 
 
 def test_followup_returns_404_for_unknown_session():
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=None)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=None)):
         response = client.post(
             "/sessions/no-such-session/followup",
             json={"question": "anything"},
@@ -247,7 +248,7 @@ def test_followup_returns_404_for_unknown_session():
 
 def test_followup_returns_404_for_unknown_run_id():
     mock_session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         response = client.post(
             "/sessions/session-1/followup",
             json={"question": "anything", "run_id": "nonexistent-run"},
@@ -268,8 +269,8 @@ def test_session_research_queues_background_run():
     mock_enqueue_event = AsyncMock(return_value=None)
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.create_session_run", new=mock_create_session_run),
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.create_session_run", new=mock_create_session_run),
         patch("src.api.endpoints.outbox.enqueue_event", new=mock_enqueue_event),
         patch("src.api.endpoints.outbox.dispatch_outbox_events", new=AsyncMock(return_value=1)),
     ):
@@ -289,7 +290,7 @@ def test_session_research_queues_background_run():
 def test_session_research_returns_429_when_quota_exceeded():
     _fake_billing.raise_quota = True
     mock_session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         response = client.post(
             "/sessions/session-1/research",
             json={"query": "What is LangGraph?"},
@@ -320,9 +321,9 @@ def test_submit_run_feedback_creates_boolean_score_and_marks_run():
     )
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.submit_user_feedback_score") as mock_score,
-        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
+        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
     ):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
@@ -352,10 +353,10 @@ def test_submit_run_feedback_backfills_langfuse_linkage_when_missing():
     )
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
-        patch("src.api.endpoints.submit_user_feedback_score") as mock_score,
-        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
+        patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
+        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
     ):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
@@ -395,7 +396,7 @@ def test_submit_run_feedback_rejects_duplicate_submission():
         created_at="2026",
     )
 
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
             json={"helpful": False, "comment": "Needs work"},
@@ -423,7 +424,7 @@ def test_submit_run_feedback_rejects_non_completed_run():
         created_at="2026",
     )
 
-    with patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)):
+    with patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
             json={"helpful": True},
@@ -441,10 +442,10 @@ def test_submit_run_feedback_returns_404_when_backfill_linkage_persist_fails():
     )
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
-        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=False)),
-        patch("src.api.endpoints.submit_user_feedback_score") as mock_score,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
+        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=False)),
+        patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
     ):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
@@ -456,7 +457,7 @@ def test_submit_run_feedback_returns_404_when_backfill_linkage_persist_fails():
 
 
 def test_execute_research_run_marks_completed_and_records():
-    from src.api.endpoints import _execute_research_run
+    from src.api.routers.sessions import _execute_research_run
 
     class FakeGraph:
         async def astream_events(self, _initial_state, version="v2"):
@@ -485,10 +486,10 @@ def test_execute_research_run_marks_completed_and_records():
     mock_graph_store.ingest_document.return_value = 1
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
-        patch("src.api.endpoints.build_graph", return_value=FakeGraph()),
-        patch("src.api.endpoints.update_session_run", new=mock_update),
-        patch("src.api.endpoints.Neo4jGraphStore", return_value=mock_graph_store),
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=session)),
+        patch("src.api.routers.sessions.build_graph", return_value=FakeGraph()),
+        patch("src.api.routers.sessions.update_session_run", new=mock_update),
+        patch("src.api.routers.sessions.Neo4jGraphStore", return_value=mock_graph_store),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
@@ -520,7 +521,7 @@ def test_execute_research_run_marks_completed_and_records():
 
 
 def test_execute_research_run_marks_failed_on_error():
-    from src.api.endpoints import _execute_research_run
+    from src.api.routers.sessions import _execute_research_run
 
     class FailingGraph:
         async def astream_events(self, _initial_state, version="v2"):
@@ -535,9 +536,9 @@ def test_execute_research_run_marks_failed_on_error():
     mock_update = AsyncMock(return_value=True)
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
-        patch("src.api.endpoints.build_graph", return_value=FailingGraph()),
-        patch("src.api.endpoints.update_session_run", new=mock_update),
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=session)),
+        patch("src.api.routers.sessions.build_graph", return_value=FailingGraph()),
+        patch("src.api.routers.sessions.update_session_run", new=mock_update),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
@@ -561,7 +562,7 @@ def test_execute_research_run_marks_failed_on_error():
 
 
 def test_execute_research_run_ignores_live_state_persist_errors():
-    from src.api.endpoints import _execute_research_run
+    from src.api.routers.sessions import _execute_research_run
 
     class FakeGraph:
         async def astream_events(self, _initial_state, version="v2"):
@@ -587,10 +588,10 @@ def test_execute_research_run_ignores_live_state_persist_errors():
         raise RuntimeError("temporary db outage")
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
-        patch("src.api.endpoints.build_graph", return_value=FakeGraph()),
-        patch("src.api.endpoints.update_session_run", new=AsyncMock(side_effect=flaky_update)),
-        patch("src.api.endpoints._record_session_run", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=session)),
+        patch("src.api.routers.sessions.build_graph", return_value=FakeGraph()),
+        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(side_effect=flaky_update)),
+        patch("src.api.routers.sessions._record_session_run", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
@@ -607,7 +608,7 @@ def test_execute_research_run_ignores_live_state_persist_errors():
 
 
 def test_execute_research_runs_can_overlap_in_time():
-    from src.api.endpoints import _execute_research_run
+    from src.api.routers.sessions import _execute_research_run
 
     starts: list[tuple[str, float]] = []
     ends: list[tuple[str, float]] = []
@@ -638,10 +639,10 @@ def test_execute_research_runs_can_overlap_in_time():
     session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=session)),
-        patch("src.api.endpoints.build_graph", return_value=SlowGraph()),
-        patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=True)),
-        patch("src.api.endpoints._record_session_run", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=session)),
+        patch("src.api.routers.sessions.build_graph", return_value=SlowGraph()),
+        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)),
+        patch("src.api.routers.sessions._record_session_run", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
@@ -671,10 +672,10 @@ def test_execute_research_runs_can_overlap_in_time():
 
 
 def test_record_session_run_raises_when_finalize_update_fails():
-    from src.api.endpoints import _record_session_run
+    from src.api.routers.sessions import _record_session_run
 
     session = Session(session_id="session-1", runs=[], conversation=[], created_at="2026")
-    with patch("src.api.endpoints.update_session_run", new=AsyncMock(return_value=False)):
+    with patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=False)):
         try:
             asyncio.run(
                 _record_session_run(
@@ -785,7 +786,7 @@ def test_configure_application_logging_sets_src_logger_level():
 
 def test_generate_suggestions_returns_list():
     """_generate_suggestions parses numbered lines into a list of strings."""
-    from src.api.endpoints import _generate_suggestions
+    from src.api.routers.sessions import _generate_suggestions
 
     mock_result = MagicMock()
     mock_result.content = "1. What are the limitations?\n2. How does it compare to X?\n3. What are real-world use cases?"
@@ -793,7 +794,7 @@ def test_generate_suggestions_returns_list():
     mock_llm = AsyncMock()
     mock_llm.ainvoke = AsyncMock(return_value=mock_result)
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+    with patch("src.api.deps.get_llm", return_value=mock_llm):
         suggestions = asyncio.run(
             _generate_suggestions("What is LangGraph?", "LangGraph is a library...", "topics: graphs, agents")
         )
@@ -807,12 +808,12 @@ def test_generate_suggestions_returns_list():
 
 def test_generate_suggestions_returns_empty_on_error():
     """_generate_suggestions returns [] when the LLM raises an exception."""
-    from src.api.endpoints import _generate_suggestions
+    from src.api.routers.sessions import _generate_suggestions
 
     mock_llm = AsyncMock()
     mock_llm.ainvoke = AsyncMock(side_effect=Exception("LLM unavailable"))
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+    with patch("src.api.deps.get_llm", return_value=mock_llm):
         suggestions = asyncio.run(
             _generate_suggestions("What is LangGraph?", "Some answer", "context")
         )
@@ -822,7 +823,7 @@ def test_generate_suggestions_returns_empty_on_error():
 
 def test_generate_suggestions_handles_non_dict_content_blocks():
     """_generate_suggestions tolerates structured content blocks with .text attributes."""
-    from src.api.endpoints import _generate_suggestions
+    from src.api.routers.sessions import _generate_suggestions
 
     mock_result = MagicMock()
     mock_result.content = [
@@ -834,7 +835,7 @@ def test_generate_suggestions_handles_non_dict_content_blocks():
     mock_llm = AsyncMock()
     mock_llm.ainvoke = AsyncMock(return_value=mock_result)
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+    with patch("src.api.deps.get_llm", return_value=mock_llm):
         suggestions = asyncio.run(
             _generate_suggestions("What is LangGraph?", "Some answer", "context")
         )
@@ -856,13 +857,13 @@ def test_followup_stream_includes_suggestions_event():
     )
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=[]),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Here is the answer.", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=["Q1?", "Q2?", "Q3?"])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Here is the answer.", False))),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=["Q1?", "Q2?", "Q3?"])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -908,13 +909,13 @@ def test_followup_stream_citations_match_reranked_chunks():
     reranked_chunks = [raw_chunks[1]]
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=reranked_chunks),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=reranked_chunks),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -959,13 +960,13 @@ def test_followup_prompt_includes_originating_report_context_fields():
         return "Answer", False
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=[]),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", side_effect=capture_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", side_effect=capture_loop),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -1000,12 +1001,12 @@ def test_followup_report_context_fallback_is_safe_for_missing_run():
         return "Answer", False
 
     with (
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=[]),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", side_effect=capture_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", side_effect=capture_loop),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -1013,7 +1014,7 @@ def test_followup_report_context_fallback_is_safe_for_missing_run():
         mock_graph_cls.return_value = mock_graph
         chunks = asyncio.run(
             _collect_stream(
-                endpoints._stream_followup(
+                sessions_router_module._stream_followup(
                     session=mock_session,
                     user_id="user-1",
                     question="Can you elaborate?",
@@ -1039,13 +1040,13 @@ def test_followup_stream_returns_answer_from_agent_loop():
     )
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=[]),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Online follow-up answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Online follow-up answer", False))),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -1083,13 +1084,13 @@ def test_followup_stream_calls_agent_loop_with_normalized_message():
     mock_loop = AsyncMock(return_value=("Follow-up answer", False))
 
     with (
-        patch("src.api.endpoints.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.endpoints.Neo4jGraphStore") as mock_graph_cls,
-        patch("src.api.endpoints.rerank_chunks", return_value=[]),
-        patch("src.api.endpoints.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.endpoints._run_agent_loop", mock_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
+        patch("src.api.routers.sessions._run_agent_loop", mock_loop),
+        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
@@ -1155,8 +1156,8 @@ def test_rag_chat_calls_agent_loop():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", mock_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
@@ -1200,8 +1201,8 @@ def test_rag_chat_stream_calls_agent_loop():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
@@ -1326,7 +1327,7 @@ def test_rag_agent_chat_stream_uploads_files_before_running_loop():
         ) as mock_ingest,
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat/stream",
@@ -1379,7 +1380,7 @@ def test_rag_agent_chat_uploads_files_before_running_loop():
         patch("src.api.endpoints.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.endpoints.enqueue_memory_refresh", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat",
@@ -1686,7 +1687,7 @@ def test_rag_agent_chat_stream_skips_ingest_without_files():
         ) as mock_ingest,
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat/stream",
@@ -1726,7 +1727,7 @@ def test_rag_agent_chat_stream_skips_reingest_for_ready_filenames():
         ) as mock_ingest,
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
             "/api/rag/agents/agent-1/chat/stream",
@@ -1935,8 +1936,8 @@ def test_workspace_rag_chat_calls_agent_loop():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", mock_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
@@ -1978,8 +1979,8 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.endpoints.start_workflow_run", side_effect=mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run", end_workflow),
     ):
@@ -2075,8 +2076,8 @@ def test_rag_chat_returns_agent_reply():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2121,8 +2122,8 @@ def test_rag_chat_stream_returns_rich_citations():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2167,10 +2168,10 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch(
-            "src.api.endpoints._generate_suggestions",
+            "src.api.deps._generate_suggestions",
             new=AsyncMock(return_value=["Follow-up one?", "Follow-up two?", "Follow-up three?"]),
         ),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2203,8 +2204,8 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2257,8 +2258,8 @@ def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
                 )
             ),
         ),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2293,8 +2294,8 @@ def test_workspace_rag_chat_allows_no_ready_resources():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("General answer", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2329,10 +2330,10 @@ def test_rag_chat_persists_suggestions_on_assistant_message():
         patch("src.api.endpoints.append_chat_message", new=append_chat),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
         patch(
-            "src.api.endpoints._generate_suggestions",
+            "src.api.deps._generate_suggestions",
             new=AsyncMock(return_value=["Next question?", "Another question?"]),
         ),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2376,8 +2377,8 @@ def test_rag_chat_keeps_attached_document_queries_grounded_in_linked_resources()
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", side_effect=capture_loop),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2404,8 +2405,8 @@ def test_workspace_rag_chat_stream_returns_valid_sse_response():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Workspace answer.", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2436,8 +2437,8 @@ def test_rag_chat_stream_agent_loop_returns_chunks():
         patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
         patch("src.api.endpoints.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.endpoints._run_agent_loop", new=AsyncMock(return_value=("Archon is a coding assistant platform.", False))),
-        patch("src.api.endpoints._generate_suggestions", new=AsyncMock(return_value=[])),
-        patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
@@ -2804,8 +2805,8 @@ def test_run_agent_loop_returns_result_object():
     mock_response.content = "test answer"
     mock_response.tool_calls = []
 
-    with patch("src.api.endpoints.get_llm") as mock_get_llm, \
-         patch("src.api.endpoints.settings") as mock_settings, \
+    with patch("src.api.deps.get_llm") as mock_get_llm, \
+         patch("src.api.deps.settings") as mock_settings, \
          patch("src.api.deps.build_agent_tools", return_value=[]):
         mock_settings.composio_max_agent_turns = 1
         mock_settings.composio_enabled = False
