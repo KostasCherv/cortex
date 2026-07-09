@@ -18,6 +18,8 @@ jobs:
         run: uv sync --extra dev --extra evals
       - name: Lint
         run: uv run ruff check src tests
+      - name: Security scan (bandit)
+        run: uv run bandit -c pyproject.toml -r src
       - name: Typecheck (non-blocking)
         # 38 pre-existing errors as of this workflow's introduction; tighten
         # once the backlog is cleared instead of blocking every PR on it.

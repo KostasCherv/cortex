@@ -1,5 +1,7 @@
 # Cortex
 
+[![CI](https://github.com/KostasCherv/cortex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KostasCherv/cortex/actions/workflows/ci.yml)
+
 Production-grade AI research and RAG orchestration platform built with LangGraph, FastAPI, Inngest, and Supabase.
 
 <img width="1722" height="898" alt="Kapture 2026-05-11 at 11 28 18" src="https://github.com/user-attachments/assets/1f01409f-bc58-43ef-bc09-5ec2649acf00" />
