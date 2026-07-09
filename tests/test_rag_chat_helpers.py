@@ -150,7 +150,7 @@ def test_should_bind_composio_tools_disabled():
 async def test_run_agent_loop_skips_router_when_bind_tools_false():
     from langchain_core.messages import AIMessage, HumanMessage
 
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     llm_response = AIMessage(content="Done.")
     mock_llm = MagicMock()
@@ -160,8 +160,8 @@ async def test_run_agent_loop_skips_router_when_bind_tools_false():
 
     from unittest.mock import patch
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm), patch(
-        "src.api.endpoints.build_agent_tools", return_value=[]
+    with patch("src.api.deps.get_llm", return_value=mock_llm), patch(
+        "src.api.deps.build_agent_tools", return_value=[]
     ):
         result = await _run_agent_loop(
             messages=[HumanMessage(content="Hi")],
@@ -197,7 +197,7 @@ def test_rag_chat_prepared_has_allow_web_search():
 async def test_prepare_workspace_respects_composio_false():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(web_search=True, composio=False)
@@ -226,7 +226,7 @@ async def test_prepare_workspace_respects_composio_false():
 async def test_prepare_workspace_respects_reference_tool_toggles():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(
@@ -333,7 +333,7 @@ async def test_prepare_agent_merges_session_attachment_resource_ids():
 async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_ids():
     from src.api.rag_chat_helpers import prepare_agent_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     agent = MagicMock(system_instructions="system")
@@ -396,7 +396,7 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
 async def test_prepare_workspace_respects_composio_true():
     from src.api.rag_chat_helpers import prepare_workspace_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
     from unittest.mock import AsyncMock, patch
 
     tools = RagChatTools(web_search=True, composio=True)

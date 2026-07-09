@@ -30,16 +30,16 @@ def _patch_router_tools(mock_mgr: MagicMock, tools: list) -> None:
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_no_tool_calls_returns_answer():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     llm_response = AIMessage(content="The answer is 42.")
     mock_llm = MagicMock()
     mock_llm.bind_tools.return_value = mock_llm
     mock_llm.ainvoke = AsyncMock(return_value=llm_response)
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is 6 times 7?")],
                 metadata={},
@@ -52,7 +52,7 @@ async def test_run_agent_loop_no_tool_calls_returns_answer():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     tool_call_response = _ai_message_with_tool_call(
         "tavily_extract", "call_extract", {"urls": ["https://example.com"]}
@@ -65,11 +65,11 @@ async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
 
     fake_tool = _make_tool("tavily_extract", {"error": "invalid api key"})
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             with patch(
-                "src.api.endpoints.build_agent_tools",
+                "src.api.deps.build_agent_tools",
                 return_value=[fake_tool],
             ):
                 result = await _run_agent_loop(
@@ -83,7 +83,7 @@ async def test_run_agent_loop_does_not_mark_web_used_for_tavily_error_payload():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_marks_web_used_for_tavily_search():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     tool_call_response = _ai_message_with_tool_call(
         "tavily_search", "call_web", {"query": "latest news"}
@@ -102,11 +102,11 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
         ),
     )
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             with patch(
-                "src.api.endpoints.build_agent_tools",
+                "src.api.deps.build_agent_tools",
                 return_value=[fake_tool],
             ):
                 result = await _run_agent_loop(
@@ -129,7 +129,7 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_executes_tool_and_returns_final_answer():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     tool_call_response = _ai_message_with_tool_call("TAVILY_SEARCH", "call_1", {"query": "AAPL"})
     final_response = AIMessage(content="AAPL is trading at $200.")
@@ -140,9 +140,9 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
 
     fake_tool = _make_tool("TAVILY_SEARCH", '{"price": 200}')
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [fake_tool])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
@@ -155,7 +155,7 @@ async def test_run_agent_loop_executes_tool_and_returns_final_answer():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_router_search_then_execute():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     search_response = _ai_message_with_tool_call(
         "COMPOSIO_SEARCH_TOOLS",
@@ -178,9 +178,9 @@ async def test_run_agent_loop_router_search_then_execute():
     search_tool = _make_tool("COMPOSIO_SEARCH_TOOLS", '{"tools": ["TAVILY_SEARCH"]}')
     execute_tool = _make_tool("COMPOSIO_MULTI_EXECUTE_TOOL", '{"price": 200}')
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [search_tool, execute_tool])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             result = await _run_agent_loop(
                 messages=[HumanMessage(content="What is AAPL price?")],
                 metadata={},
@@ -195,7 +195,7 @@ async def test_run_agent_loop_router_search_then_execute():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_emits_tool_events_via_on_event():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     events: list[dict] = []
 
@@ -211,9 +211,9 @@ async def test_run_agent_loop_emits_tool_events_via_on_event():
 
     fake_tool = _make_tool("GITHUB_CREATE_ISSUE", '{"id": 42}')
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [fake_tool])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
                 metadata={},
@@ -230,7 +230,7 @@ async def test_run_agent_loop_emits_tool_events_via_on_event():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     events: list[dict] = []
 
@@ -248,9 +248,9 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
     broken_tool.name = "GITHUB_CREATE_ISSUE"
     broken_tool.arun = AsyncMock(side_effect=Exception("Unauthorized"))
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [broken_tool])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
             result = await _run_agent_loop(
                 messages=[HumanMessage(content="Create an issue.")],
                 metadata={},
@@ -265,7 +265,7 @@ async def test_run_agent_loop_tool_error_emits_error_event_and_continues():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_respects_max_turns():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     tool_call_response = _ai_message_with_tool_call("TAVILY_SEARCH", "call_n", {"query": "x"})
 
@@ -275,10 +275,10 @@ async def test_run_agent_loop_respects_max_turns():
 
     fake_tool = _make_tool("TAVILY_SEARCH", "result")
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [fake_tool])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            with patch("src.api.endpoints.settings") as mock_settings:
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
+            with patch("src.api.deps.settings") as mock_settings:
                 mock_settings.composio_max_agent_turns = 3
                 mock_settings.composio_enabled = True
                 await _run_agent_loop(
@@ -322,7 +322,7 @@ def test_build_agent_messages_constructs_correct_structure():
 
 @pytest.mark.asyncio
 async def test_run_agent_loop_collects_arxiv_read_paper_citation():
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     @asynccontextmanager
     async def _arxiv_context(*, enabled: bool = True):
@@ -348,11 +348,11 @@ async def test_run_agent_loop_collects_arxiv_read_paper_citation():
     mock_llm.bind_tools.return_value = mock_llm
     mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
 
-    with patch("src.api.endpoints.get_composio_toolset_manager") as mock_mgr:
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
         _patch_router_tools(mock_mgr, [])
-        with patch("src.api.endpoints.get_llm", return_value=mock_llm):
-            with patch("src.api.endpoints.build_agent_tools", return_value=[]):
-                with patch("src.api.endpoints.arxiv_mcp_tools_context", new=_arxiv_context):
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
+            with patch("src.api.deps.build_agent_tools", return_value=[]):
+                with patch("src.api.deps.arxiv_mcp_tools_context", new=_arxiv_context):
                     result = await _run_agent_loop(
                         messages=[HumanMessage(content="Read that paper")],
                         metadata={},

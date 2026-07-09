@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.api.endpoints import AgentLoopResult, app
+from src.api.deps import AgentLoopResult
+from src.api.endpoints import app
 
 
 client = TestClient(app)
@@ -21,7 +22,7 @@ def test_internal_benchmark_endpoint_runs_agent_loop(monkeypatch):
     monkeypatch.setattr("src.api.endpoints.settings.internal_dispatch_secret", "bench-secret")
 
     with patch(
-        "src.api.endpoints._run_agent_loop",
+        "src.api.routers.internal._run_agent_loop",
         new=AsyncMock(
             return_value=AgentLoopResult(
                 answer="Short answer",
@@ -63,11 +64,11 @@ def test_internal_benchmark_endpoint_reuses_initialized_composio(monkeypatch):
         },
     )()
 
-    with patch("src.api.endpoints.get_composio_toolset_manager", return_value=fake_manager), patch(
-        "src.api.endpoints.initialize_composio_toolset",
+    with patch("src.api.routers.internal.get_composio_toolset_manager", return_value=fake_manager), patch(
+        "src.api.routers.internal.initialize_composio_toolset",
         new=AsyncMock(),
     ) as initialize_composio, patch(
-        "src.api.endpoints._run_agent_loop",
+        "src.api.routers.internal._run_agent_loop",
         new=AsyncMock(return_value=AgentLoopResult(answer="ok", web_used=False, citations=[])),
     ):
         response = client.post(

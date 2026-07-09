@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.api.endpoints import RagChatTools
+    from src.api.deps import RagChatTools
 
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -515,7 +515,7 @@ async def resolve_suggestions(
     if settings.rag_suggestions_deferred:
         timings.suggestions_ms = 0.0
         return []
-    from src.api.endpoints import _generate_suggestions
+    from src.api.deps import _generate_suggestions
 
     t0 = time.perf_counter()
     suggestions = await _generate_suggestions(query, answer, context)
@@ -538,7 +538,7 @@ def schedule_deferred_suggestions(
         return
 
     async def _run() -> None:
-        from src.api.endpoints import _generate_suggestions
+        from src.api.deps import _generate_suggestions
         from src.rag import update_chat_message_suggestions
 
         try:

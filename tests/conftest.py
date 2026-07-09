@@ -31,9 +31,19 @@ def mock_enqueue_memory_refresh():
     # write and previously only passed because a local .env pointed at a real
     # Supabase project. Default it to a no-op here; tests that care about the
     # call still patch/assert it explicitly (see test_api.py:1363).
-    with patch(
-        "src.api.endpoints.enqueue_memory_refresh",
-        new=AsyncMock(return_value=False),
+    with (
+        patch(
+            "src.api.routers.sessions.enqueue_memory_refresh",
+            new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "src.api.routers.rag_agents.enqueue_memory_refresh",
+            new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "src.api.routers.rag_chat.enqueue_memory_refresh",
+            new=AsyncMock(return_value=False),
+        ),
     ):
         yield
 
@@ -46,7 +56,11 @@ def mock_list_session_attachments():
             new=AsyncMock(return_value=[]),
         ),
         patch(
-            "src.api.endpoints.list_rag_chat_session_attachments",
+            "src.api.routers.rag_agents.list_rag_chat_session_attachments",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.routers.rag_chat.list_rag_chat_session_attachments",
             new=AsyncMock(return_value=[]),
         ),
     ):
