@@ -8,7 +8,8 @@ os.environ.setdefault("INNGEST_DEV", "1")
 
 # High default so normal test traffic (many requests to the same route within
 # a fast test run) never trips the rate limiter. Individual tests that want to
-# exercise real 429 behavior override the limit explicitly on the app/limiter.
+# exercise real 429 behavior mount a dedicated route with its own explicit
+# @limiter.limit(...) decorator instead of relying on this default.
 os.environ.setdefault("RATE_LIMIT_DEFAULT", "100000/minute")
 
 

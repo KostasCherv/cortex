@@ -97,7 +97,7 @@ def test_rate_limit_returns_429_after_burst():
     """
     from fastapi import APIRouter, Request
 
-    from src.api.endpoints import app, limiter
+    from src.api.endpoints import limiter
 
     probe_router = APIRouter()
 
