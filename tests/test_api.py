@@ -88,26 +88,33 @@ def test_rate_limit_returns_429_after_burst():
     """Proves the slowapi limiter actually enforces a limit and returns 429.
 
     The global default limit is set very high in tests (see conftest.py) so
-    normal test traffic never trips it. To exercise real enforcement here we
-    temporarily swap the limiter's default limits for a tiny one, hit /health
-    enough times to burst past it, then restore the original limits and reset
-    the in-memory limiter storage in a `finally` block so no state leaks into
+    normal test traffic never trips it. To exercise real enforcement without
+    reaching into slowapi's private internals, mount a dedicated throwaway
+    route decorated with the public `@limiter.limit(...)` API, hit it enough
+    times to burst past its tiny limit, then remove the route and reset the
+    in-memory limiter storage in a `finally` block so no state leaks into
     other tests.
     """
-    from slowapi.wrappers import LimitGroup
+    from fastapi import APIRouter, Request
 
-    from src.api.endpoints import limiter
+    from src.api.endpoints import app, limiter
 
-    original_limits = limiter._default_limits
-    limiter._default_limits = [
-        LimitGroup("2/minute", limiter._key_func, None, False, None, None, None, 1, False)
-    ]
+    probe_router = APIRouter()
+
+    @probe_router.get("/__test_rate_limit_probe")
+    @limiter.limit("2/minute")
+    async def _probe(request: Request):
+        return {"ok": True}
+
+    app.include_router(probe_router)
     try:
-        responses = [client.get("/health") for _ in range(5)]
+        responses = [client.get("/__test_rate_limit_probe") for _ in range(5)]
         statuses = [r.status_code for r in responses]
         assert 429 in statuses
     finally:
-        limiter._default_limits = original_limits
+        app.router.routes = [
+            r for r in app.router.routes if getattr(r, "path", None) != "/__test_rate_limit_probe"
+        ]
         limiter.reset()
 
 
