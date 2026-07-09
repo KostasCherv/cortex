@@ -41,7 +41,6 @@ from src.api.routers.rag_resources import router as rag_resources_router
 from src.api.routers.sessions import router as sessions_router
 
 logger = logging.getLogger(__name__)
-_LIVE_REPORT_FLUSH_SECONDS = 0.3
 
 
 def _configure_application_logging() -> None:
