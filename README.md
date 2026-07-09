@@ -10,10 +10,10 @@ Cortex runs multi-step web research workflows, streams progress in real time, ge
 
 ## Quickstart
 
-Cortex isn't a single-container app — it needs an LLM provider key, Neo4j (for GraphRAG), and Supabase for auth/sessions, so there's no honest "one command and you're running" path. The fastest realistic route:
+Cortex needs an LLM provider key, Neo4j (GraphRAG), and Supabase (auth/sessions) — there's no single-command startup. Fastest realistic route:
 
 ```bash
-uv sync && cp .env.example .env   # fill in an LLM_PROVIDER key at minimum
+uv sync && cp .env.example .env   # LLM_PROVIDER key gets the API serving; add Supabase creds too for session-scoped chat/RAG
 docker compose up -d              # Redis + Neo4j support services
 uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload   # API on :8000
 cd ui && npm install && npm run dev             # UI on :5173
