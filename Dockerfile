@@ -10,7 +10,7 @@ RUN uv sync --frozen --no-dev
 
 COPY src/ src/
 
-RUN useradd --create-home appuser
+RUN useradd --create-home appuser && chown -R appuser:appuser /app
 USER appuser
 
 ENV PYTHONUNBUFFERED=1 \
