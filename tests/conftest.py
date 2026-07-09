@@ -6,6 +6,11 @@ import pytest
 # Must be set before any src imports so inngest.Inngest initialises in dev mode.
 os.environ.setdefault("INNGEST_DEV", "1")
 
+# High default so normal test traffic (many requests to the same route within
+# a fast test run) never trips the rate limiter. Individual tests that want to
+# exercise real 429 behavior override the limit explicitly on the app/limiter.
+os.environ.setdefault("RATE_LIMIT_DEFAULT", "100000/minute")
+
 
 @pytest.fixture(autouse=True)
 def reset_provider():

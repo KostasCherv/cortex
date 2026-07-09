@@ -84,6 +84,33 @@ def test_health_returns_ok():
     assert "version" in data
 
 
+def test_rate_limit_returns_429_after_burst():
+    """Proves the slowapi limiter actually enforces a limit and returns 429.
+
+    The global default limit is set very high in tests (see conftest.py) so
+    normal test traffic never trips it. To exercise real enforcement here we
+    temporarily swap the limiter's default limits for a tiny one, hit /health
+    enough times to burst past it, then restore the original limits and reset
+    the in-memory limiter storage in a `finally` block so no state leaks into
+    other tests.
+    """
+    from slowapi.wrappers import LimitGroup
+
+    from src.api.endpoints import limiter
+
+    original_limits = limiter._default_limits
+    limiter._default_limits = [
+        LimitGroup("2/minute", limiter._key_func, None, False, None, None, None, 1, False)
+    ]
+    try:
+        responses = [client.get("/health") for _ in range(5)]
+        statuses = [r.status_code for r in responses]
+        assert 429 in statuses
+    finally:
+        limiter._default_limits = original_limits
+        limiter.reset()
+
+
 def test_billing_usage_endpoint():
     summary = UsageSummary(
         plan=Plan.FREE,
