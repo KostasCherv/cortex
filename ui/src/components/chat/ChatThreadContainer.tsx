@@ -293,7 +293,7 @@ export function ChatThreadContainer({
     async (files: File[]) => {
       if (files.length === 0 || !transport.uploadAttachments || !transport.ensureSession) return
 
-      const uploadIds = files.map(() => crypto.randomUUID())
+      const uploadIds: string[] = files.map(() => crypto.randomUUID())
       setPendingUploads((prev) => [
         ...prev,
         ...files.map((file, index) => ({

@@ -26,6 +26,19 @@ def mock_list_ready_session_attachment_resource_ids():
 
 
 @pytest.fixture(autouse=True)
+def mock_enqueue_memory_refresh():
+    # ponytail: several endpoint tests don't mock this fire-and-forget outbox
+    # write and previously only passed because a local .env pointed at a real
+    # Supabase project. Default it to a no-op here; tests that care about the
+    # call still patch/assert it explicitly (see test_api.py:1363).
+    with patch(
+        "src.api.endpoints.enqueue_memory_refresh",
+        new=AsyncMock(return_value=False),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def mock_list_session_attachments():
     with (
         patch(

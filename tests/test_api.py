@@ -485,14 +485,24 @@ def test_execute_research_run_marks_completed_and_records():
         patch("src.api.endpoints.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.endpoints.end_workflow_run"),
     ):
-        asyncio.run(
-            _execute_research_run(
+
+        async def _run_and_drain() -> None:
+            # ponytail: _execute_research_run fires Neo4j persistence via a
+            # fire-and-forget asyncio.create_task (intentionally decoupled
+            # from run completion). asyncio.run() only awaits the main
+            # coroutine, so the background task's completion is a race —
+            # drain pending tasks here so the assertion below is deterministic.
+            await _execute_research_run(
                 session_id="session-1",
                 run_id="run-1",
                 user_id="user-1",
                 query="What is LangGraph?",
             )
-        )
+            pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+            if pending:
+                await asyncio.gather(*pending)
+
+        asyncio.run(_run_and_drain())
 
     assert any(
         call.kwargs.get("patch", {}).get("status") == "completed"
