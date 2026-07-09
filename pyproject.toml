@@ -5,7 +5,7 @@ description = "Cortex — multi-step research and RAG orchestration with LangGra
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=0.2.0",
+    "langgraph>=1.2.8",
     "langchain>=0.3.0",
     "langchain-community>=0.3.0",
     "langchain-openai>=0.2.0",
