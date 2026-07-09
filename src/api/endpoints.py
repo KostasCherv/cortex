@@ -103,11 +103,7 @@ from src.inngest_client import (
     inngest_client,
 )
 from src.storage import ensure_rag_storage_ready
-from src.billing import (
-    BillingSyncError,
-    UsageIncrement,
-    usage_summary_to_response,
-)
+from src.billing import UsageIncrement
 from src.user_memory import (
     delete_user_memory,
     enqueue_memory_refresh,
@@ -115,6 +111,7 @@ from src.user_memory import (
     get_user_memory_prompt_block,
     update_user_memory,
 )
+from src.api.routers.billing import router as billing_router
 from src.api.routers.internal import router as internal_router
 from src.api.deps import (
     CreateRagChatSessionRequest,
@@ -125,7 +122,6 @@ from src.api.deps import (
     _build_workspace_fallback_citations,
     _coerce_agent_loop_result,
     _consume_usage_or_429,
-    _get_billing_service,
     _merge_citations,
     _raise_rag_validation_error,
     _run_agent_loop,
@@ -181,6 +177,7 @@ _inngest_fast_api.serve(
 )
 
 app.include_router(internal_router)
+app.include_router(billing_router)
 
 
 @app.on_event("startup")
@@ -302,10 +299,6 @@ class RagAgentUpdateRequest(BaseModel):
 
 class RagAgentLinkRequest(BaseModel):
     resource_ids: list[str]
-
-
-class BillingCheckoutRequest(BaseModel):
-    pass
 
 
 class MemoryUpdateRequest(BaseModel):
@@ -993,14 +986,6 @@ async def health():
     return HealthResponse(status="ok", version="0.1.0")
 
 
-@app.get("/api/billing/usage", tags=["Billing"])
-async def billing_usage(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    summary = await _get_billing_service().get_usage_summary(current_user.user_id)
-    return usage_summary_to_response(summary)
-
-
 @app.get("/api/memory", tags=["Memory"])
 async def get_memory_endpoint(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
@@ -1024,47 +1009,6 @@ async def delete_memory_endpoint(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     return await delete_user_memory(current_user.user_id)
-
-
-@app.post("/api/billing/checkout-session", tags=["Billing"])
-async def create_checkout_session(
-    _body: BillingCheckoutRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    try:
-        checkout_url = await _get_billing_service().start_checkout(
-            user_id=current_user.user_id,
-            email=current_user.email,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    return {"url": checkout_url}
-
-
-@app.post("/api/billing/portal-session", tags=["Billing"])
-async def create_portal_session(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    try:
-        portal_url = await _get_billing_service().start_portal(
-            user_id=current_user.user_id
-        )
-    except BillingSyncError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    return {"url": portal_url}
-
-
-@app.post("/api/billing/webhook", tags=["Billing"])
-async def stripe_webhook(request: Request):
-    signature = request.headers.get("Stripe-Signature", "")
-    payload = await request.body()
-    try:
-        await _get_billing_service().handle_webhook(payload, signature)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return JSONResponse({"received": True})
 
 
 # ---------------------------------------------------------------------------
