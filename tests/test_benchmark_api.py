@@ -2,7 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from src.api.endpoints import AgentLoopResult, app
+from src.api.deps import AgentLoopResult
+from src.api.endpoints import app
 
 
 client = TestClient(app)

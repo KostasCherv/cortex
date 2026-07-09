@@ -26,6 +26,7 @@ from src.billing import (
 from src.rag import AgentDefinitionDraft, RagValidationError
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
+import src.api.deps as deps
 
 client = TestClient(app)
 
@@ -60,7 +61,7 @@ class _FakeBillingService:
 
 
 _fake_billing = _FakeBillingService()
-endpoints._billing_service = _fake_billing
+deps._billing_service = _fake_billing
 
 
 def _auth_override() -> AuthenticatedUser:
@@ -2225,7 +2226,7 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
 
 
 def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
-    from src.api.endpoints import AgentLoopResult
+    from src.api.deps import AgentLoopResult
 
     mock_context = MagicMock()
     mock_context.context = ""
@@ -2805,7 +2806,7 @@ def test_run_agent_loop_returns_result_object():
 
     with patch("src.api.endpoints.get_llm") as mock_get_llm, \
          patch("src.api.endpoints.settings") as mock_settings, \
-         patch("src.api.endpoints.build_agent_tools", return_value=[]):
+         patch("src.api.deps.build_agent_tools", return_value=[]):
         mock_settings.composio_max_agent_turns = 1
         mock_settings.composio_enabled = False
         llm = MagicMock()

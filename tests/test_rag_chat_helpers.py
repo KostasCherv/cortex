@@ -150,7 +150,7 @@ def test_should_bind_composio_tools_disabled():
 async def test_run_agent_loop_skips_router_when_bind_tools_false():
     from langchain_core.messages import AIMessage, HumanMessage
 
-    from src.api.endpoints import _run_agent_loop
+    from src.api.deps import _run_agent_loop
 
     llm_response = AIMessage(content="Done.")
     mock_llm = MagicMock()
@@ -160,8 +160,8 @@ async def test_run_agent_loop_skips_router_when_bind_tools_false():
 
     from unittest.mock import patch
 
-    with patch("src.api.endpoints.get_llm", return_value=mock_llm), patch(
-        "src.api.endpoints.build_agent_tools", return_value=[]
+    with patch("src.api.deps.get_llm", return_value=mock_llm), patch(
+        "src.api.deps.build_agent_tools", return_value=[]
     ):
         result = await _run_agent_loop(
             messages=[HumanMessage(content="Hi")],
