@@ -17,7 +17,7 @@ Install [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) and start th
 
 ```bash
 docker compose up -d
-uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8010 --reload
 ```
 
 Optional backend flags that make benchmark analysis easier:
@@ -31,7 +31,7 @@ RAG_SUGGESTIONS_DEFERRED=true
 
 All scripts respect these variables:
 
-- `BENCHMARK_BASE_URL` default: `http://127.0.0.1:8000`
+- `BENCHMARK_BASE_URL` default: `http://127.0.0.1:8010`
 - `BENCHMARK_TEST_ID` optional run identifier, default: `local-adhoc`
 - `BENCHMARK_RATE` requests per second for the constant-arrival-rate executor
 - `BENCHMARK_DURATION` test duration such as `1m`
@@ -77,7 +77,7 @@ mkdir -p reports/benchmarks
 export BENCHMARK_TEST_ID=health-local-001
 
 docker run --rm -v "$PWD:/work" -w /work \
-  -e BENCHMARK_BASE_URL=http://host.docker.internal:8000 \
+  -e BENCHMARK_BASE_URL=http://host.docker.internal:8010 \
   -e BENCHMARK_TEST_ID=$BENCHMARK_TEST_ID \
   -e K6_PROMETHEUS_RW_SERVER_URL=http://host.docker.internal:9090/api/v1/write \
   -e K6_PROMETHEUS_RW_TREND_STATS=avg,med,p(95),p(99),max \
@@ -174,7 +174,7 @@ INTERNAL_DISPATCH_SECRET=bench-secret \
 INNGEST_DEV=1 \
 INNGEST_SIGNING_KEY=local-benchmark-signing-key \
 LLM_PROVIDER=openai \
-uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8010
 ```
 
 Then run the benchmark:

@@ -28,7 +28,7 @@ export function boolEnv(name, fallback) {
 }
 
 export function baseUrl() {
-  return optionalEnv("BENCHMARK_BASE_URL", "http://127.0.0.1:8000").replace(/\/$/, "");
+  return optionalEnv("BENCHMARK_BASE_URL", "http://127.0.0.1:8010").replace(/\/$/, "");
 }
 
 export function jsonHeaders(token) {

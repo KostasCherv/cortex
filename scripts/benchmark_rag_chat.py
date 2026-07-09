@@ -214,9 +214,9 @@ async def benchmark_direct_llm(*, bind_tools: bool, message: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark RAG agent chat latency")
-    parser.add_argument("--live", action="store_true", help="Hit running server on port 8000")
+    parser.add_argument("--live", action="store_true", help="Hit running server on port 8010")
     parser.add_argument("--inprocess", action="store_true", help="Use FastAPI TestClient in-process")
-    parser.add_argument("--base-url", default=os.environ.get("BENCHMARK_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument("--base-url", default=os.environ.get("BENCHMARK_BASE_URL", "http://127.0.0.1:8010"))
     parser.add_argument("--agent-id", default=os.environ.get("BENCHMARK_AGENT_ID", ""))
     parser.add_argument("--message", default="Hello, summarize what you know from my documents in two sentences.")
     parser.add_argument("--session-id", default=None, help="Reuse session to skip new-session title path")

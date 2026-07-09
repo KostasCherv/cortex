@@ -187,7 +187,7 @@ class Settings(BaseSettings):
 
     # API
     api_host: str = Field(default="0.0.0.0")  # nosec B104 — intentional; containerised service binds all interfaces
-    api_port: int = Field(default=8000)
+    api_port: int = Field(default=8010)
     app_log_level: str = Field(
         default="INFO",
         description="Application logger level for Cortex loggers.",

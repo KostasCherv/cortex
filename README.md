@@ -17,7 +17,7 @@ Cortex needs an LLM provider key, Neo4j (GraphRAG), and Supabase (auth/sessions)
 ```bash
 uv sync && cp .env.example .env   # LLM_PROVIDER key gets the API serving; add Supabase creds too for session-scoped chat/RAG
 docker compose up -d              # Redis + Neo4j support services
-uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload   # API on :8000
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8010 --reload   # API on :8010
 cd ui && npm install && npm run dev             # UI on :5173
 ```
 
@@ -187,7 +187,7 @@ REDIS_URL=redis://localhost:6379/0
 ### 4. Start backend API
 
 ```bash
-uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn src.api.endpoints:app --host 0.0.0.0 --port 8010 --reload
 ```
 
 Backend startup now validates that `arxiv-mcp-server` is available in the same runtime environment. If it is missing or cannot load its tools, startup fails immediately instead of disabling arXiv silently.
@@ -203,7 +203,7 @@ npm run dev
 ### 6. Start event and ingestion workers
 
 ```bash
-npx --ignore-scripts=false inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery
+npx --ignore-scripts=false inngest-cli@latest dev -u http://127.0.0.1:8010/api/inngest --no-discovery
 ```
 
 The Inngest dev server fires the `outbox-dispatcher` cron automatically every 2 minutes. No separate dispatcher process is needed locally.
