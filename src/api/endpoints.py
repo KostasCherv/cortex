@@ -105,14 +105,12 @@ from src.inngest_client import (
 from src.storage import ensure_rag_storage_ready
 from src.billing import UsageIncrement
 from src.user_memory import (
-    delete_user_memory,
     enqueue_memory_refresh,
-    get_user_memory,
     get_user_memory_prompt_block,
-    update_user_memory,
 )
 from src.api.routers.billing import router as billing_router
 from src.api.routers.internal import router as internal_router
+from src.api.routers.memory import router as memory_router
 from src.api.deps import (
     CreateRagChatSessionRequest,
     RagChatRequest,
@@ -178,6 +176,7 @@ _inngest_fast_api.serve(
 
 app.include_router(internal_router)
 app.include_router(billing_router)
+app.include_router(memory_router)
 
 
 @app.on_event("startup")
@@ -299,10 +298,6 @@ class RagAgentUpdateRequest(BaseModel):
 
 class RagAgentLinkRequest(BaseModel):
     resource_ids: list[str]
-
-
-class MemoryUpdateRequest(BaseModel):
-    content: str
 
 
 # ---------------------------------------------------------------------------
@@ -984,31 +979,6 @@ async def _stream_followup(
 async def health():
     """Simple liveness probe."""
     return HealthResponse(status="ok", version="0.1.0")
-
-
-@app.get("/api/memory", tags=["Memory"])
-async def get_memory_endpoint(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    return await get_user_memory(current_user.user_id)
-
-
-@app.put("/api/memory", tags=["Memory"])
-async def update_memory_endpoint(
-    body: MemoryUpdateRequest,
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    content = body.content.strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
-    return await update_user_memory(current_user.user_id, content)
-
-
-@app.delete("/api/memory", tags=["Memory"])
-async def delete_memory_endpoint(
-    current_user: AuthenticatedUser = Depends(get_authenticated_user),
-):
-    return await delete_user_memory(current_user.user_id)
 
 
 # ---------------------------------------------------------------------------

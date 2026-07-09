@@ -117,7 +117,7 @@ def test_billing_usage_endpoint():
 
 def test_get_memory_returns_single_memory_document():
     with patch(
-        "src.api.endpoints.get_user_memory",
+        "src.api.routers.memory.get_user_memory",
         new=AsyncMock(
             return_value={
                 "content": "Prefers concise answers.\nWorks in fintech.",
@@ -133,7 +133,7 @@ def test_get_memory_returns_single_memory_document():
 
 def test_put_memory_updates_content():
     with patch(
-        "src.api.endpoints.update_user_memory",
+        "src.api.routers.memory.update_user_memory",
         new=AsyncMock(
             return_value={
                 "content": "Works in fintech.",
@@ -156,7 +156,7 @@ def test_put_memory_rejects_blank_content():
 
 def test_delete_memory_clears_saved_memory():
     with patch(
-        "src.api.endpoints.delete_user_memory",
+        "src.api.routers.memory.delete_user_memory",
         new=AsyncMock(return_value={"deleted": True}),
     ) as delete_memory:
         response = client.delete("/api/memory")
