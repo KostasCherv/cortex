@@ -1,8 +1,10 @@
 """FastAPI application — /health, /research (SSE), and session endpoints."""
 
 import logging
+from contextlib import asynccontextmanager
 
 import inngest.fast_api as _inngest_fast_api
+import sentry_sdk
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -11,6 +13,10 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 
 from src.tools.arxiv_mcp import ensure_arxiv_mcp_available
 
@@ -62,10 +68,31 @@ def _configure_application_logging() -> None:
     logger.info("[startup] Application logging configured at level=%s", level_name)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run startup checks, yield control, then shut down background clients."""
+    await _run_startup_checks()
+    yield
+    await _shutdown_background_clients()
+
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        # Tracing is already covered by LangFuse/LangSmith; Sentry here is
+        # error-capture only.
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        # Stack-trace locals can hold user research queries, chat messages,
+        # and RAG document content — don't ship them to Sentry.
+        include_local_variables=False,
+    )
+
 app = FastAPI(
     title="Cortex API",
     description="Multi-step LangGraph research orchestration with SSE streaming.",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 app.add_middleware(
@@ -75,6 +102,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 _inngest_fast_api.serve(
     app,
@@ -96,8 +128,7 @@ app.include_router(rag_agents_router)
 app.include_router(rag_chat_router)
 
 
-@app.on_event("startup")
-async def validate_session_store_configuration() -> None:
+async def _run_startup_checks() -> None:
     """Validate critical runtime dependencies and session persistence wiring."""
     _configure_application_logging()
     if not settings.cohere_api_key:
@@ -157,8 +188,7 @@ async def validate_session_store_configuration() -> None:
     )
 
 
-@app.on_event("shutdown")
-async def shutdown_background_clients() -> None:
+async def _shutdown_background_clients() -> None:
     """Stop long-lived background clients gracefully."""
     await shutdown_composio_toolset()
 

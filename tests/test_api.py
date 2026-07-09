@@ -84,6 +84,40 @@ def test_health_returns_ok():
     assert "version" in data
 
 
+def test_rate_limit_returns_429_after_burst():
+    """Proves the slowapi limiter actually enforces a limit and returns 429.
+
+    The global default limit is set very high in tests (see conftest.py) so
+    normal test traffic never trips it. To exercise real enforcement without
+    reaching into slowapi's private internals, mount a dedicated throwaway
+    route decorated with the public `@limiter.limit(...)` API, hit it enough
+    times to burst past its tiny limit, then remove the route and reset the
+    in-memory limiter storage in a `finally` block so no state leaks into
+    other tests.
+    """
+    from fastapi import APIRouter, Request
+
+    from src.api.endpoints import limiter
+
+    probe_router = APIRouter()
+
+    @probe_router.get("/__test_rate_limit_probe")
+    @limiter.limit("2/minute")
+    async def _probe(request: Request):
+        return {"ok": True}
+
+    app.include_router(probe_router)
+    try:
+        responses = [client.get("/__test_rate_limit_probe") for _ in range(5)]
+        statuses = [r.status_code for r in responses]
+        assert 429 in statuses
+    finally:
+        app.router.routes = [
+            r for r in app.router.routes if getattr(r, "path", None) != "/__test_rate_limit_probe"
+        ]
+        limiter.reset()
+
+
 def test_billing_usage_endpoint():
     summary = UsageSummary(
         plan=Plan.FREE,
@@ -708,7 +742,7 @@ def test_startup_validation_does_not_fail_without_supabase_configuration():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(app.router.on_startup[0]())
+        asyncio.run(endpoints._run_startup_checks())
         mock_init.assert_not_called()
         mock_storage_ready.assert_not_awaited()
 
@@ -722,7 +756,7 @@ def test_startup_validation_configures_application_logging():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()),
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(app.router.on_startup[0]())
+        asyncio.run(endpoints._run_startup_checks())
 
     mock_configure_logging.assert_called_once()
 
@@ -735,7 +769,7 @@ def test_startup_validation_checks_rag_storage_when_supabase_configured():
         patch("src.api.endpoints.ensure_rag_storage_ready", new=AsyncMock()) as mock_storage_ready,
         patch("src.api.endpoints.ensure_arxiv_mcp_available", new=AsyncMock()),
     ):
-        asyncio.run(app.router.on_startup[0]())
+        asyncio.run(endpoints._run_startup_checks())
         mock_init.assert_called_once()
         mock_storage_ready.assert_awaited_once()
 
@@ -752,7 +786,7 @@ def test_startup_validation_fails_when_arxiv_mcp_is_unavailable():
         ),
     ):
         with pytest.raises(RuntimeError, match="arxiv-mcp-server missing"):
-            asyncio.run(app.router.on_startup[0]())
+            asyncio.run(endpoints._run_startup_checks())
 
 
 

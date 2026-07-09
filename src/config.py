@@ -208,9 +208,15 @@ class Settings(BaseSettings):
         default=True,
         description="Require authentication for session endpoints.",
     )
+    rate_limit_default: str = Field(
+        default="60/minute", description="Default per-IP rate limit for API endpoints"
+    )
     internal_dispatch_secret: str = Field(
         default="",
         description="Secret token required to call POST /internal/dispatch-outbox. Set a strong random value in prod.",
+    )
+    sentry_dsn: str = Field(
+        default="", description="Sentry DSN for error tracking; empty disables it"
     )
 
     # Supabase
