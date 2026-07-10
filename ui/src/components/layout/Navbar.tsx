@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { HealthDot } from '@/components/layout/HealthDot'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 
@@ -60,16 +61,7 @@ export function Navbar({ health, authSession, onSignIn, onSignOut }: NavbarProps
         <div className="flex-1" />
 
         <Badge variant="outline" className="text-xs gap-1.5">
-          <span
-            className={cn(
-              'size-1.5 rounded-full',
-              health === 'online'
-                ? 'bg-green-500'
-                : health === 'offline'
-                  ? 'bg-red-500'
-                  : 'bg-muted-foreground',
-            )}
-          />
+          <HealthDot health={health} />
           {health === 'online' ? 'Online' : health === 'offline' ? 'Offline' : 'Checking...'}
         </Badge>
 

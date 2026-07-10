@@ -155,7 +155,7 @@ function AttachmentShelf({
           <Badge
             variant="outline"
             className={cn('text-[10px] px-1 py-0 h-4', {
-              'border-green-500/40 text-green-600': a.state === 'ready',
+              'border-success/40 text-success': a.state === 'ready',
               'border-destructive/40 text-destructive': a.state === 'failed',
               'border-muted-foreground/30 text-muted-foreground': a.state === 'processing' || a.state === 'uploaded',
             })}

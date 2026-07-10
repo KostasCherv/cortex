@@ -80,7 +80,7 @@ export function ResearchProgress({ events = [], latestNode = null, status = 'idl
             return (
               <li key={node} className="flex items-center gap-2 text-sm">
                 {complete ? (
-                  <CheckCircle2 size={16} className="text-green-500 shrink-0" />
+                  <CheckCircle2 size={16} className="text-success shrink-0" />
                 ) : current ? (
                   <Loader2 size={16} className="animate-spin text-primary shrink-0" />
                 ) : (
@@ -110,7 +110,7 @@ export function ResearchProgress({ events = [], latestNode = null, status = 'idl
           )}
           {ended && (
             <li className="flex items-center gap-2 text-sm">
-              <CheckCircle2 size={16} className="text-green-500 shrink-0" />
+              <CheckCircle2 size={16} className="text-success shrink-0" />
               <span>Completed</span>
             </li>
           )}

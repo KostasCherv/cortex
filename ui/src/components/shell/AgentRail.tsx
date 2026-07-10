@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Brain, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
+import { HealthDot } from '@/components/layout/HealthDot'
 import {
   createCheckoutSession,
   createPortalSession,
@@ -755,17 +756,7 @@ export function AgentRail({
       {/* Header */}
       <div className="flex h-14 shrink-0 items-center justify-between px-4 max-md:h-12">
         <span className="font-semibold tracking-tight text-foreground">Cortex</span>
-        <span
-          className={cn(
-            'size-1.5 rounded-full',
-            health === 'online'
-              ? 'bg-green-500'
-              : health === 'offline'
-                ? 'bg-red-500'
-                : 'bg-muted-foreground',
-          )}
-          title={health === 'online' ? 'Online' : health === 'offline' ? 'Offline' : 'Checking...'}
-        />
+        <HealthDot health={health} />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
