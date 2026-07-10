@@ -515,6 +515,7 @@ async def _stream_followup(
             messages=messages,
             metadata={"user_id": user_id, "run_id": run_id},
             on_event=on_event,
+            stream_answer_chunks=True,
         )
     )
     while not loop_task.done():
@@ -534,7 +535,8 @@ async def _stream_followup(
 
     if loop_result.web_used:
         yield f"data: {json.dumps({'type': 'web_used', 'provider': settings.web_search_provider})}\n\n"
-    yield f"data: {json.dumps({'type': 'chunk', 'text': loop_result.answer})}\n\n"
+    if not loop_result.streamed_answer:
+        yield f"data: {json.dumps({'type': 'chunk', 'text': loop_result.answer})}\n\n"
 
     citations = _merge_citations(_build_rag_citations(chunks), loop_result.citations)
     yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"

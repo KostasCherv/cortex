@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 
 
 def _make_tool(name: str, result: object) -> MagicMock:
@@ -227,6 +227,43 @@ async def test_run_agent_loop_emits_tool_events_via_on_event():
     assert tool_start_events[0]["tool"] == "GITHUB_CREATE_ISSUE"
     assert len(tool_end_events) == 1
     assert tool_end_events[0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_streams_answer_chunks_via_on_event():
+    from src.api.deps import _run_agent_loop
+
+    events: list[dict] = []
+
+    async def capture_event(event: dict) -> None:
+        events.append(event)
+
+    class StreamingLLM:
+        def bind_tools(self, _tools: list) -> "StreamingLLM":
+            return self
+
+        async def astream(self, _messages: list):
+            yield AIMessageChunk(content="Hello, ")
+            yield AIMessageChunk(content="Kostas! ")
+            yield AIMessageChunk(content="How can I help?")
+
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [])
+        with patch("src.api.deps.get_llm", return_value=StreamingLLM()):
+            result = await _run_agent_loop(
+                messages=[HumanMessage(content="Say hello")],
+                metadata={},
+                on_event=capture_event,
+                stream_answer_chunks=True,
+            )
+
+    assert result.answer == "Hello, Kostas! How can I help?"
+    assert result.streamed_answer is True
+    assert [event for event in events if event["type"] == "chunk"] == [
+        {"type": "chunk", "text": "Hello, "},
+        {"type": "chunk", "text": "Kostas! "},
+        {"type": "chunk", "text": "How can I help?"},
+    ]
 
 
 @pytest.mark.asyncio

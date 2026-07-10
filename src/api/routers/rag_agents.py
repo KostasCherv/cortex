@@ -605,6 +605,7 @@ async def rag_chat_with_agent_stream(
                         bind_tools=prepared.bind_tools,
                         allow_web_search=prepared.allow_web_search,
                         reference_tools=prepared.reference_tools,
+                        stream_answer_chunks=True,
                     )
                 )
                 last_heartbeat = time.perf_counter()
@@ -687,7 +688,8 @@ async def rag_chat_with_agent_stream(
                         web_used=loop_result.web_used,
                     ),
                 )
-                yield f"data: {json.dumps({'type': 'chunk', 'text': loop_result.answer})}\n\n"
+                if not loop_result.streamed_answer:
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': loop_result.answer})}\n\n"
                 yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
                 if suggestions:
                     yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
