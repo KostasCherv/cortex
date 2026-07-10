@@ -322,11 +322,19 @@ On first connection, the backend automatically creates:
 - Vector index `chunk_embedding_index` on `Chunk.embedding`
 - B-tree indexes on `Chunk.run_id`, `Document.resource_id`, `Entity.normalized_name`
 
-## Graphify (codebase knowledge graph)
+## Agent instructions
+
+Rules for AI coding agents (Cursor, Claude Code, Codex) working in this repo live in `AGENTS.md` / `CLAUDE.md` (kept in sync). Summary:
+
+- **Keep docs in sync with code**: agents update `README.md` when a change affects setup, deploy, or architecture, and `ui/DESIGN.md` when it affects UI components, variants, or design tokens under `ui/src/`.
+- **UI design system**: `ui/DESIGN.md` documents the frontend's component library, theming tokens, and conventions — check it before re-deriving design-system decisions from source.
+- **Debugging a LangSmith run**: given a `smith.langchain.com` URL or run/trace UUID, agents follow a documented procedure in `AGENTS.md` (fetch via the `langsmith` SDK using `.env` credentials, correlate with `src/graph/`). Claude Code auto-dispatches this via the `.claude/agents/langsmith-debugger.md` subagent.
+
+### Graphify (codebase knowledge graph)
 
 This repo includes a [Graphify](https://github.com/safishamsi/graphify) map at `graphify-out/` — nodes, edges, and communities across code and docs. Cursor, Claude Code, and Codex are configured to prefer `graphify query` over large greps when `graph.json` exists.
 
-### Prerequisites
+#### Prerequisites
 
 ```bash
 uv tool install graphifyy
@@ -341,7 +349,7 @@ export OLLAMA_API_KEY=ollama
 export GRAPHIFY_OLLAMA_MODEL=gemma4:31b-cloud
 ```
 
-### Commands
+#### Commands
 
 | Task | Command |
 |------|---------|
@@ -356,7 +364,7 @@ export GRAPHIFY_OLLAMA_MODEL=gemma4:31b-cloud
 
 Outputs: `graphify-out/graph.json`, `GRAPH_REPORT.md`, `graph.html`.
 
-### Git hooks
+#### Git hooks
 
 ```bash
 graphify hook install                      # AST rebuild on code commits (upstream)
