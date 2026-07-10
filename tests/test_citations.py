@@ -107,6 +107,60 @@ def test_select_chat_citations_uses_rag_when_no_tool_citations():
     assert citations == _build_rag_citations(rag_chunks)
 
 
+def test_select_chat_citations_ignores_rag_chunks_below_rerank_threshold(monkeypatch):
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "rerank_relevance_threshold", 0.1)
+    rag_chunks = [
+        {
+            "source_title": "The-Founders-Playbook.pdf",
+            "source_url": "",
+            "chunk_id": "rag-low",
+            "text": "irrelevant playbook chunk",
+            "rerank_score": 0.008,
+        },
+        {
+            "source_title": "brief.pdf",
+            "source_url": "",
+            "chunk_id": "rag-high",
+            "text": "relevant brief chunk",
+            "rerank_score": 0.42,
+        },
+    ]
+
+    citations = _select_chat_citations(
+        rag_chunks,
+        [],
+        web_used=False,
+        rag_context_text="[source:brief.pdf chunk:rag-high]\nrelevant brief chunk",
+    )
+
+    assert [citation["chunk_id"] for citation in citations] == ["rag-high"]
+
+
+def test_select_chat_citations_does_not_fallback_after_irrelevant_rag_chunks(monkeypatch):
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "rerank_relevance_threshold", 0.1)
+
+    citations = _select_chat_citations(
+        [
+            {
+                "source_title": "The-Founders-Playbook.pdf",
+                "source_url": "",
+                "chunk_id": "rag-low",
+                "text": "irrelevant playbook chunk",
+                "rerank_score": 0.008,
+            }
+        ],
+        [],
+        web_used=False,
+        rag_context_text="[source:The-Founders-Playbook.pdf chunk:rag-low]\nirrelevant playbook chunk",
+    )
+
+    assert citations == []
+
+
 def test_select_chat_citations_fallback_only_when_rag_context_exists():
     assert _select_chat_citations([], [], web_used=False, rag_context_text="") == []
 

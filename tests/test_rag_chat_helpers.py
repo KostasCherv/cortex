@@ -544,7 +544,7 @@ async def test_prepare_workspace_router_decision_none_when_disabled():
         ("asset_price", False),
         ("search_finance_tools", False),
         ("answer_from_rag", True),
-        ("answer_direct", True),
+        ("answer_direct", False),
     ],
 )
 def test_should_use_workspace_resources(action, should_list_workspace_resources):

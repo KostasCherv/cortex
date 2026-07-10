@@ -112,7 +112,7 @@ def test_rerank_chunks_propagates_unexpected_errors(monkeypatch):
         reranker.rerank_chunks("query", _chunks())
 
 
-def test_rerank_chunks_falls_back_when_all_scores_below_threshold(monkeypatch):
+def test_rerank_chunks_returns_empty_when_all_scores_below_threshold(monkeypatch):
     _reset_client(monkeypatch)
     class FakeClient:
         def __init__(self, api_key, timeout=None):
@@ -132,8 +132,7 @@ def test_rerank_chunks_falls_back_when_all_scores_below_threshold(monkeypatch):
 
     result = reranker.rerank_chunks("query", _chunks(), top_k=2)
 
-    assert [chunk["chunk_id"] for chunk in result] == ["a", "b"]
-    assert all("rerank_score" not in chunk for chunk in result)
+    assert result == []
 
 
 def test_rerank_chunks_skips_malformed_and_out_of_bounds_results(monkeypatch):
@@ -161,7 +160,7 @@ def test_rerank_chunks_skips_malformed_and_out_of_bounds_results(monkeypatch):
     assert [chunk["chunk_id"] for chunk in result] == ["b"]
 
 
-def test_rerank_chunks_falls_back_when_cohere_returns_no_results(monkeypatch):
+def test_rerank_chunks_returns_empty_when_cohere_returns_no_results(monkeypatch):
     _reset_client(monkeypatch)
 
     class FakeClient:
@@ -177,7 +176,7 @@ def test_rerank_chunks_falls_back_when_cohere_returns_no_results(monkeypatch):
 
     result = reranker.rerank_chunks("query", _chunks())
 
-    assert [chunk["chunk_id"] for chunk in result] == ["a", "b"]
+    assert result == []
 
 
 def test_rerank_chunks_reuses_single_cohere_client_and_sets_timeout(monkeypatch):

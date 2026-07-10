@@ -147,6 +147,25 @@ def _build_rag_citations(chunks: list[dict] | None) -> list[dict]:
     return citations
 
 
+def _filter_relevant_rag_chunks(chunks: list[dict] | None) -> list[dict]:
+    if not chunks:
+        return []
+
+    relevant: list[dict] = []
+    for chunk in chunks:
+        raw_score = chunk.get("rerank_score")
+        if raw_score is None:
+            relevant.append(chunk)
+            continue
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            continue
+        if score >= settings.rerank_relevance_threshold:
+            relevant.append(chunk)
+    return relevant
+
+
 def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict]:
     if not results:
         return []
@@ -409,7 +428,8 @@ def _select_chat_citations(
     rag_context_text: str,
 ) -> list[dict]:
     """Choose persisted citations based on which evidence actually supported the answer."""
-    rag_citations = _build_rag_citations(rag_chunks)
+    had_rag_chunks = bool(rag_chunks)
+    rag_citations = _build_rag_citations(_filter_relevant_rag_chunks(rag_chunks))
 
     if web_used or _has_tool_or_web_citations(loop_citations):
         return list(loop_citations)
@@ -422,6 +442,9 @@ def _select_chat_citations(
 
     if rag_citations:
         return rag_citations
+
+    if had_rag_chunks:
+        return []
 
     if (rag_context_text or "").strip():
         return _build_workspace_fallback_citations(rag_context_text, [])

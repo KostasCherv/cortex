@@ -61,23 +61,19 @@ _COMPOSIO_META_KEYWORDS = (
     "integrate",
 )
 
-_LIVE_TOOL_ROUTER_ACTIONS = frozenset(
-    {"web_search", "asset_price", "search_finance_tools"}
-)
-
-
 def should_use_workspace_resources(
     router_decision: ChatActionDecisionPayload | None,
 ) -> bool:
     """Return whether workspace-wide resources should be retrieved for this turn.
 
     When the router is unavailable, preserve the existing behavior and allow
-    workspace retrieval. Live/tool intents skip workspace-wide resources but
-    explicit session attachments are still retrieved separately.
+    workspace retrieval. Once routed, only document/knowledge-base questions
+    should load workspace-wide resources; explicit session attachments are
+    still retrieved separately.
     """
     if router_decision is None:
         return True
-    return router_decision.action not in _LIVE_TOOL_ROUTER_ACTIONS
+    return router_decision.action == "answer_from_rag"
 
 
 _EXTERNAL_INTENT_MARKERS = (
