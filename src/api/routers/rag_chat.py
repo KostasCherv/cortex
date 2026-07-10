@@ -17,13 +17,11 @@ from src.api.deps import (
     RagChatRequest,
     UpdateSessionTitleRequest,
     _build_chat_trace_outputs,
-    _build_rag_citations,
-    _build_workspace_fallback_citations,
     _coerce_agent_loop_result,
     _consume_usage_or_429,
-    _merge_citations,
     _raise_rag_validation_error,
     _run_agent_loop,
+    _select_chat_citations,
     _workflow_error_text,
 )
 from src.auth import AuthenticatedUser, get_authenticated_user
@@ -138,12 +136,11 @@ async def rag_chat_workspace(
                 content=normalized_message,
                 chat_scope=CHAT_SCOPE_WORKSPACE,
             )
-            citations = _merge_citations(
-                _build_rag_citations(prepared.rag_context.chunks),
+            citations = _select_chat_citations(
+                prepared.rag_context.chunks,
                 loop_result.citations,
-            )
-            citations = _build_workspace_fallback_citations(
-                prepared.rag_context.context or "", citations
+                web_used=loop_result.web_used,
+                rag_context_text=prepared.rag_context.context or "",
             )
             assistant_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -244,10 +241,6 @@ async def rag_chat_workspace_stream(
                     timings=timings,
                     tools=body.tools,
                 )
-                citations = _build_rag_citations(prepared.rag_context.chunks)
-                citations = _build_workspace_fallback_citations(
-                    prepared.rag_context.context or "", citations
-                )
                 yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
                 loop_task = asyncio.create_task(
@@ -291,12 +284,11 @@ async def rag_chat_workspace_stream(
                     content=normalized_message,
                     chat_scope=CHAT_SCOPE_WORKSPACE,
                 )
-                citations = _merge_citations(
-                    _build_rag_citations(prepared.rag_context.chunks),
+                citations = _select_chat_citations(
+                    prepared.rag_context.chunks,
                     loop_result.citations,
-                )
-                citations = _build_workspace_fallback_citations(
-                    prepared.rag_context.context or "", citations
+                    web_used=loop_result.web_used,
+                    rag_context_text=prepared.rag_context.context or "",
                 )
                 assistant_msg = RagChatMessage(
                     message_id=str(uuid.uuid4()),

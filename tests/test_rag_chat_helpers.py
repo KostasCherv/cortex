@@ -535,3 +535,224 @@ async def test_prepare_workspace_router_decision_none_when_disabled():
             timings=RagChatTimings(),
         )
         assert result.router_decision is None
+
+
+@pytest.mark.parametrize(
+    ("action", "should_list_workspace_resources"),
+    [
+        ("web_search", False),
+        ("asset_price", False),
+        ("search_finance_tools", False),
+        ("answer_from_rag", True),
+        ("answer_direct", True),
+    ],
+)
+def test_should_use_workspace_resources(action, should_list_workspace_resources):
+    from src.api.rag_chat_helpers import should_use_workspace_resources
+    from src.llm.output_parsers import ChatActionDecisionPayload
+
+    kwargs = {"action": action, "reason": "routing"}
+    if action == "web_search":
+        kwargs["query"] = "latest news"
+    if action == "search_finance_tools":
+        kwargs["query"] = "AAPL ratios"
+    if action == "asset_price":
+        kwargs["symbols"] = ["AAPL"]
+
+    decision = ChatActionDecisionPayload(**kwargs)
+    assert should_use_workspace_resources(decision) is should_list_workspace_resources
+    assert should_use_workspace_resources(None) is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_live_query_skips_workspace_rag():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.llm.output_parsers import ChatActionDecisionPayload
+    from unittest.mock import AsyncMock, patch
+
+    router_decision = ChatActionDecisionPayload(
+        action="web_search",
+        reason="needs current info",
+        query="latest crypto news",
+    )
+    rag_context = MagicMock(context="", chunks=[])
+
+    with patch(
+        "src.api.rag_chat_helpers.classify_chat_action",
+        new_callable=AsyncMock,
+        return_value=router_decision,
+    ), patch(
+        "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+        new_callable=AsyncMock,
+        return_value=["saas-pdf", "playbook-pdf"],
+    ) as mock_list_resources, patch(
+        "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+        new_callable=AsyncMock,
+        return_value="sess-1",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch(
+        "src.api.rag_chat_helpers.get_composio_toolset_manager"
+    ) as mock_mgr, patch(
+        "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+        new_callable=AsyncMock,
+        return_value=rag_context,
+    ) as mock_retrieve, patch(
+        "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_messages",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="latest crypto news",
+            session_id=None,
+            timings=RagChatTimings(),
+        )
+
+    mock_list_resources.assert_not_awaited()
+    mock_retrieve.assert_awaited_once_with(
+        user_id="u1",
+        agent_resource_ids=[],
+        session_attachment_resource_ids=[],
+        session_attachment_files=[],
+        question="latest crypto news",
+    )
+    assert result.router_decision == router_decision
+    assert result.resource_ids == []
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_rag_query_uses_workspace_resources():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.llm.output_parsers import ChatActionDecisionPayload
+    from unittest.mock import AsyncMock, patch
+
+    router_decision = ChatActionDecisionPayload(
+        action="answer_from_rag",
+        reason="document question",
+    )
+    rag_context = MagicMock(context="doc context", chunks=[])
+
+    with patch(
+        "src.api.rag_chat_helpers.classify_chat_action",
+        new_callable=AsyncMock,
+        return_value=router_decision,
+    ), patch(
+        "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+        new_callable=AsyncMock,
+        return_value=["saas-pdf", "playbook-pdf"],
+    ) as mock_list_resources, patch(
+        "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+        new_callable=AsyncMock,
+        return_value="sess-1",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+        new_callable=AsyncMock,
+        return_value=[],
+    ), patch(
+        "src.api.rag_chat_helpers.get_composio_toolset_manager"
+    ) as mock_mgr, patch(
+        "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+        new_callable=AsyncMock,
+        return_value=rag_context,
+    ) as mock_retrieve, patch(
+        "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_messages",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="summarize my uploaded playbook",
+            session_id=None,
+            timings=RagChatTimings(),
+        )
+
+    mock_list_resources.assert_awaited_once_with("u1")
+    mock_retrieve.assert_awaited_once_with(
+        user_id="u1",
+        agent_resource_ids=["saas-pdf", "playbook-pdf"],
+        session_attachment_resource_ids=[],
+        session_attachment_files=[],
+        question="summarize my uploaded playbook",
+    )
+    assert result.resource_ids == ["saas-pdf", "playbook-pdf"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_workspace_live_query_keeps_session_attachments():
+    from src.api.rag_chat_helpers import prepare_workspace_rag_chat
+    from src.api.rag_chat_timing import RagChatTimings
+    from src.llm.output_parsers import ChatActionDecisionPayload
+    from unittest.mock import AsyncMock, patch
+
+    router_decision = ChatActionDecisionPayload(
+        action="web_search",
+        reason="needs current info",
+        query="latest crypto news",
+    )
+    rag_context = MagicMock(context="attachment context", chunks=[])
+
+    with patch(
+        "src.api.rag_chat_helpers.classify_chat_action",
+        new_callable=AsyncMock,
+        return_value=router_decision,
+    ), patch(
+        "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+        new_callable=AsyncMock,
+        return_value=["saas-pdf"],
+    ) as mock_list_resources, patch(
+        "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+        new_callable=AsyncMock,
+        return_value="sess-1",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+        new_callable=AsyncMock,
+        return_value=[
+            MagicMock(resource_id="attachment-res-1", filename="brief.pdf", state="ready"),
+        ],
+    ), patch(
+        "src.api.rag_chat_helpers.get_composio_toolset_manager"
+    ) as mock_mgr, patch(
+        "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+        new_callable=AsyncMock,
+        return_value=rag_context,
+    ) as mock_retrieve, patch(
+        "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+        new_callable=AsyncMock,
+        return_value="",
+    ), patch(
+        "src.api.rag_chat_helpers.list_rag_chat_messages",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        result = await prepare_workspace_rag_chat(
+            user_id="u1",
+            normalized_message="latest crypto news",
+            session_id="sess-1",
+            timings=RagChatTimings(),
+        )
+
+    mock_list_resources.assert_not_awaited()
+    mock_retrieve.assert_awaited_once_with(
+        user_id="u1",
+        agent_resource_ids=[],
+        session_attachment_resource_ids=["attachment-res-1"],
+        session_attachment_files=["brief.pdf"],
+        question="latest crypto news",
+    )
+    assert result.resource_ids == ["attachment-res-1"]

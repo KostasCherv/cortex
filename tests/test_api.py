@@ -968,7 +968,13 @@ def test_followup_stream_citations_match_reranked_chunks():
     ]
     citations_event = next(event for event in events if event["type"] == "citations")
     assert citations_event["citations"] == [
-        {"source_title": "B", "source_url": "https://b.com", "chunk_id": "raw-2", "text": "More relevant"}
+        {
+            "source_title": "B",
+            "source_url": "https://b.com",
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+            "source_type": "rag",
+        }
     ]
 
 
@@ -1989,6 +1995,107 @@ def test_workspace_rag_chat_calls_agent_loop():
     assert end_workflow.call_args.kwargs["outputs"]["answer"] == "Answer"
 
 
+def test_workspace_rag_chat_persists_web_citations_not_unrelated_rag():
+    from src.api.deps import AgentLoopResult
+
+    mock_context = MagicMock()
+    mock_context.context = "irrelevant workspace context"
+    mock_context.chunks = [
+        {
+            "source_title": "SaaS_Starter_Kit.pdf",
+            "source_url": "",
+            "chunk_id": "rag-1",
+            "text": "starter kit",
+        },
+        {
+            "source_title": "The-Founders-Playbook.pdf",
+            "source_url": "",
+            "chunk_id": "rag-2",
+            "text": "playbook",
+        },
+    ]
+    web_citation = {
+        "source_title": "Crypto Daily",
+        "source_url": "https://example.com/crypto",
+        "chunk_id": "tavily-web-1",
+        "text": "Bitcoin rises",
+        "source_type": "web",
+    }
+    mock_loop = AsyncMock(
+        return_value=AgentLoopResult(
+            answer="Latest crypto news summary",
+            web_used=True,
+            citations=[web_citation],
+        )
+    )
+    captured_messages: list = []
+
+    async def capture_append(message):
+        captured_messages.append(message)
+
+    trace_ctx = MagicMock(workflow_id="wf-1")
+    end_workflow = MagicMock()
+
+    @contextmanager
+    def mock_trace_ctx(**_kwargs):
+        yield trace_ctx
+
+    with (
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=["res-1"]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.list_rag_chat_session_attachments",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.list_rag_chat_messages",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.routers.rag_chat.list_rag_chat_messages",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block",
+            new=AsyncMock(return_value=""),
+        ),
+        patch(
+            "src.api.routers.rag_chat.append_chat_message",
+            new=AsyncMock(side_effect=capture_append),
+        ),
+        patch("src.api.routers.rag_chat._run_agent_loop", mock_loop),
+        patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.rag_chat.start_workflow_run", side_effect=mock_trace_ctx),
+        patch("src.api.routers.rag_chat.end_workflow_run", end_workflow),
+        patch("src.api.routers.rag_chat.enqueue_memory_refresh", new=AsyncMock()),
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        response = client.post(
+            "/api/rag/chat",
+            json={"message": "latest crypto news 10th of july 2026", "session_id": None},
+        )
+
+    assert response.status_code == 200
+    assistant_messages = [msg for msg in captured_messages if msg.role == "assistant"]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0].citations == [web_citation]
+    assert "SaaS_Starter_Kit.pdf" not in {
+        citation["source_title"] for citation in assistant_messages[0].citations
+    }
+    assert end_workflow.call_args.kwargs["outputs"]["citation_count"] == 1
+
+
 def test_workspace_rag_chat_stream_calls_agent_loop():
     mock_context = MagicMock()
     mock_context.context = "Workspace context."
@@ -2128,6 +2235,7 @@ def test_rag_chat_returns_agent_reply():
             "source_url": "https://example.com",
             "chunk_id": "chunk-1",
             "text": "Retrieved chunk text.",
+            "source_type": "rag",
         }
     ]
 
@@ -2180,6 +2288,7 @@ def test_rag_chat_stream_returns_rich_citations():
             "source_url": "https://example.com",
             "chunk_id": "chunk-1",
             "text": "Retrieved chunk text.",
+            "source_type": "rag",
         }
     ]
 
@@ -2256,6 +2365,7 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
             "source_url": None,
             "chunk_id": "workspace-context-fallback",
             "text": "Context from workspace docs.",
+            "source_type": "rag_fallback",
         }
     ]
 

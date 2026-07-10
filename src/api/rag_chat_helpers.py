@@ -61,6 +61,25 @@ _COMPOSIO_META_KEYWORDS = (
     "integrate",
 )
 
+_LIVE_TOOL_ROUTER_ACTIONS = frozenset(
+    {"web_search", "asset_price", "search_finance_tools"}
+)
+
+
+def should_use_workspace_resources(
+    router_decision: ChatActionDecisionPayload | None,
+) -> bool:
+    """Return whether workspace-wide resources should be retrieved for this turn.
+
+    When the router is unavailable, preserve the existing behavior and allow
+    workspace retrieval. Live/tool intents skip workspace-wide resources but
+    explicit session attachments are still retrieved separately.
+    """
+    if router_decision is None:
+        return True
+    return router_decision.action not in _LIVE_TOOL_ROUTER_ACTIONS
+
+
 _EXTERNAL_INTENT_MARKERS = (
     "http://",
     "https://",
@@ -415,8 +434,6 @@ async def prepare_workspace_rag_chat(
     timings: RagChatTimings,
     tools: "RagChatTools | None" = None,
 ) -> RagChatPrepared:
-    resource_ids = await list_workspace_ready_resource_ids(user_id)
-
     t_session = time.perf_counter()
     chat_session_id = await create_or_get_workspace_chat_session(
         user_id=user_id,
@@ -439,7 +456,14 @@ async def prepare_workspace_rag_chat(
         for attachment in session_attachments
         if attachment.state == "ready" and attachment.filename
     ]
-    merged_resource_ids = list(dict.fromkeys(resource_ids + session_attachment_resource_ids))
+
+    router_decision = await classify_chat_action(message=normalized_message)
+    workspace_resource_ids: list[str] = []
+    if should_use_workspace_resources(router_decision):
+        workspace_resource_ids = await list_workspace_ready_resource_ids(user_id)
+    merged_resource_ids = list(
+        dict.fromkeys(workspace_resource_ids + session_attachment_resource_ids)
+    )
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
@@ -464,17 +488,16 @@ async def prepare_workspace_rag_chat(
     timings.tool_skip_reason = tool_skip_reason
 
     t0 = time.perf_counter()
-    rag_context, user_memory_context, history, router_decision = await asyncio.gather(
+    rag_context, user_memory_context, history = await asyncio.gather(
         retrieve_merged_context_for_agent_chat(
             user_id=user_id,
-            agent_resource_ids=resource_ids,
+            agent_resource_ids=workspace_resource_ids,
             session_attachment_resource_ids=session_attachment_resource_ids,
             session_attachment_files=session_attachment_files,
             question=normalized_message,
         ),
         get_user_memory_prompt_block(user_id, normalized_message),
         list_rag_chat_messages(chat_session_id, user_id),
-        classify_chat_action(message=normalized_message),
     )
     history = trim_chat_history(history)
 

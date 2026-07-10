@@ -38,6 +38,8 @@ from src.tools.registry import create_rag_chat_tools_model, is_arxiv_mcp_enabled
 
 logger = logging.getLogger(__name__)
 
+_TOOL_SOURCE_TYPES = frozenset({"web", "wikipedia", "open_library", "arxiv"})
+
 
 # ---------------------------------------------------------------------------
 # Request models shared across RAG chat routers
@@ -139,6 +141,7 @@ def _build_rag_citations(chunks: list[dict] | None) -> list[dict]:
                 "source_url": chunk.get("source_url") or "",
                 "chunk_id": chunk.get("chunk_id") or "",
                 "text": chunk.get("text") or "",
+                "source_type": "rag",
             }
         )
     return citations
@@ -167,6 +170,7 @@ def _build_web_citations(results: list[dict] | None, provider: str) -> list[dict
                 "source_url": row.get("url") or "",
                 "chunk_id": f"{provider}-web-{index + 1}",
                 "text": citation_text,
+                "source_type": "web",
             }
         )
     return citations
@@ -187,6 +191,7 @@ def _build_workspace_fallback_citations(
             "source_url": None,
             "chunk_id": "workspace-context-fallback",
             "text": cleaned[:1200],
+            "source_type": "rag_fallback",
         }
     ]
 
@@ -196,6 +201,15 @@ def _normalize_tool_result(raw_result: object) -> tuple[str, object | None]:
         content, artifact = raw_result
         return str(content), artifact
     return str(raw_result), None
+
+
+async def _invoke_tool_raw_result(tool: object, tool_args: dict) -> object:
+    """Invoke a LangChain tool preserving content+artifact when configured."""
+    if getattr(tool, "response_format", None) == "content_and_artifact":
+        coroutine = getattr(tool, "coroutine", None)
+        if coroutine is not None:
+            return await coroutine(**tool_args)
+    return await tool.arun(tool_args)
 
 
 def _merge_citations(*groups: list[dict]) -> list[dict]:
@@ -212,12 +226,18 @@ def _merge_citations(*groups: list[dict]) -> list[dict]:
             if key in seen:
                 continue
             seen.add(key)
+            source_type = citation.get("source_type")
             merged.append(
                 {
                     "source_title": source_title,
                     "source_url": source_url,
                     "chunk_id": chunk_id,
                     "text": text,
+                    **(
+                        {"source_type": source_type}
+                        if isinstance(source_type, str) and source_type
+                        else {}
+                    ),
                 }
             )
     return merged
@@ -250,6 +270,7 @@ def _build_wikipedia_citations(results: object) -> list[dict]:
                 ),
                 "chunk_id": f"wikipedia-{index + 1}",
                 "text": str(row.get("extract") or ""),
+                "source_type": "wikipedia",
             }
         )
     return citations
@@ -274,6 +295,7 @@ def _build_open_library_citations(results: object) -> list[dict]:
                 "source_url": str(row.get("url") or "") or None,
                 "chunk_id": f"open-library-{index + 1}",
                 "text": "\n".join(part for part in text_parts if part),
+                "source_type": "open_library",
             }
         )
     return citations
@@ -341,6 +363,7 @@ def _build_arxiv_tool_citations(
                     "source_url": url or None,
                     "chunk_id": f"arxiv-search-{candidate_id or index + 1}",
                     "text": text,
+                    "source_type": "arxiv",
                 }
             )
             if len(citations) >= 5:
@@ -365,8 +388,45 @@ def _build_arxiv_tool_citations(
             "source_url": source_url,
             "chunk_id": f"{tool_name}:{paper_id or 'unknown'}:{start}",
             "text": content[:1200],
+            "source_type": "arxiv",
         }
     ]
+
+
+def _has_tool_or_web_citations(citations: list[dict]) -> bool:
+    return any(
+        isinstance(citation.get("source_type"), str)
+        and citation["source_type"] in _TOOL_SOURCE_TYPES
+        for citation in citations
+    )
+
+
+def _select_chat_citations(
+    rag_chunks: list[dict] | None,
+    loop_citations: list[dict],
+    *,
+    web_used: bool,
+    rag_context_text: str,
+) -> list[dict]:
+    """Choose persisted citations based on which evidence actually supported the answer."""
+    rag_citations = _build_rag_citations(rag_chunks)
+
+    if web_used or _has_tool_or_web_citations(loop_citations):
+        return list(loop_citations)
+
+    if loop_citations and rag_citations:
+        return _merge_citations(loop_citations, rag_citations)
+
+    if loop_citations:
+        return loop_citations
+
+    if rag_citations:
+        return rag_citations
+
+    if (rag_context_text or "").strip():
+        return _build_workspace_fallback_citations(rag_context_text, [])
+
+    return []
 
 
 def _build_tool_citations(
@@ -379,6 +439,8 @@ def _build_tool_citations(
             results = artifact.get("results")
         elif isinstance(raw_result, dict):
             results = raw_result.get("results")
+        elif isinstance(raw_result, list):
+            results = raw_result
         return _build_web_citations(results, settings.web_search_provider)
 
     if tool_name == "wikipedia":
@@ -532,7 +594,7 @@ async def _run_agent_loop(
                             raise ValueError(
                                 f"Tool '{tool_name}' not found in catalog."
                             )
-                        raw_result = await matched_tool.arun(tool_args)
+                        raw_result = await _invoke_tool_raw_result(matched_tool, tool_args)
                         normalized_content, _ = _normalize_tool_result(raw_result)
                         tool_result = normalized_content[:6000]
                         collected_citations[:] = _merge_citations(

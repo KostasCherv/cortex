@@ -122,6 +122,7 @@ async def test_run_agent_loop_marks_web_used_for_tavily_search():
             "source_url": "https://example.com/news",
             "chunk_id": "tavily-web-1",
             "text": "Fresh reporting",
+            "source_type": "web",
         }
     ]
     fake_tool.arun.assert_awaited_once()
@@ -367,5 +368,65 @@ async def test_run_agent_loop_collects_arxiv_read_paper_citation():
             "source_url": "https://arxiv.org/abs/2401.12345",
             "chunk_id": "read_paper:2401.12345:50000",
             "text": "Section 4 shows the retrieval method in detail.",
+            "source_type": "arxiv",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_loop_collects_tavily_citations_via_content_and_artifact_coroutine():
+    from src.api.deps import _run_agent_loop
+
+    tool_call_response = _ai_message_with_tool_call(
+        "tavily_search", "call_web", {"query": "latest crypto news"}
+    )
+    final_response = AIMessage(content="Here is the news.")
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = mock_llm
+    mock_llm.ainvoke = AsyncMock(side_effect=[tool_call_response, final_response])
+
+    fake_tool = _make_tool(
+        "tavily_search",
+        "[Crypto Daily](https://example.com/crypto)\nBitcoin rises",
+    )
+    fake_tool.response_format = "content_and_artifact"
+    fake_tool.coroutine = AsyncMock(
+        return_value=(
+            "[Crypto Daily](https://example.com/crypto)\nBitcoin rises",
+            {
+                "results": [
+                    {
+                        "title": "Crypto Daily",
+                        "url": "https://example.com/crypto",
+                        "content": "Bitcoin rises",
+                    }
+                ]
+            },
+        )
+    )
+
+    with patch("src.api.deps.get_composio_toolset_manager") as mock_mgr:
+        _patch_router_tools(mock_mgr, [])
+        with patch("src.api.deps.get_llm", return_value=mock_llm):
+            with patch(
+                "src.api.deps.build_agent_tools",
+                return_value=[fake_tool],
+            ):
+                result = await _run_agent_loop(
+                    messages=[HumanMessage(content="What's the latest crypto news?")],
+                    metadata={},
+                )
+
+    assert result.web_used is True
+    assert result.citations == [
+        {
+            "source_title": "Crypto Daily",
+            "source_url": "https://example.com/crypto",
+            "chunk_id": "tavily-web-1",
+            "text": "Bitcoin rises",
+            "source_type": "web",
+        }
+    ]
+    fake_tool.arun.assert_not_called()
+    fake_tool.coroutine.assert_awaited_once_with(query="latest crypto news")
