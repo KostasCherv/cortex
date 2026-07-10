@@ -8,6 +8,7 @@ Frontend-specific reference: component library, theming, and conventions. For pr
 - **Tailwind CSS v4** (`@tailwindcss/vite`, `@tailwindcss/typography`) — CSS-first config, no `tailwind.config.js`; theme lives in `src/index.css`
 - **shadcn/ui** (style `default`, base color `zinc` — see `components.json`) on top of **Radix UI** primitives
 - `class-variance-authority` for variant definitions, `tailwind-merge` + `clsx` for class composition
+- **Streamdown** renders chat Markdown so partially streamed AI responses keep stable Markdown semantics; longer-form research reports still use `react-markdown` + `remark-gfm`
 
 ## Theming
 
@@ -45,7 +46,7 @@ avatar, badge, button, card, checkbox, dialog, dropdown-menu, input, label, popo
 |---|---|
 | `ui/` | shadcn primitives (above) — generic, no app-specific logic |
 | `research/` | Research-session UI: sidebar, query composer/form, streaming progress, report viewer with feedback |
-| `chat/` | Chat thread machinery: `GenericChat` composes `ChatThreadContainer` + a transport, plus markdown rendering and the tool menu |
+| `chat/` | Chat thread machinery: `GenericChat` composes `ChatThreadContainer` + a transport, plus Streamdown-based markdown rendering and the tool menu |
 | `shell/` | Top-level app shell: `AppShell` wires auth/health/pages together, `AgentRail` is the left nav rail (agents, theme toggle, billing) |
 | `layout/` | Cross-page chrome: `Navbar` (top bar, theme toggle, user menu), the theme system (`ThemeProvider`, `theme-context.ts`), and shared `HealthDot` status indicator |
 | `resources/` | RAG resource management: table + upload dialog |

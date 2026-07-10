@@ -1,5 +1,4 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Streamdown } from 'streamdown'
 import { cn } from '@/lib/utils'
 
 export const assistantAvatarClassName =
@@ -28,7 +27,7 @@ export function ChatMarkdown({ content, className }: Props) {
   return (
     <div className={cn('overflow-x-auto', className)}>
       <div className={proseClassName}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        <Streamdown>{content}</Streamdown>
       </div>
     </div>
   )
