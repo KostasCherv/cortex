@@ -10,3 +10,5 @@ Rules:
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 - For deploy/ops questions, check README.md's "Production deployment" section before re-deriving from scripts/.
 - When code changes affect setup, deploy, or architecture, update README.md to match.
+- For UI design-system questions (theming, component conventions, shadcn primitives), check ui/DESIGN.md before re-deriving from source.
+- When adding/changing UI components, variants, or design tokens under ui/src/, update ui/DESIGN.md to match.
