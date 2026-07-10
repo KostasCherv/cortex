@@ -22,9 +22,10 @@ inngest_client = inngest.Inngest(
 async def handle_rag_ingestion(ctx: inngest.Context) -> dict:
     job_id: str = ctx.event.data["job_id"]
 
-    from src.rag import _get_store, _run_ingestion_job
+    from src.db.provider import get_session_store
+    from src.rag import _run_ingestion_job
 
-    claimed = await _get_store().claim_rag_ingestion_job(job_id)
+    claimed = await get_session_store().claim_rag_ingestion_job(job_id)
     if not claimed:
         return {"skipped": True, "job_id": job_id}
 
@@ -37,7 +38,7 @@ async def handle_rag_ingestion(ctx: inngest.Context) -> dict:
     trigger=inngest.TriggerEvent(event="research/run.requested"),
 )
 async def handle_research_run(ctx: inngest.Context) -> dict:
-    from src.api.endpoints import _execute_research_run
+    from src.api.routers.sessions import _execute_research_run
 
     await _execute_research_run(**ctx.event.data)
     return {"done": True, "run_id": ctx.event.data.get("run_id")}

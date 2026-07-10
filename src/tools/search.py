@@ -71,7 +71,7 @@ def _perform_search_uncached(query: str, max_results: int | None = None) -> list
     client = TavilyClient(api_key=settings.tavily_api_key)
     n = max_results or settings.max_search_results
 
-    response = client.search(query=query, max_results=n, include_raw_content=True)
+    response = client.search(query=query, max_results=n, include_raw_content=True, timeout=20)
     results = response.get("results", [])
 
     return [

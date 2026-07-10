@@ -72,6 +72,7 @@ def _build_chat_model(
             model=model_name or settings.openai_model,
             temperature=temperature,
             api_key=settings.openai_api_key,  # type: ignore[arg-type]
+            timeout=60,
             **common_kwargs,
         )
 
@@ -85,6 +86,7 @@ def _build_chat_model(
             temperature=temperature,
             api_key=settings.openrouter_api_key,  # type: ignore[arg-type]
             base_url="https://openrouter.ai/api/v1",
+            timeout=60,
             **common_kwargs,
         )
 
@@ -106,6 +108,7 @@ def _build_chat_model(
             temperature=temperature,
             base_url=settings.lmstudio_base_url,
             api_key="lm-studio",
+            timeout=60,
             **common_kwargs,
         )
 
