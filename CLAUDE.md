@@ -12,3 +12,7 @@ Rules:
 - When code changes affect setup, deploy, or architecture, update README.md to match.
 - For UI design-system questions (theming, component conventions, shadcn primitives), check ui/DESIGN.md before re-deriving from source.
 - When adding/changing UI components, variants, or design tokens under ui/src/, update ui/DESIGN.md to match.
+
+## Production deploy
+
+When the user types `/deploy-prod` or asks to deploy/ship/release to production, follow `.cursor/skills/deploy-prod/SKILL.md` before doing anything else.

@@ -15,6 +15,10 @@ Rules:
 - For UI design-system questions (theming, component conventions, shadcn primitives), check ui/DESIGN.md before re-deriving from source.
 - When adding/changing UI components, variants, or design tokens under ui/src/, update ui/DESIGN.md to match.
 
+## Production deploy
+
+When the user types `/deploy-prod` or asks to deploy/ship/release to production, invoke the **deploy-prod** skill (`.cursor/skills/deploy-prod/SKILL.md`) before doing anything else. Cursor can also dispatch the `.cursor/agents/deploy-prod.md` subagent for the same workflow.
+
 ## Debugging a LangSmith run
 
 Credentials come from `.env` (`LANGSMITH_API_KEY`, `LANGSMITH_ENDPOINT`, `LANGSMITH_PROJECT`) via `src.config.settings` — never ask the user for keys, never print them.

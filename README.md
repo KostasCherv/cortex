@@ -328,6 +328,7 @@ Rules for AI coding agents (Cursor, Claude Code, Codex) working in this repo liv
 
 - **Keep docs in sync with code**: agents update `README.md` when a change affects setup, deploy, or architecture, and `ui/DESIGN.md` when it affects UI components, variants, or design tokens under `ui/src/`.
 - **UI design system**: `ui/DESIGN.md` documents the frontend's component library, theming tokens, and conventions — check it before re-deriving design-system decisions from source.
+- **Production deploy**: type `/deploy-prod` or ask to ship to production — agents follow `.cursor/skills/deploy-prod/SKILL.md` (Cloud Run backend + Vercel UI via `scripts/deploy.sh` and `scripts/deploy-ui.sh --prod`).
 - **Debugging a LangSmith run**: given a `smith.langchain.com` URL or run/trace UUID, agents follow a documented procedure in `AGENTS.md` (fetch via the `langsmith` SDK using `.env` credentials, correlate with `src/graph/`). Claude Code auto-dispatches this via the `.claude/agents/langsmith-debugger.md` subagent.
 
 ### Graphify (codebase knowledge graph)
