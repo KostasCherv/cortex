@@ -221,7 +221,8 @@ uv run python scripts/dispatch_outbox.py --limit 100
 The backend runs on Cloud Run with secrets stored in Google Secret Manager.
 
 ```bash
-./scripts/deploy.sh
+GCP_PROJECT=<your-project-id> ./scripts/setup_secrets.sh   # first time only
+GCP_PROJECT=<your-project-id> ./scripts/deploy.sh
 ```
 
 This script:

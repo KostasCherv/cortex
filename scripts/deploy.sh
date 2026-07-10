@@ -2,13 +2,17 @@
 # Deploy a new version of cortex to Cloud Run.
 #
 # Usage:
-#   ./scripts/deploy.sh               # deploy current HEAD
-#   ./scripts/deploy.sh --no-cache    # force full Docker rebuild
+#   GCP_PROJECT=my-project ./scripts/deploy.sh               # deploy current HEAD
+#   GCP_PROJECT=my-project ./scripts/deploy.sh --no-cache    # force full Docker rebuild
 
 set -euo pipefail
 
-PROJECT="cortex-496709"
-REGION="us-central1"
+PROJECT="${GCP_PROJECT:-}"
+if [[ -z "$PROJECT" ]]; then
+  echo "ERROR: GCP_PROJECT not set. Usage: GCP_PROJECT=my-project $0"
+  exit 1
+fi
+REGION="${GCP_REGION:-us-central1}"
 IMAGE="gcr.io/$PROJECT/cortex"
 SERVICE_YAML="cloudrun/service.yaml"
 
@@ -48,9 +52,15 @@ gcloud container images add-tag "$TAG" "$LATEST" --quiet
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
-# Inject the SHA-tagged image so Cloud Run sees a spec change and creates a new revision
+# Inject the SHA-tagged image (and project id) so Cloud Run sees a spec change
 TMP_YAML=$(mktemp /tmp/service-XXXXXX.yaml)
-sed "s|$IMAGE:latest|$TAG|g" "$SERVICE_YAML" > "$TMP_YAML"
+sed "s|gcr.io/PROJECT_ID/cortex:latest|$TAG|g" "$SERVICE_YAML" > "$TMP_YAML"
+
+if ! grep -q "$TAG" "$TMP_YAML"; then
+  echo "ERROR: image placeholder gcr.io/PROJECT_ID/cortex:latest not found in $SERVICE_YAML"
+  rm -f "$TMP_YAML"
+  exit 1
+fi
 
 echo "▶ Deploying to Cloud Run..."
 gcloud run services replace "$TMP_YAML" \
