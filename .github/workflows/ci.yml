@@ -20,10 +20,8 @@ jobs:
         run: uv run ruff check src tests
       - name: Security scan (bandit)
         run: uv run bandit -c pyproject.toml -r src
-      - name: Typecheck (non-blocking)
-        # 38 pre-existing errors as of this workflow's introduction; tighten
-        # once the backlog is cleared instead of blocking every PR on it.
-        run: uv run mypy src || true
+      - name: Typecheck
+        run: uv run mypy src
       - name: Test
         env:
           # Dummy values so config "is this configured?" checks pass; no real

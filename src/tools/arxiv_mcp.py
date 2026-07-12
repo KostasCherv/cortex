@@ -139,7 +139,7 @@ def wrap_arxiv_mcp_tool(tool: BaseTool) -> BaseTool:
             logger.warning("[arxiv-mcp] %s unexpected error: %s", tool.name, message)
             return _preserve_response_format(tool, message)
 
-    tool.coroutine = safe_coroutine
+    setattr(tool, "coroutine", safe_coroutine)
     return tool
 
 
@@ -167,7 +167,7 @@ def get_arxiv_mcp_client() -> MultiServerMCPClient:
     storage_path = _resolve_storage_path()
     storage_path.mkdir(parents=True, exist_ok=True)
     command = _resolve_arxiv_mcp_command()
-    connection = {
+    connection: Any = {
         "arxiv": {
             "transport": "stdio",
             "command": command,

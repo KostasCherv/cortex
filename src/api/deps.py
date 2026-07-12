@@ -11,6 +11,7 @@ from typing import Awaitable, Callable
 from fastapi import HTTPException
 from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.runnables import Runnable
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from src.billing import (
@@ -52,7 +53,7 @@ RagChatTools = create_rag_chat_tools_model()
 class RagChatRequest(BaseModel):
     message: str
     session_id: str | None = None
-    tools: RagChatTools = Field(default_factory=RagChatTools)
+    tools: RagChatTools = Field(default_factory=RagChatTools)  # type: ignore[valid-type]
 
 
 class CreateRagChatSessionRequest(BaseModel):
@@ -222,7 +223,7 @@ def _normalize_tool_result(raw_result: object) -> tuple[str, object | None]:
     return str(raw_result), None
 
 
-async def _invoke_tool_raw_result(tool: object, tool_args: dict) -> object:
+async def _invoke_tool_raw_result(tool: BaseTool, tool_args: dict) -> object:
     """Invoke a LangChain tool preserving content+artifact when configured."""
     if getattr(tool, "response_format", None) == "content_and_artifact":
         coroutine = getattr(tool, "coroutine", None)
@@ -604,7 +605,7 @@ async def _run_agent_loop(
     async def _run_tool_loop(
         *,
         llm_with_tools: Runnable,
-        tool_map: dict[str, object],
+        tool_map: dict[str, BaseTool],
         composio_stream: bool,
     ) -> AgentLoopResult:
         nonlocal last_response_text

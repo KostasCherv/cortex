@@ -47,7 +47,7 @@ See [Run locally](#run-locally) below for the full setup, including Inngest (bac
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
+- Quality tooling: `pytest`, `ruff`, blocking `mypy` type checks, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
 
 ## Architecture
 
