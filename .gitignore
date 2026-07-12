@@ -10,6 +10,10 @@ __pycache__
 cortex.egg-info
 .ruff_cache
 .pytest_cache
+.coverage
+coverage.json
+coverage.xml
+ui/coverage
 .mypy_cache
 chroma_db
 reports
