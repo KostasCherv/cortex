@@ -47,7 +47,7 @@ See [Run locally](#run-locally) below for the full setup, including Inngest (bac
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
+- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `Trivy`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
 
 ## Architecture
 
@@ -215,6 +215,12 @@ uv run python scripts/dispatch_outbox.py --limit 100
 ```
 
 ## Production deployment
+
+### Supply-chain security
+
+Every pull request and push to `main` builds the production container and scans both the repository and image with Trivy. CI blocks HIGH or CRITICAL vulnerabilities that have an available fix, along with HIGH or CRITICAL configuration and secret findings. Unfixed vulnerabilities remain visible without blocking delivery so the gate stays actionable; Dependabot continues to surface dependency updates as fixes become available.
+
+CI also produces a CycloneDX container SBOM named `cortex-sbom-<commit-sha>` and retains it as a workflow artifact for 30 days. The SBOM records the exact packages shipped in the image for release review and incident response.
 
 ### Backend — Google Cloud Run
 

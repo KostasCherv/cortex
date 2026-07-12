@@ -57,12 +57,45 @@ jobs:
       - name: Test
         run: npx vitest run
 
-  docker:
+  security:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
     needs: [backend, ui]
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t cortex:${{ github.sha }} .
+      - name: Generate container SBOM
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cortex:${{ github.sha }}
+          format: cyclonedx
+          output: cortex-sbom.cdx.json
+          scanners: vuln
+      - name: Upload container SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cortex-sbom-${{ github.sha }}
+          path: cortex-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Scan repository dependencies and configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+      - name: Scan container image
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: cortex:${{ github.sha }}
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
