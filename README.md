@@ -238,6 +238,16 @@ Key production settings in `service.yaml`:
 - `CORS_ORIGINS` must be a JSON array string: `'["https://your-app.vercel.app"]'`
 - `LANGSMITH_TRACING=true` with `LANGSMITH_API_KEY` secret
 
+Production health checks use separate endpoints:
+
+- `GET /health` is a process-only liveness check and never contacts dependencies.
+- `GET /ready` checks LLM configuration plus Supabase, Neo4j, and optional Redis with
+  per-dependency timeouts. It returns `503` when a critical dependency is not ready and `200`
+  with `status: degraded` when only an optional dependency such as Redis is unavailable.
+- Cloud Run startup and readiness probes use `/ready`; its liveness probe uses `/health`.
+- `READINESS_REQUIRE_SUPABASE=true` and `READINESS_REQUIRE_NEO4J=true` make those production
+  dependencies critical. Both default to `false` so local development can run with them disabled.
+
 ### Frontend — Vercel
 
 ```bash

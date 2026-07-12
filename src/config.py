@@ -218,6 +218,19 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(
         default="", description="Sentry DSN for error tracking; empty disables it"
     )
+    readiness_timeout_seconds: float = Field(
+        default=2.0,
+        gt=0,
+        description="Maximum duration of each live dependency readiness check.",
+    )
+    readiness_require_supabase: bool = Field(
+        default=False,
+        description="Return unready when Supabase is missing or unreachable.",
+    )
+    readiness_require_neo4j: bool = Field(
+        default=False,
+        description="Return unready when Neo4j is missing or unreachable.",
+    )
 
     # Supabase
     supabase_url: str = Field(default="", description="Supabase project URL")

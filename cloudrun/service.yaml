@@ -21,6 +21,25 @@ spec:
             limits:
               memory: 1Gi
               cpu: "1"
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 2
+            timeoutSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 5
           env:
             # --- LLM ---
             - name: LLM_PROVIDER
@@ -67,6 +86,10 @@ spec:
                   key: latest
             - name: SUPABASE_JWKS_URL
               value: "https://oukmugleriangmcdkocn.supabase.co/auth/v1/.well-known/jwks.json"
+            - name: READINESS_REQUIRE_SUPABASE
+              value: "true"
+            - name: READINESS_REQUIRE_NEO4J
+              value: "true"
             # --- Inngest ---
             - name: INNGEST_EVENT_KEY
               valueFrom:

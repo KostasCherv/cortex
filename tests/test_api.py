@@ -24,6 +24,7 @@ from src.billing import (
     UserSubscription,
 )
 from src.rag import AgentDefinitionDraft, RagValidationError
+from src.readiness import ReadinessCheck
 from src.sessions import ConversationTurn, Session, SessionRun
 import src.api.endpoints as endpoints
 import src.api.deps as deps
@@ -82,6 +83,57 @@ def test_health_returns_ok():
     data = response.json()
     assert data["status"] == "ok"
     assert "version" in data
+
+
+def test_readiness_returns_ready_when_all_dependencies_are_healthy():
+    checks = {
+        "llm_provider": ReadinessCheck(status="ok", critical=True),
+        "supabase": ReadinessCheck(status="ok", critical=True),
+        "neo4j": ReadinessCheck(status="ok", critical=True),
+        "redis": ReadinessCheck(status="ok", critical=False),
+    }
+    with patch("src.api.endpoints.run_readiness_checks", AsyncMock(return_value=checks)):
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "version": "0.1.0",
+        "checks": {
+            "llm_provider": {"status": "ok", "critical": True},
+            "supabase": {"status": "ok", "critical": True},
+            "neo4j": {"status": "ok", "critical": True},
+            "redis": {"status": "ok", "critical": False},
+        },
+    }
+
+
+def test_readiness_returns_degraded_for_optional_dependency_failure():
+    checks = {
+        "llm_provider": ReadinessCheck(status="ok", critical=True),
+        "supabase": ReadinessCheck(status="ok", critical=True),
+        "neo4j": ReadinessCheck(status="ok", critical=True),
+        "redis": ReadinessCheck(status="unavailable", critical=False),
+    }
+    with patch("src.api.endpoints.run_readiness_checks", AsyncMock(return_value=checks)):
+        response = client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "degraded"
+
+
+def test_readiness_returns_503_for_critical_dependency_failure():
+    checks = {
+        "llm_provider": ReadinessCheck(status="ok", critical=True),
+        "supabase": ReadinessCheck(status="unavailable", critical=True),
+        "neo4j": ReadinessCheck(status="ok", critical=True),
+        "redis": ReadinessCheck(status="disabled", critical=False),
+    }
+    with patch("src.api.endpoints.run_readiness_checks", AsyncMock(return_value=checks)):
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "unready"
 
 
 def test_rate_limit_returns_429_after_burst():
