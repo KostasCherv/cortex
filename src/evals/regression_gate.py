@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,12 +79,7 @@ EVALUATORS = {
 
 
 def _git_sha() -> str:
-    if sha := os.getenv("GITHUB_SHA"):
-        return sha
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=False
-    )
-    return result.stdout.strip() or "unknown"
+    return os.getenv("GITHUB_SHA", "local")
 
 
 def evaluate(dataset_path: Path) -> dict[str, Any]:
