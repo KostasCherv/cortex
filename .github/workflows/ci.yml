@@ -56,6 +56,20 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.app.json
       - name: Test
         run: npx vitest run
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke test
+        run: npx playwright test
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
   docker:
     runs-on: ubuntu-latest

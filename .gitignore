@@ -19,6 +19,8 @@ ui/node_modules
 ui/dist
 ui/.vercel
 .DS_Store
+ui/playwright-report/
+ui/test-results/
 supabase/.temp
 ui/.impeccable-live.json
 ui/index.html

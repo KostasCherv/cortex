@@ -397,7 +397,19 @@ Used for generation-level observability, user scoring, and evaluation datasets. 
 uv run pytest -v
 uv run ruff check src
 uv run mypy src
+
+cd ui
+npm run lint
+npm test
+npx playwright install chromium  # first run only
+npm run test:e2e
 ```
+
+The Playwright smoke journey uses local fixtures—no Google, Supabase, or model
+credentials are required. It restores an authenticated browser session, creates a
+research session, consumes paced SSE progress/report events, and verifies the
+completed report. CI retains the HTML report, trace, screenshot, and video when
+the journey fails.
 
 ## Local benchmarking
 
