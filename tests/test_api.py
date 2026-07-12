@@ -84,6 +84,14 @@ def test_health_returns_ok():
     assert "version" in data
 
 
+def test_health_stream_emits_sse_probe():
+    response = client.get("/health/stream")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: ready" in response.text
+    assert 'data: {"status":"ok"}' in response.text
+
+
 def test_rate_limit_returns_429_after_burst():
     """Proves the slowapi limiter actually enforces a limit and returns 429.
 
