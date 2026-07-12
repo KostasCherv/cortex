@@ -442,6 +442,25 @@ Local benchmark numbers are not production-capacity claims. Use them to find bot
 
 ## Model evaluation
 
+### Fast AI regression gate
+
+Every pull request runs a credential-free AI contract gate over 20 versioned cases in
+`src/evals/ai_regression_set.json`. The cases protect deterministic production boundaries:
+validated chat-router decisions, RAG/tool citation provenance, and progressive finance-tool
+selection and call planning. CI requires 100% overall and in every category, then uploads a
+commit-keyed JSON score artifact for comparison and audit.
+
+Run the same gate locally:
+
+```bash
+uv run python -m src.evals.regression_gate
+```
+
+Add a uniquely named case to the JSON dataset whenever one of these boundaries gains behavior
+or a production failure needs a permanent regression case. Keep PR cases deterministic and free
+of provider credentials. The model-backed DeepEval comparison below remains the appropriate
+manual evaluation for semantic generation quality; it is intentionally not duplicated in CI.
+
 Requires the `evals` optional extra (`uv sync --extra evals`) for `pandas` and `deepeval`.
 
 The repo includes a standalone summarize-only comparison script at `src/evals/model_comparison.py`.

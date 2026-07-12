@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "cases": [
+    {"id":"router-direct","category":"router","response":{"action":"answer_direct","reason":"Stable knowledge is sufficient"},"expected":{"valid":true,"action":"answer_direct","query":"","symbols":[]}},
+    {"id":"router-rag","category":"router","response":{"action":"answer_from_rag","reason":"The attached handbook contains the answer"},"expected":{"valid":true,"action":"answer_from_rag","query":"","symbols":[]}},
+    {"id":"router-web","category":"router","response":{"action":"web_search","reason":"Current information is required","query":"latest Swiss inflation rate"},"expected":{"valid":true,"action":"web_search","query":"latest Swiss inflation rate","symbols":[]}},
+    {"id":"router-price","category":"router","response":{"action":"asset_price","reason":"The user requested live prices","symbols":["BTC","ETH"],"currency":"USD"},"expected":{"valid":true,"action":"asset_price","query":"","symbols":["BTC","ETH"]}},
+    {"id":"router-finance-discovery","category":"router","response":{"action":"search_finance_tools","reason":"A specialist finance operation is needed","query":"company fundamentals lookup"},"expected":{"valid":true,"action":"search_finance_tools","query":"company fundamentals lookup","symbols":[]}},
+    {"id":"router-clarify","category":"router","response":{"action":"ask_clarifying","reason":"The requested company is ambiguous"},"expected":{"valid":true,"action":"ask_clarifying","query":"","symbols":[]}},
+    {"id":"router-web-missing-query","category":"router","response":{"action":"web_search","reason":"Fresh data is needed"},"expected":{"valid":false}},
+    {"id":"router-price-normalizes-symbols","category":"router","response":{"action":"asset_price","reason":"A quote is requested","symbols":" AAPL, MSFT "},"expected":{"valid":true,"action":"asset_price","query":"","symbols":["AAPL","MSFT"]}},
+
+    {"id":"citation-rag","category":"citation","input":{"rag_chunks":[{"source_title":"handbook.pdf","source_url":"","chunk_id":"rag-1","text":"Refunds are available for 30 days."}],"loop_citations":[],"web_used":false,"rag_context_text":"[source:handbook.pdf chunk:rag-1]"},"expected":{"chunk_ids":["rag-1"],"source_types":["rag"]}},
+    {"id":"citation-web-wins","category":"citation","input":{"rag_chunks":[{"source_title":"old.pdf","chunk_id":"rag-old","text":"Old figure"}],"loop_citations":[{"source_title":"Statistics office","source_url":"https://example.com/current","chunk_id":"web-1","text":"Current figure","source_type":"web"}],"web_used":true,"rag_context_text":"old"},"expected":{"chunk_ids":["web-1"],"source_types":["web"]}},
+    {"id":"citation-tool-evidence-wins","category":"citation","input":{"rag_chunks":[{"source_title":"notes.pdf","chunk_id":"rag-2","text":"Notes"}],"loop_citations":[{"source_title":"Wikipedia","source_url":"https://en.wikipedia.org/wiki/AI","chunk_id":"wiki-1","text":"AI","source_type":"wikipedia"}],"web_used":false,"rag_context_text":"notes"},"expected":{"chunk_ids":["wiki-1"],"source_types":["wikipedia"]}},
+    {"id":"citation-nonweb-tool-merges-rag","category":"citation","input":{"rag_chunks":[{"source_title":"brief.pdf","chunk_id":"rag-3","text":"Brief"}],"loop_citations":[{"source_title":"Internal tool","source_url":null,"chunk_id":"tool-1","text":"Result","source_type":"tool"}],"web_used":false,"rag_context_text":"brief"},"expected":{"chunk_ids":["tool-1","rag-3"],"source_types":["tool","rag"]}},
+    {"id":"citation-context-fallback","category":"citation","input":{"rag_chunks":[],"loop_citations":[],"web_used":false,"rag_context_text":"Workspace context without structured chunks"},"expected":{"chunk_ids":["workspace-context-fallback"],"source_types":["rag_fallback"]}},
+    {"id":"citation-no-evidence","category":"citation","input":{"rag_chunks":[],"loop_citations":[],"web_used":false,"rag_context_text":""},"expected":{"chunk_ids":[],"source_types":[]}},
+    {"id":"citation-no-false-rag-fallback-after-web","category":"citation","input":{"rag_chunks":[{"source_title":"local.pdf","chunk_id":"rag-4","text":"Local"}],"loop_citations":[],"web_used":true,"rag_context_text":"Local"},"expected":{"chunk_ids":[],"source_types":[]}},
+
+    {"id":"tool-selection-valid","category":"tool_selection","stage":"selection","response":{"tool_name":"get_company_profile","reason":"The tool returns company fundamentals"},"expected":{"valid":true,"tool_name":"get_company_profile"}},
+    {"id":"tool-selection-blank-name","category":"tool_selection","stage":"selection","response":{"tool_name":"   ","reason":"No usable tool"},"expected":{"valid":false}},
+    {"id":"tool-plan-call","category":"tool_selection","stage":"plan","response":{"should_call":true,"reason":"All required arguments are present","arguments":{"symbol":"NVDA"}},"expected":{"valid":true,"should_call":true,"arguments":{"symbol":"NVDA"}}},
+    {"id":"tool-plan-clarify","category":"tool_selection","stage":"plan","response":{"should_call":false,"reason":"Ticker is missing","clarifying_question":"Which company or ticker do you mean?"},"expected":{"valid":true,"should_call":false,"arguments":{}}},
+    {"id":"tool-plan-invalid-no-question","category":"tool_selection","stage":"plan","response":{"should_call":false,"reason":"Ticker is missing"},"expected":{"valid":false}}
+  ]
+}
