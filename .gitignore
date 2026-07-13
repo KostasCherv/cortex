@@ -13,6 +13,10 @@ cortex.egg-info
 .mypy_cache
 chroma_db
 reports
+!reports/
+!reports/benchmarks/
+reports/benchmarks/*
+!reports/benchmarks/*.md
 .worktrees
 node_modules
 ui/node_modules

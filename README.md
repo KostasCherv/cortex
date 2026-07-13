@@ -32,6 +32,15 @@ See [Run locally](#run-locally) below for the full setup, including Inngest (bac
 - Durable ingestion pipeline with transactional outbox, dispatcher, and idempotent workers.
 - End-to-end observability with trace spans across graph nodes and external dependencies.
 
+## Performance & reliability
+
+Measured with k6 against the live Cloud Run deployment and locally (2026-07, full methodology and caveats in [reports/benchmarks/LOAD_TEST_REPORT.md](reports/benchmarks/LOAD_TEST_REPORT.md)):
+
+- Agent-loop turns with a real LLM call: **median 1.2s, p95 2.0s** — latency is provider-bound; framework overhead is single-digit ms (isolated via per-phase `x-rag-perf` timing headers).
+- API layer in production: **13,197 requests at up to 200 req/s, 0% errors**, p95 flat across a 10× load increase.
+- Per-IP rate limiting verified empirically in production: 70 concurrent requests → exactly 60 admitted, remainder rejected with HTTP 429; limit raised via config for the benchmark, then reverted and re-verified.
+- Repeatable harness: k6 scenarios in [load-tests/](load-tests/) with constant-arrival-rate executors and thresholds, plus automated markdown reporting via `scripts/render_k6_report.py` — see [Local benchmarking](#local-benchmarking).
+
 ## Stack and tools
 
 - Orchestration: `LangGraph`
