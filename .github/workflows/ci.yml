@@ -34,6 +34,16 @@ jobs:
           SUPABASE_SECRET_KEY: dummy-secret-key-for-ci
           SUPABASE_JWKS_URL: https://example.com/auth/v1/.well-known/jwks.json
         run: uv run python -m pytest tests/ -q
+      - name: AI regression gate
+        if: always()
+        run: uv run python -m src.evals.regression_gate --output reports/ai-regression-${{ github.sha }}.json
+      - name: Upload AI regression score
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-regression-${{ github.sha }}
+          path: reports/ai-regression-${{ github.sha }}.json
+          if-no-files-found: error
 
   ui:
     runs-on: ubuntu-latest
@@ -56,6 +66,20 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.app.json
       - name: Test
         run: npx vitest run
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke test
+        run: npx playwright test
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-artifacts
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
   docker:
     runs-on: ubuntu-latest
