@@ -48,6 +48,18 @@ export function AppShell() {
     return data
   }, [accessToken])
 
+  const upsertResource = useCallback((resource: RagResource) => {
+    setResources((prev) => {
+      const index = prev.findIndex((r) => r.resource_id === resource.resource_id)
+      if (index >= 0) {
+        const next = [...prev]
+        next[index] = resource
+        return next
+      }
+      return [resource, ...prev]
+    })
+  }, [])
+
   useEffect(() => {
     void checkHealth()
       .then((r: HealthResponse) => setHealth(r.status === 'ok' ? 'online' : 'offline'))
@@ -84,11 +96,15 @@ export function AppShell() {
 
   useEffect(() => {
     if (!accessToken || !hasPendingResources) return
-    const intervalId = window.setInterval(() => {
+
+    const refresh = () => {
       void listRagResources(accessToken)
         .then(({ resources: data }) => setResources(data))
         .catch(() => {})
-    }, 2000)
+    }
+
+    refresh()
+    const intervalId = window.setInterval(refresh, 2000)
     return () => window.clearInterval(intervalId)
   }, [accessToken, hasPendingResources])
 
@@ -247,6 +263,7 @@ export function AppShell() {
             authSession={authSession}
             resources={resources}
             onResourcesChange={loadResources}
+            onResourceUploaded={upsertResource}
           />
         )}
       </div>
