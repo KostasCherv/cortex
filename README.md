@@ -414,15 +414,22 @@ Used for generation-level observability, user scoring, and evaluation datasets. 
 
 ```bash
 uv run pytest -v
+uv run pytest --cov=src --cov-fail-under=73 --cov-report=term-missing
 uv run ruff check src
 uv run mypy src
 
 cd ui
 npm run lint
-npm test
+npm run test:coverage
 npx playwright install chromium  # first run only
 npm run test:e2e
 ```
+
+CI enforces the measured coverage baseline rather than an aspirational target:
+backend coverage must remain at least 73%, while UI statements, branches,
+functions, and lines must remain at least 19%, 19%, 12%, and 20%. Coverage
+reports are uploaded as workflow artifacts for each run. Raise these floors as
+the test suite improves.
 
 The Playwright smoke journey uses local fixtures—no Google, Supabase, or model
 credentials are required. It restores an authenticated browser session, creates a
