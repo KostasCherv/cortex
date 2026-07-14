@@ -9,10 +9,9 @@ metrics, and generates a before/after comparison report.
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,8 +38,6 @@ def analyze_template(path: Path) -> PromptSpec | None:
     """Read a Jinja2 template and build its PromptSpec."""
     source = path.read_text(encoding="utf-8")
     name = path.stem  # removes .j2
-    # Extract Jinja2 variable references (handles {{ var }} and {{ var or 'default' }})
-    variables = set(re.findall(r"{{\s*(\w+)", source))
 
     specs: dict[str, PromptSpec] = {
         "summarize": PromptSpec(
@@ -89,60 +86,11 @@ def analyze_template(path: Path) -> PromptSpec | None:
             golden_mapping="summarize",
             template_source=source,
         ),
-        "followup_answer": PromptSpec(
-            template_name="followup_answer",
-            subject="follow-up research answer",
-            goal="Answer a follow-up question grounded in the existing research report, conversation history, retrieved passages, and web search context.",
-            input_fields=[
-                ("report_block", "str", "The research report's main findings"),
-                ("history_block", "str", "Conversation history so far"),
-                ("answer_context_block", "str", "Retrieved source passages"),
-                ("web_results_json", "str", "Web search results in JSON format"),
-                ("question", "str", "The user's follow-up question"),
-            ],
-            output_fields=[
-                ("answer", "str", "Concise answer grounded in report, passages, and web context"),
-            ],
-            golden_mapping="summarize",
-            template_source=source,
-        ),
-        "web_search_decision": PromptSpec(
-            template_name="web_search_decision",
-            subject="route assistant action",
-            goal="Route the next assistant action (answer_direct, answer_from_rag, web_search, fetch_url, ask_clarifying) based on conversation history, RAG context, and the user message.",
-            input_fields=[
-                ("history_block", "str", "Conversation history"),
-                ("rag_context", "str", "Retrieved RAG context"),
-                ("rag_is_insufficient", "str", "Whether RAG context is insufficient (true/false)"),
-                ("message_urls", "str", "URLs in the current user message"),
-                ("history_urls", "str", "URLs in conversation history"),
-                ("message", "str", "The user's current message"),
-            ],
-            output_fields=[
-                ("action", "str", "One of: answer_direct, answer_from_rag, web_search, fetch_url, ask_clarifying"),
-                ("reason", "str", "Short snake_case explanation"),
-                ("query", "str", "Search query (only for web_search)"),
-                ("url", "str", "URL to fetch (only for fetch_url)"),
-            ],
-            golden_mapping="router",
-            template_source=source,
-        ),
-        "web_search_repair": PromptSpec(
-            template_name="web_search_repair",
-            subject="repair URL access refusal",
-            goal="Repair when the model falsely claims it cannot access URLs — rewrite the answer using already-retrieved web content.",
-            input_fields=[
-                ("normalized_message", "str", "The user's original request"),
-                ("web_results_json", "str", "Already-retrieved web content"),
-                ("rag_context", "str", "Retrieved RAG context"),
-            ],
-            output_fields=[
-                ("answer", "str", "Helpful answer using the retrieved content"),
-            ],
-            golden_mapping="summarize",
-            template_source=source,
-        ),
     }
+    # The production chat router is a hardcoded prompt in
+    # src/api/rag_chat_helpers.py, not a Jinja2 template — it is optimized
+    # separately with scripts/optimize_router_prompt.py against the
+    # teacher-labeled dataset in data/router_dataset/.
 
     result = specs.get(name)
     if result is None:
@@ -208,28 +156,6 @@ def build_deepeval_metrics() -> tuple[Callable | None, str]:
         return None, "deepeval_error"
 
 
-def routing_accuracy_metric(example, prediction, trace=None) -> float:
-    """Score router output: valid action + proper field usage."""
-    VALID_ACTIONS = {"answer_direct", "answer_from_rag", "web_search", "fetch_url", "ask_clarifying"}
-    action = getattr(prediction, "action", None) or ""
-    reason = getattr(prediction, "reason", None) or ""
-    query = getattr(prediction, "query", None) or ""
-    url = getattr(prediction, "url", None) or ""
-
-    if action not in VALID_ACTIONS:
-        return 0.0
-    score = 0.4
-    if reason.strip():
-        score += 0.2
-    if action == "web_search" and query.strip():
-        score += 0.4
-    elif action == "fetch_url" and url.strip():
-        score += 0.4
-    elif action in ("answer_direct", "answer_from_rag", "ask_clarifying") and not query.strip() and not url.strip():
-        score += 0.4
-    return score
-
-
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 
 
@@ -283,9 +209,6 @@ def load_golden_set() -> list[dict]:
 
 def build_metric_for(module_type: str, use_deepeval: bool = True) -> tuple[Callable, str]:
     """Pick the best available metric for a module type. Returns (metric_fn, name)."""
-    if module_type == "web_search_decision":
-        return routing_accuracy_metric, "routing_accuracy"
-
     if use_deepeval:
         metric, name = build_deepeval_metrics()
         if metric is not None:
@@ -387,28 +310,6 @@ def build_examples(spec: PromptSpec, golden_set: list[dict]) -> list[Any]:
             for key in output_keys:
                 kwargs[key] = case.get("expected_answer", "")
 
-        elif mapping == "router":
-            for key in input_keys:
-                if key == "message":
-                    kwargs["message"] = case["query"]
-                elif key == "rag_context":
-                    kwargs["rag_context"] = "None"
-                elif key == "history_block":
-                    kwargs["history_block"] = "None"
-                elif key == "rag_is_insufficient":
-                    kwargs["rag_is_insufficient"] = "false"
-                elif key == "message_urls":
-                    kwargs["message_urls"] = "None"
-                elif key == "history_urls":
-                    kwargs["history_urls"] = "None"
-                else:
-                    kwargs[key] = ""
-
-            kwargs["action"] = "answer_from_rag"
-            kwargs["reason"] = "context_is_relevant"
-            kwargs["query"] = ""
-            kwargs["url"] = ""
-
         kwargs["expected_output"] = case.get("expected_answer", "")
         example = dspy.Example(**kwargs).with_inputs(*input_keys)
         examples.append(example)
@@ -418,7 +319,6 @@ def build_examples(spec: PromptSpec, golden_set: list[dict]) -> list[Any]:
 
 def estimate_quality(spec: PromptSpec, golden_set: list[dict], metric: Callable, module) -> dict[str, Any]:
     """Score a module against the golden set without optimization."""
-    import dspy
 
     examples = build_examples(spec, golden_set)
     total = 0.0

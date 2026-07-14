@@ -1011,3 +1011,63 @@ async def test_prepare_workspace_live_query_keeps_session_attachments():
         question="latest crypto news",
     )
     assert result.resource_ids == ["attachment-res-1"]
+
+
+class TestGetRouterSystemPrompt:
+    """ROUTER_PROMPT_PATH activation path for optimized router prompts."""
+
+    def _clear_cache(self):
+        from src.api import rag_chat_helpers
+
+        rag_chat_helpers._ROUTER_PROMPT_CACHE.clear()
+
+    def test_defaults_to_builtin_prompt(self):
+        from src.api.rag_chat_helpers import (
+            _ROUTER_ACTION_SYSTEM_PROMPT,
+            get_router_system_prompt,
+        )
+
+        self._clear_cache()
+        with patch("src.api.rag_chat_helpers.settings") as settings_mock:
+            settings_mock.router_prompt_path = ""
+            assert get_router_system_prompt() == _ROUTER_ACTION_SYSTEM_PROMPT
+
+    def test_loads_optimized_artifact(self, tmp_path):
+        import json
+
+        from src.api.rag_chat_helpers import get_router_system_prompt
+
+        self._clear_cache()
+        artifact = tmp_path / "router.json"
+        artifact.write_text(json.dumps({"system_prompt": "OPTIMIZED ROUTER PROMPT"}))
+        with patch("src.api.rag_chat_helpers.settings") as settings_mock:
+            settings_mock.router_prompt_path = str(artifact)
+            assert get_router_system_prompt() == "OPTIMIZED ROUTER PROMPT"
+
+    def test_falls_back_on_bad_artifact(self, tmp_path):
+        from src.api.rag_chat_helpers import (
+            _ROUTER_ACTION_SYSTEM_PROMPT,
+            get_router_system_prompt,
+        )
+
+        self._clear_cache()
+        artifact = tmp_path / "broken.json"
+        artifact.write_text("{not json")
+        with patch("src.api.rag_chat_helpers.settings") as settings_mock:
+            settings_mock.router_prompt_path = str(artifact)
+            assert get_router_system_prompt() == _ROUTER_ACTION_SYSTEM_PROMPT
+
+    def test_falls_back_on_missing_key(self, tmp_path):
+        import json
+
+        from src.api.rag_chat_helpers import (
+            _ROUTER_ACTION_SYSTEM_PROMPT,
+            get_router_system_prompt,
+        )
+
+        self._clear_cache()
+        artifact = tmp_path / "empty.json"
+        artifact.write_text(json.dumps({"system_prompt": "  "}))
+        with patch("src.api.rag_chat_helpers.settings") as settings_mock:
+            settings_mock.router_prompt_path = str(artifact)
+            assert get_router_system_prompt() == _ROUTER_ACTION_SYSTEM_PROMPT

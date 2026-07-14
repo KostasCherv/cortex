@@ -210,6 +210,36 @@ Routing rules:
 - ask_clarifying: message is too ambiguous, incomplete, or multi-intent to route confidently"""
 
 _ROUTER_ACTION_SCHEMA = None
+_ROUTER_PROMPT_CACHE: dict[str, str] = {}
+
+
+def get_router_system_prompt() -> str:
+    """Return the router system prompt, preferring an optimized artifact when configured.
+
+    When ROUTER_PROMPT_PATH points at a JSON artifact with a non-empty
+    'system_prompt' key (produced by scripts/optimize_router_prompt.py), that
+    prompt is used; any load failure logs a warning and falls back to the
+    built-in prompt so routing never breaks on a bad artifact.
+    """
+    path = settings.router_prompt_path.strip()
+    if not path:
+        return _ROUTER_ACTION_SYSTEM_PROMPT
+    cached = _ROUTER_PROMPT_CACHE.get(path)
+    if cached is not None:
+        return cached
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        data = _json.loads(_Path(path).read_text(encoding="utf-8"))
+        prompt = str(data.get("system_prompt", "")).strip()
+        if not prompt:
+            raise ValueError("artifact has no 'system_prompt'")
+    except Exception as exc:
+        logger.warning("[rag_chat] failed to load router prompt from %s: %s — using built-in", path, exc)
+        prompt = _ROUTER_ACTION_SYSTEM_PROMPT
+    _ROUTER_PROMPT_CACHE[path] = prompt
+    return prompt
 
 
 def _get_router_action_schema() -> str:
@@ -240,7 +270,7 @@ async def classify_chat_action(
     failures raise RouterError rather than silently enabling document retrieval.
     """
     user_turn = _format_router_user_turn(message=message, rag_context=rag_context)
-    prompt = f"{_ROUTER_ACTION_SYSTEM_PROMPT}\n\n{user_turn}"
+    prompt = f"{get_router_system_prompt()}\n\n{user_turn}"
 
     try:
         llm = get_router_llm()

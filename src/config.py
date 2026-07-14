@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     router_temperature: float = Field(
         default=0.0, description="Sampling temperature for the router LLM."
     )
+    router_prompt_path: str = Field(
+        default="",
+        description=(
+            "Path to an optimized router prompt artifact (JSON with a 'system_prompt' key), "
+            "e.g. optimized_prompts/router_action_optimized.json. Empty uses the built-in prompt."
+        ),
+    )
     embedding_provider: str = Field(
         default="openai",
         description="Embedding provider: 'ollama' or 'openai'",

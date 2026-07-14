@@ -87,7 +87,20 @@ async def run_case(model_config: dict[str, str], case: dict) -> dict[str, object
 
     with temporary_provider_settings(provider, model):
         started_at = time.perf_counter()
-        result = await summarize_node(state)
+        try:
+            result = await summarize_node(state)
+        except Exception as exc:
+            # Hard cases (e.g. context that cannot answer the query) can make
+            # summarize_node raise; record the failure instead of aborting the run.
+            latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
+            return {
+                "model": model,
+                "query": case["query"],
+                "faithfulness": 0.0,
+                "relevancy": 0.0,
+                "latency_ms": latency_ms,
+                "error": type(exc).__name__,
+            }
         latency_ms = round((time.perf_counter() - started_at) * 1000, 2)
 
     actual_output = "\n\n".join(
@@ -106,6 +119,7 @@ async def run_case(model_config: dict[str, str], case: dict) -> dict[str, object
         "faithfulness": faithfulness.score,
         "relevancy": answer_relevancy.score,
         "latency_ms": latency_ms,
+        "error": "",
     }
 
 
@@ -119,7 +133,7 @@ async def main() -> None:
 
     dataframe = pd.DataFrame(
         rows,
-        columns=["model", "query", "faithfulness", "relevancy", "latency_ms"],
+        columns=["model", "query", "faithfulness", "relevancy", "latency_ms", "error"],
     )
     dataframe.to_csv(RESULTS_PATH, index=False)
     print(f"Wrote {len(rows)} rows to {RESULTS_PATH}")
