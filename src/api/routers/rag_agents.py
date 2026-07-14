@@ -24,9 +24,9 @@ from src.api.deps import (
     _consume_usage_or_429,
     _raise_rag_validation_error,
     _run_agent_loop,
-    _select_chat_citations,
     _workflow_error_text,
 )
+from src.citations import select_chat_citations
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing import UsageIncrement
 from src.config import settings
@@ -413,7 +413,7 @@ async def rag_chat_with_agent(
                 role="user",
                 content=normalized_message,
             )
-            citations = _select_chat_citations(
+            citations = select_chat_citations(
                 prepared.rag_context.chunks,
                 loop_result.citations,
                 router_action=getattr(getattr(prepared, "router_decision", None), "action", None),
@@ -628,7 +628,7 @@ async def rag_chat_with_agent_stream(
                     role="user",
                     content=normalized_message,
                 )
-                citations = _select_chat_citations(
+                citations = select_chat_citations(
                     prepared.rag_context.chunks,
                     loop_result.citations,
                     router_action=getattr(

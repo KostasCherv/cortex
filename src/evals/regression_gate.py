@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from src.api.deps import _select_chat_citations
+from src.citations import select_chat_citations
 from src.llm.output_parsers import (
     parse_chat_action_json,
     parse_finance_tool_call_plan_json,
@@ -40,7 +40,7 @@ def _evaluate_router(case: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
 
 def _evaluate_citation(case: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
     data = case["input"]
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         data["rag_chunks"],
         data["loop_citations"],
         router_action=data["router_action"],

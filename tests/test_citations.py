@@ -1,14 +1,14 @@
 """Tests for citation provenance and final citation selection."""
 
-from src.api.deps import (
-    _build_rag_citations,
-    _build_web_citations,
-    _select_chat_citations,
+from src.citations import (
+    build_rag_citations,
+    build_web_citations,
+    select_chat_citations,
 )
 
 
 def test_build_rag_citations_includes_source_type():
-    citations = _build_rag_citations(
+    citations = build_rag_citations(
         [
             {
                 "source_title": "brief.pdf",
@@ -30,7 +30,7 @@ def test_build_rag_citations_includes_source_type():
 
 
 def test_build_web_citations_uses_content_fallback():
-    citations = _build_web_citations(
+    citations = build_web_citations(
         [
             {
                 "title": "Crypto Daily",
@@ -76,7 +76,7 @@ def test_select_chat_citations_prefers_web_when_web_used():
         }
     ]
 
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         rag_chunks,
         web_citations,
         router_action="web_search",
@@ -98,7 +98,7 @@ def test_select_chat_citations_uses_rag_when_no_tool_citations():
         }
     ]
 
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         rag_chunks,
         [],
         router_action="answer_from_rag",
@@ -106,7 +106,7 @@ def test_select_chat_citations_uses_rag_when_no_tool_citations():
         rag_context_text="[source:brief.pdf chunk:rag-1]\nquarterly results",
     )
 
-    assert citations == _build_rag_citations(rag_chunks)
+    assert citations == build_rag_citations(rag_chunks)
 
 
 def test_select_chat_citations_ignores_rag_chunks_below_rerank_threshold(monkeypatch):
@@ -130,7 +130,7 @@ def test_select_chat_citations_ignores_rag_chunks_below_rerank_threshold(monkeyp
         },
     ]
 
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         rag_chunks,
         [],
         router_action="answer_from_rag",
@@ -146,7 +146,7 @@ def test_select_chat_citations_does_not_fallback_after_irrelevant_rag_chunks(mon
 
     monkeypatch.setattr(settings, "rerank_relevance_threshold", 0.1)
 
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         [
             {
                 "source_title": "The-Founders-Playbook.pdf",
@@ -167,7 +167,7 @@ def test_select_chat_citations_does_not_fallback_after_irrelevant_rag_chunks(mon
 
 def test_select_chat_citations_fallback_only_when_rag_context_exists():
     assert (
-        _select_chat_citations(
+        select_chat_citations(
             [],
             [],
             router_action="answer_from_rag",
@@ -177,7 +177,7 @@ def test_select_chat_citations_fallback_only_when_rag_context_exists():
         == []
     )
 
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         [],
         [],
         router_action="answer_from_rag",
@@ -196,7 +196,7 @@ def test_select_chat_citations_fallback_only_when_rag_context_exists():
 
 
 def test_select_chat_citations_does_not_fallback_when_web_used_without_citations():
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         [
             {
                 "source_title": "SaaS_Starter_Kit.pdf",
@@ -214,7 +214,7 @@ def test_select_chat_citations_does_not_fallback_when_web_used_without_citations
 
 
 def test_select_chat_citations_excludes_rag_for_direct_answer():
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         [
             {
                 "source_title": "playbook.pdf",
@@ -233,7 +233,7 @@ def test_select_chat_citations_excludes_rag_for_direct_answer():
 
 
 def test_select_chat_citations_fails_closed_without_router_action():
-    citations = _select_chat_citations(
+    citations = select_chat_citations(
         [],
         [],
         router_action=None,

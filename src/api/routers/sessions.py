@@ -14,13 +14,12 @@ from pydantic import BaseModel
 from src import outbox
 from src.api.deps import (
     UpdateSessionTitleRequest,
-    _build_rag_citations,
     _coerce_agent_loop_result,
     _consume_usage_or_429,
     _generate_suggestions,
-    _merge_citations,
     _run_agent_loop,
 )
+from src.citations import build_rag_citations, merge_citations
 from src.api.rag_chat_helpers import build_agent_messages
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing import UsageIncrement
@@ -539,7 +538,7 @@ async def _stream_followup(
     if not loop_result.streamed_answer:
         yield f"data: {json.dumps({'type': 'chunk', 'text': loop_result.answer})}\n\n"
 
-    citations = _merge_citations(_build_rag_citations(chunks), loop_result.citations)
+    citations = merge_citations(build_rag_citations(chunks), loop_result.citations)
     yield f"data: {json.dumps({'type': 'citations', 'citations': citations})}\n\n"
 
     # Generate suggestions before persisting so they are stored with the turn
