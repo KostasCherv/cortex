@@ -532,3 +532,38 @@ async def test_update_session_run_falls_back_to_base_payload_when_status_shape_i
         "source_urls": [],
         "report": "r",
     }
+
+
+async def test_create_resource_job_and_outbox_invalidates_resources_list_cache():
+    store = object.__new__(SupabaseSessionStore)
+    store._request = AsyncMock()  # type: ignore[method-assign]
+    store._invalidate_rag_resources_list_cache = AsyncMock()  # type: ignore[method-assign]
+
+    await store.create_resource_job_and_outbox(
+        resource_payload={
+            "resource_id": "res-1",
+            "owner_id": "user-1",
+            "workspace_id": "ws-1",
+            "filename": "doc.pdf",
+            "state": "uploaded",
+        },
+        job_payload={"job_id": "job-1", "resource_id": "res-1"},
+        outbox_payload={"id": "evt-1", "event_name": "rag/ingestion.requested"},
+    )
+
+    store._request.assert_awaited_once_with(
+        "POST",
+        "rpc/create_resource_job_and_outbox",
+        json_body={
+            "p_resource": {
+                "resource_id": "res-1",
+                "owner_id": "user-1",
+                "workspace_id": "ws-1",
+                "filename": "doc.pdf",
+                "state": "uploaded",
+            },
+            "p_job": {"job_id": "job-1", "resource_id": "res-1"},
+            "p_outbox": {"id": "evt-1", "event_name": "rag/ingestion.requested"},
+        },
+    )
+    store._invalidate_rag_resources_list_cache.assert_awaited_once_with("user-1", "ws-1")
