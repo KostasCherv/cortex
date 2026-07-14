@@ -1,11 +1,41 @@
-model,query,faithfulness,relevancy,latency_ms
-gpt-4o-mini,What refund window does the store offer for shoes that do not fit?,1.0,1.0,2723.62
-gpt-4o-mini,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,2436.71
-gpt-4o-mini,What are the main health benefits of regular walking?,1.0,1.0,2120.44
-gpt-4o-mini,Why do teams use feature flags in software delivery?,1.0,1.0,2413.77
-gpt-4o-mini,What causes the sky to appear blue during the day?,1.0,1.0,3180.46
-gemma4:31b-cloud,What refund window does the store offer for shoes that do not fit?,1.0,1.0,1412.11
-gemma4:31b-cloud,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,1199.73
-gemma4:31b-cloud,What are the main health benefits of regular walking?,1.0,1.0,1061.13
-gemma4:31b-cloud,Why do teams use feature flags in software delivery?,1.0,1.0,3703.85
-gemma4:31b-cloud,What causes the sky to appear blue during the day?,1.0,1.0,1235.72
+model,query,faithfulness,relevancy,latency_ms,error
+gpt-4o-mini,What refund window does the store offer for shoes that do not fit?,1.0,0.8333333333333334,2912.72,
+gpt-4o-mini,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,2816.38,
+gpt-4o-mini,What are the main health benefits of regular walking?,1.0,1.0,2060.91,
+gpt-4o-mini,Why do teams use feature flags in software delivery?,1.0,1.0,2119.12,
+gpt-4o-mini,What causes the sky to appear blue during the day?,1.0,1.0,1486.48,
+gpt-4o-mini,How many vacation days do new employees get per year?,1.0,1.0,2330.87,
+gpt-4o-mini,What is the maximum daily dose of the supplement described in the leaflet?,1.0,1.0,3080.81,
+gpt-4o-mini,What was the company's revenue in the fourth quarter?,1.0,0.42857142857142855,3789.69,
+gpt-4o-mini,Who is the current CEO of Meridian Labs?,1.0,1.0,2704.07,
+gpt-4o-mini,What is the penalty for returning a rental car late?,0.5,1.0,3241.71,
+gpt-4o-mini,Which browser versions does the dashboard officially support?,0.8,0.5,4119.06,
+gpt-4o-mini,"What is the total fee for an international wire transfer of $2,000?",1.0,1.0,1656.07,
+gpt-4o-mini,How long does the full onboarding process take from application to first shift?,1.0,1.0,2365.59,
+gpt-4o-mini,Is the museum open on Monday holidays?,0.75,1.0,2171.61,
+gpt-4o-mini,When does the early-bird discount for the conference end?,1.0,1.0,3544.94,
+gpt-4o-mini,What are the system requirements and price of the Pro plan?,1.0,1.0,2516.27,
+gpt-4o-mini,Which cities does the shuttle serve and how often does it run?,1.0,0.5714285714285714,3073.98,
+gpt-4o-mini,Can I use the gym membership at other branch locations?,1.0,1.0,1960.03,
+gpt-4o-mini,Does the warranty cover water damage to the headphones?,1.0,1.0,2543.26,
+gpt-4o-mini,What happens to unused credits at the end of the billing cycle?,1.0,1.0,2574.19,
+gemma4:31b-cloud,What refund window does the store offer for shoes that do not fit?,1.0,1.0,1563.25,
+gemma4:31b-cloud,How long can F-1 students stay in the U.S. after graduation?,1.0,1.0,1328.74,
+gemma4:31b-cloud,What are the main health benefits of regular walking?,1.0,1.0,1468.16,
+gemma4:31b-cloud,Why do teams use feature flags in software delivery?,1.0,1.0,1523.29,
+gemma4:31b-cloud,What causes the sky to appear blue during the day?,1.0,1.0,1708.97,
+gemma4:31b-cloud,How many vacation days do new employees get per year?,1.0,1.0,1136.58,
+gemma4:31b-cloud,What is the maximum daily dose of the supplement described in the leaflet?,1.0,1.0,2373.32,
+gemma4:31b-cloud,What was the company's revenue in the fourth quarter?,1.0,0.8333333333333334,5043.39,
+gemma4:31b-cloud,Who is the current CEO of Meridian Labs?,1.0,1.0,1738.7,
+gemma4:31b-cloud,What is the penalty for returning a rental car late?,1.0,1.0,1571.55,
+gemma4:31b-cloud,Which browser versions does the dashboard officially support?,1.0,1.0,856.38,
+gemma4:31b-cloud,"What is the total fee for an international wire transfer of $2,000?",1.0,0.8,1851.01,
+gemma4:31b-cloud,How long does the full onboarding process take from application to first shift?,1.0,1.0,1959.12,
+gemma4:31b-cloud,Is the museum open on Monday holidays?,1.0,1.0,1005.78,
+gemma4:31b-cloud,When does the early-bird discount for the conference end?,1.0,1.0,2343.14,
+gemma4:31b-cloud,What are the system requirements and price of the Pro plan?,1.0,1.0,2683.62,
+gemma4:31b-cloud,Which cities does the shuttle serve and how often does it run?,1.0,1.0,1563.61,
+gemma4:31b-cloud,Can I use the gym membership at other branch locations?,1.0,0.8,1135.24,
+gemma4:31b-cloud,Does the warranty cover water damage to the headphones?,1.0,1.0,1043.98,
+gemma4:31b-cloud,What happens to unused credits at the end of the billing cycle?,1.0,1.0,1809.85,

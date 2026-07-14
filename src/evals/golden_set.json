@@ -78,5 +78,255 @@
       }
     ],
     "expected_answer": "The daytime sky looks blue because atmospheric molecules scatter short blue wavelengths of sunlight more strongly than longer red wavelengths."
+  },
+  {
+    "query": "How many vacation days do new employees get per year?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/handbook-2023",
+        "title": "Employee Handbook 2023",
+        "raw_text": "New employees accrue 15 vacation days per year, available after a 90-day probation period."
+      },
+      {
+        "url": "https://example.com/handbook-2025",
+        "title": "Employee Handbook 2025 (current)",
+        "raw_text": "Effective January 2025, all new employees receive 20 vacation days per year from their start date. This supersedes prior handbook versions."
+      }
+    ],
+    "expected_answer": "According to the current 2025 handbook, new employees receive 20 vacation days per year from their start date, superseding the older policy of 15 days after probation."
+  },
+  {
+    "query": "What is the maximum daily dose of the supplement described in the leaflet?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/leaflet",
+        "title": "Product Leaflet",
+        "raw_text": "Do not exceed 400 mg per day. Adults may take one 200 mg capsule up to twice daily with meals."
+      },
+      {
+        "url": "https://example.com/blog",
+        "title": "Wellness Blog Review",
+        "raw_text": "Some users report taking three or four capsules a day for faster results, though the manufacturer has not commented."
+      }
+    ],
+    "expected_answer": "The leaflet states a maximum of 400 mg per day (one 200 mg capsule up to twice daily); the blog's mention of higher user-reported doses contradicts the manufacturer's stated limit."
+  },
+  {
+    "query": "What was the company's revenue in the fourth quarter?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/q3-report",
+        "title": "Q3 Financial Summary",
+        "raw_text": "Third-quarter revenue reached $4.2 million, up 8% year over year, driven by subscription growth."
+      },
+      {
+        "url": "https://example.com/press",
+        "title": "Company Press Page",
+        "raw_text": "The company will announce fourth-quarter results at its investor call scheduled for February 12."
+      }
+    ],
+    "expected_answer": "The provided sources do not contain fourth-quarter revenue; they only report Q3 revenue of $4.2 million and note that Q4 results will be announced on February 12."
+  },
+  {
+    "query": "Who is the current CEO of Meridian Labs?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/about",
+        "title": "About Meridian Labs",
+        "raw_text": "Meridian Labs was founded in 2015 and is headquartered in Austin, Texas. The company employs around 300 people across three offices."
+      },
+      {
+        "url": "https://example.com/products",
+        "title": "Meridian Product Overview",
+        "raw_text": "Meridian's flagship platform provides supply-chain analytics for mid-market manufacturers."
+      }
+    ],
+    "expected_answer": "The provided sources do not identify Meridian Labs' current CEO; they only cover the company's founding year, headquarters, size, and products."
+  },
+  {
+    "query": "What is the penalty for returning a rental car late?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/rental-terms",
+        "title": "Rental Terms and Conditions",
+        "raw_text": "Vehicles returned more than 59 minutes after the scheduled time incur an additional full-day charge. A grace period of 59 minutes applies to all returns."
+      },
+      {
+        "url": "https://example.com/hotel-policy",
+        "title": "Partner Hotel Cancellation Policy",
+        "raw_text": "Hotel bookings cancelled within 24 hours of check-in forfeit the first night's rate."
+      },
+      {
+        "url": "https://example.com/flight-fees",
+        "title": "Airline Change Fees",
+        "raw_text": "Flight changes made within 7 days of departure cost $75 per passenger on economy fares."
+      }
+    ],
+    "expected_answer": "Returning the rental car more than 59 minutes late incurs an additional full-day charge; returns within the 59-minute grace period are not penalized."
+  },
+  {
+    "query": "Which browser versions does the dashboard officially support?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/requirements",
+        "title": "System Requirements",
+        "raw_text": "The dashboard supports the two most recent major versions of Chrome, Firefox, and Edge, and Safari 16 or newer. Internet Explorer is not supported."
+      },
+      {
+        "url": "https://example.com/mobile",
+        "title": "Mobile App Requirements",
+        "raw_text": "The mobile app requires iOS 15+ or Android 11+."
+      },
+      {
+        "url": "https://example.com/api",
+        "title": "API Client Libraries",
+        "raw_text": "Official SDKs are published for Python 3.10+, Node.js 18+, and Go 1.21+."
+      }
+    ],
+    "expected_answer": "The dashboard officially supports the two most recent major versions of Chrome, Firefox, and Edge, plus Safari 16 or newer; Internet Explorer is not supported."
+  },
+  {
+    "query": "What is the total fee for an international wire transfer of $2,000?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/fees",
+        "title": "Fee Schedule",
+        "raw_text": "International wire transfers cost a flat $25 plus 0.5% of the transferred amount. Domestic wires cost a flat $15."
+      },
+      {
+        "url": "https://example.com/limits",
+        "title": "Transfer Limits",
+        "raw_text": "Daily international transfer limit is $10,000 for standard accounts and $50,000 for premium accounts."
+      }
+    ],
+    "expected_answer": "An international wire of $2,000 costs $35 in total: the flat $25 fee plus 0.5% of $2,000 ($10)."
+  },
+  {
+    "query": "How long does the full onboarding process take from application to first shift?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/hiring",
+        "title": "Hiring Process",
+        "raw_text": "Applications are reviewed within 5 business days, followed by a single interview scheduled within one week of review."
+      },
+      {
+        "url": "https://example.com/onboarding",
+        "title": "Onboarding Guide",
+        "raw_text": "After an offer is accepted, background checks take 3 to 5 business days, and orientation is held every Monday. New hires may start shifts the day after orientation."
+      }
+    ],
+    "expected_answer": "End to end it takes roughly three to four weeks: up to 5 business days for application review, an interview within a week, 3-5 business days for the background check, then the next Monday orientation with shifts starting the following day."
+  },
+  {
+    "query": "Is the museum open on Monday holidays?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/hours",
+        "title": "Museum Hours",
+        "raw_text": "The museum is closed on Mondays. It is open Tuesday through Sunday from 10:00 to 17:30."
+      },
+      {
+        "url": "https://example.com/holidays",
+        "title": "Holiday Schedule",
+        "raw_text": "On public holidays that fall on a Monday, the museum opens with Sunday hours and closes the following Tuesday instead."
+      }
+    ],
+    "expected_answer": "Yes — on public holidays that fall on a Monday the museum opens with Sunday hours (10:00 to 17:30) and closes the following Tuesday instead."
+  },
+  {
+    "query": "When does the early-bird discount for the conference end?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/tickets",
+        "title": "Conference Tickets",
+        "raw_text": "Early-bird pricing of $299 is available until March 31 or while the first 500 tickets last, whichever comes first. Standard pricing is $449."
+      },
+      {
+        "url": "https://example.com/faq",
+        "title": "Conference FAQ",
+        "raw_text": "As of March 10, over 460 early-bird tickets have been sold."
+      }
+    ],
+    "expected_answer": "Early-bird pricing ends on March 31 or when the first 500 tickets sell out, whichever comes first — and as of March 10 more than 460 were already sold, so it may end before March 31."
+  },
+  {
+    "query": "What are the system requirements and price of the Pro plan?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/pricing",
+        "title": "Pricing",
+        "raw_text": "The Pro plan costs $24 per user per month billed annually, or $29 billed monthly."
+      },
+      {
+        "url": "https://example.com/changelog",
+        "title": "Changelog",
+        "raw_text": "Version 3.2 added dark mode and improved export performance by 40%."
+      }
+    ],
+    "expected_answer": "The Pro plan costs $24 per user per month billed annually ($29 monthly); the provided sources do not list system requirements."
+  },
+  {
+    "query": "Which cities does the shuttle serve and how often does it run?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/routes",
+        "title": "Shuttle Routes",
+        "raw_text": "The shuttle serves Riverton, Lakewood, and Fairview, with a stop at the regional airport."
+      },
+      {
+        "url": "https://example.com/contact",
+        "title": "Contact Us",
+        "raw_text": "For schedule questions, call the dispatch office between 6:00 and 22:00 daily."
+      }
+    ],
+    "expected_answer": "The shuttle serves Riverton, Lakewood, and Fairview plus the regional airport; the sources do not state how often it runs."
+  },
+  {
+    "query": "Can I use the gym membership at other branch locations?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/membership",
+        "title": "Membership Tiers",
+        "raw_text": "Standard memberships are valid at the home branch only. Plus memberships include access to all branches nationwide."
+      },
+      {
+        "url": "https://example.com/branches",
+        "title": "Branch Directory",
+        "raw_text": "The network includes 42 branches across 12 states, with new locations opening in Denver and Tampa this year."
+      }
+    ],
+    "expected_answer": "It depends on the tier: Standard memberships work only at the home branch, while Plus memberships grant access to all 42 branches nationwide."
+  },
+  {
+    "query": "Does the warranty cover water damage to the headphones?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/warranty",
+        "title": "Warranty Terms",
+        "raw_text": "The two-year limited warranty covers manufacturing defects. Damage from liquids, drops, or unauthorized repair is excluded."
+      },
+      {
+        "url": "https://example.com/specs",
+        "title": "Product Specifications",
+        "raw_text": "The headphones carry an IPX4 splash-resistance rating, suitable for sweat and light rain."
+      }
+    ],
+    "expected_answer": "No — the warranty excludes liquid damage. The IPX4 rating means the headphones tolerate splashes in normal use, but water damage itself is not covered."
+  },
+  {
+    "query": "What happens to unused credits at the end of the billing cycle?",
+    "retrieved_contents": [
+      {
+        "url": "https://example.com/billing",
+        "title": "Billing Overview",
+        "raw_text": "Monthly plans include 1,000 credits. Unused credits expire at the end of each billing cycle and do not roll over."
+      },
+      {
+        "url": "https://example.com/addons",
+        "title": "Credit Add-ons",
+        "raw_text": "Purchased add-on credit packs never expire and are consumed only after plan credits are exhausted."
+      }
+    ],
+    "expected_answer": "Plan credits expire at the end of each billing cycle without rolling over, but purchased add-on credits never expire and are used only after plan credits run out."
   }
 ]
