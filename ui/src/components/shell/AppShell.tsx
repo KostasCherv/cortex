@@ -38,15 +38,33 @@ export function AppShell() {
     [resources],
   )
 
+  /** Apply a server list without dropping locally-known pending uploads still missing from a stale response. */
+  const applyResourcesList = useCallback((incoming: RagResource[]) => {
+    setResources((prev) => {
+      const byId = new Map(incoming.map((r) => [r.resource_id, r]))
+      for (const resource of prev) {
+        if (
+          !byId.has(resource.resource_id) &&
+          (resource.state === 'uploaded' || resource.state === 'processing')
+        ) {
+          byId.set(resource.resource_id, resource)
+        }
+      }
+      return Array.from(byId.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+    })
+  }, [])
+
   const loadResources = useCallback(async () => {
     if (!accessToken) {
       setResources([])
       return []
     }
     const { resources: data } = await listRagResources(accessToken)
-    setResources(data)
+    applyResourcesList(data)
     return data
-  }, [accessToken])
+  }, [accessToken, applyResourcesList])
 
   const upsertResource = useCallback((resource: RagResource) => {
     setResources((prev) => {
@@ -90,23 +108,23 @@ export function AppShell() {
       .then(({ agents }) => setRagAgents(agents))
       .catch(() => setRagAgents([]))
     void listRagResources(accessToken)
-      .then(({ resources: data }) => setResources(data))
+      .then(({ resources: data }) => applyResourcesList(data))
       .catch(() => setResources([]))
-  }, [accessToken])
+  }, [accessToken, applyResourcesList])
 
   useEffect(() => {
     if (!accessToken || !hasPendingResources) return
 
     const refresh = () => {
       void listRagResources(accessToken)
-        .then(({ resources: data }) => setResources(data))
+        .then(({ resources: data }) => applyResourcesList(data))
         .catch(() => {})
     }
 
     refresh()
     const intervalId = window.setInterval(refresh, 2000)
     return () => window.clearInterval(intervalId)
-  }, [accessToken, hasPendingResources])
+  }, [accessToken, hasPendingResources, applyResourcesList])
 
   const signInWithGoogle = useCallback(async () => {
     await supabase.auth.signInWithOAuth({
