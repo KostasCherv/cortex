@@ -56,7 +56,7 @@ Measured with k6 against the live Cloud Run deployment and locally (2026-07, ful
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
+- Quality tooling: `pytest`, `ruff`, blocking `mypy` type checks, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
 
 ## Architecture
 

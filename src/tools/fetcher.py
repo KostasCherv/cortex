@@ -58,7 +58,7 @@ def _validate_url(url: str) -> None:
     except OSError as exc:
         raise FetchError(f"DNS resolution failed for {hostname}: {exc}") from exc
     for info in infos:
-        ip_str = info[4][0]
+        ip_str = str(info[4][0])
         # Strip IPv6 zone ID if present (e.g. "fe80::1%eth0")
         ip_str = ip_str.split("%")[0]
         try:

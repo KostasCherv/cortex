@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from uuid import uuid4
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal, cast
 
 from src.config import settings
 from src.observability.context import (
@@ -21,12 +21,15 @@ from src.observability.context import (
 from src.observability.redaction import redact_payload
 
 try:
-    from langsmith import Client
-    from langsmith.run_helpers import trace, tracing_context
+    from langsmith import Client as _Client
+    from langsmith.run_helpers import trace as _trace, tracing_context as _tracing_context
+    Client: Any = _Client
+    trace: Any = _trace
+    tracing_context: Any = _tracing_context
 except Exception:  # pragma: no cover - optional dependency at runtime
-    Client = None  # type: ignore[assignment]
-    trace = None  # type: ignore[assignment]
-    tracing_context = None  # type: ignore[assignment]
+    Client = None
+    trace = None
+    tracing_context = None
 
 
 @dataclass
@@ -89,10 +92,7 @@ def start_workflow_run(
     )
     redaction_mode = settings.langsmith_redaction_mode
     run_name = _workflow_run_name(entrypoint)
-    run_inputs = redact_payload(
-        {"query": query},
-        mode=redaction_mode,
-    )
+    run_inputs = cast(dict[Any, Any], redact_payload({"query": query}, mode=redaction_mode))
     tags = build_trace_tags(["workflow"])
     metadata = build_trace_metadata({"entrypoint": entrypoint})
 
@@ -137,11 +137,10 @@ def end_workflow_run(
         payload["data"] = redact_payload(outputs, mode=settings.langsmith_redaction_mode)
     redacted_error: str | None = None
     if error:
-        redacted_error = str(
-            redact_payload({"error": error}, mode=settings.langsmith_redaction_mode).get(
-                "error", error
-            )
-        )
+        redacted = cast(dict[str, object], redact_payload(
+            {"error": error}, mode=settings.langsmith_redaction_mode
+        ))
+        redacted_error = str(redacted.get("error", error))
     if hasattr(ctx.run, "end"):
         ctx.run.end(outputs=payload, error=redacted_error)
     patch = getattr(ctx.run, "patch", None)
@@ -184,7 +183,7 @@ def end_workflow_run(
 def start_step_span(
     *,
     name: str,
-    run_type: str = "tool",
+    run_type: Literal["tool", "chain", "llm", "retriever", "embedding", "prompt", "parser"] = "tool",
     node_name: str | None = None,
     inputs: dict[str, object] | None = None,
     metadata: dict[str, object] | None = None,
@@ -193,7 +192,7 @@ def start_step_span(
     """Start a child span under the current workflow context."""
     node_label = node_name or name
     redaction_mode = settings.langsmith_redaction_mode
-    trace_inputs = redact_payload(inputs or {}, mode=redaction_mode)
+    trace_inputs = cast(dict[Any, Any], redact_payload(inputs or {}, mode=redaction_mode))
     trace_metadata = build_trace_metadata(metadata or {})
     trace_tags = build_trace_tags(tags or [])
 

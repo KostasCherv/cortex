@@ -35,7 +35,7 @@ async def wikipedia_lookup(query: str) -> str:
     if not normalized_query:
         return "No Wikipedia query provided."
 
-    params = {
+    params: dict[str, str | int] = {
         "action": "query",
         "generator": "search",
         "gsrsearch": normalized_query,
