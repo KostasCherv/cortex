@@ -3,6 +3,7 @@
 .env.local
 .env.prod
 .env.*.local
+gha-creds-*.json
 ui/.env
 ui/.env.local
 __pycache__

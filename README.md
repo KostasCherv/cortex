@@ -235,6 +235,24 @@ CI also produces a CycloneDX container SBOM named `cortex-sbom-<commit-sha>` and
 
 The backend runs on Cloud Run with secrets stored in Google Secret Manager.
 
+Production backend releases can be started manually from **GitHub Actions → Deploy
+production backend → Run workflow**. The workflow accepts only `main`, runs the full
+CI suite, waits for approval through the `Production` environment, applies pending
+Supabase migrations, deploys Cloud Run, and runs the post-deployment smoke checks.
+Only one production deployment runs at a time.
+
+The `Production` environment requires these variables:
+
+- `GCP_PROJECT_ID`, `GCP_REGION`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT`
+- `SUPABASE_PROJECT_REF`
+
+It also requires `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` secrets.
+`SMOKE_TEST_TOKEN` is optional and enables the authenticated smoke check. Google
+Cloud authentication uses GitHub OIDC rather than a long-lived service-account key.
+
+The local backend deployment remains available for recovery or maintenance:
+
 ```bash
 GCP_PROJECT=<your-project-id> ./scripts/setup_secrets.sh   # first time only
 GCP_PROJECT=<your-project-id> ./scripts/deploy.sh
@@ -274,6 +292,12 @@ Production health checks use separate endpoints:
   dependencies critical. Both default to `false` so local development can run with them disabled.
 
 ### Frontend — Vercel
+
+Vercel's Git integration deploys the production UI automatically. The backend
+deployment workflow does not invoke Vercel or require Vercel credentials.
+
+The scripts below remain available for environment synchronization and manual
+recovery deployments:
 
 ```bash
 # Sync VITE_* env vars to Vercel
