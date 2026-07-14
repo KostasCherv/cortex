@@ -1,6 +1,6 @@
 # UI Design System
 
-Frontend-specific reference: component library, theming, and conventions. For product/backend architecture, stack, and API flows, see the root [README.md](../README.md) — this doc doesn't repeat any of that.
+Frontend-specific reference: component library, theming, and conventions. For the product overview see the root [README.md](../README.md); for backend architecture and API flows see [docs/architecture.md](../docs/architecture.md). This document does not repeat either.
 
 ## Stack
 

@@ -10,8 +10,8 @@ Rules:
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-- For deploy/ops questions, check README.md's "Production deployment" section before re-deriving from scripts/.
-- When code changes affect setup, deploy, or architecture, update README.md to match.
+- For deploy/ops questions, check docs/deployment.md before re-deriving from scripts/.
+- Keep documentation changes scoped: update README.md for product positioning and headline capabilities, docs/getting-started.md for local setup, docs/architecture.md for system design, and docs/deployment.md for production operations.
 - For UI design-system questions (theming, component conventions, shadcn primitives), check ui/DESIGN.md before re-deriving from source.
 - When adding/changing UI components, variants, or design tokens under ui/src/, update ui/DESIGN.md to match.
 
