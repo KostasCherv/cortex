@@ -53,7 +53,7 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Validate production configuration
         shell: bash
