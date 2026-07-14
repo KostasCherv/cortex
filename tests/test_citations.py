@@ -79,6 +79,7 @@ def test_select_chat_citations_prefers_web_when_web_used():
     citations = _select_chat_citations(
         rag_chunks,
         web_citations,
+        router_action="web_search",
         web_used=True,
         rag_context_text="irrelevant workspace context",
     )
@@ -100,6 +101,7 @@ def test_select_chat_citations_uses_rag_when_no_tool_citations():
     citations = _select_chat_citations(
         rag_chunks,
         [],
+        router_action="answer_from_rag",
         web_used=False,
         rag_context_text="[source:brief.pdf chunk:rag-1]\nquarterly results",
     )
@@ -131,6 +133,7 @@ def test_select_chat_citations_ignores_rag_chunks_below_rerank_threshold(monkeyp
     citations = _select_chat_citations(
         rag_chunks,
         [],
+        router_action="answer_from_rag",
         web_used=False,
         rag_context_text="[source:brief.pdf chunk:rag-high]\nrelevant brief chunk",
     )
@@ -154,6 +157,7 @@ def test_select_chat_citations_does_not_fallback_after_irrelevant_rag_chunks(mon
             }
         ],
         [],
+        router_action="answer_from_rag",
         web_used=False,
         rag_context_text="[source:The-Founders-Playbook.pdf chunk:rag-low]\nirrelevant playbook chunk",
     )
@@ -162,11 +166,21 @@ def test_select_chat_citations_does_not_fallback_after_irrelevant_rag_chunks(mon
 
 
 def test_select_chat_citations_fallback_only_when_rag_context_exists():
-    assert _select_chat_citations([], [], web_used=False, rag_context_text="") == []
+    assert (
+        _select_chat_citations(
+            [],
+            [],
+            router_action="answer_from_rag",
+            web_used=False,
+            rag_context_text="",
+        )
+        == []
+    )
 
     citations = _select_chat_citations(
         [],
         [],
+        router_action="answer_from_rag",
         web_used=False,
         rag_context_text="[source:brief.pdf chunk:rag-1]\nquarterly results",
     )
@@ -192,7 +206,39 @@ def test_select_chat_citations_does_not_fallback_when_web_used_without_citations
             }
         ],
         [],
+        router_action="web_search",
         web_used=True,
         rag_context_text="irrelevant workspace context",
     )
+    assert citations == []
+
+
+def test_select_chat_citations_excludes_rag_for_direct_answer():
+    citations = _select_chat_citations(
+        [
+            {
+                "source_title": "playbook.pdf",
+                "source_url": "",
+                "chunk_id": "rag-1",
+                "text": "Unrelated workspace content",
+            }
+        ],
+        [],
+        router_action="answer_direct",
+        web_used=False,
+        rag_context_text="Unrelated workspace content",
+    )
+
+    assert citations == []
+
+
+def test_select_chat_citations_fails_closed_without_router_action():
+    citations = _select_chat_citations(
+        [],
+        [],
+        router_action=None,
+        web_used=False,
+        rag_context_text="Workspace context without structured chunks",
+    )
+
     assert citations == []

@@ -597,17 +597,20 @@ uv run pytest tests/test_dspy_optimizer.py -v
 
 Requires the `finetune` optional extra (`uv sync --extra finetune`) for `datasets` and `huggingface-hub`.
 
-Cortex can offload the chat action-classification step to a small router model instead of the main "brain" model. The router is a compact base model (Qwen2.5-3B-Instruct) **fine-tuned with LoRA/QLoRA via [Unsloth](https://github.com/unslothai/unsloth)**, then exported to GGUF and served through Ollama. This path is **opt-in and inert by default** — it does not change any existing chat behavior unless explicitly enabled.
+Cortex classifies every chat turn before deciding whether document retrieval is needed. By default the router uses the provider and model configured for the main LLM. It can optionally use a compact model (Qwen2.5-3B-Instruct) **fine-tuned with LoRA/QLoRA via [Unsloth](https://github.com/unslothai/unsloth)**, exported to GGUF, and served through Ollama.
+
+Workspace and agent document collections are deny-by-default: they are retrieved only when the router explicitly selects `answer_from_rag`. Session attachments remain available as explicitly scoped resources. If routing fails after one structured-output repair attempt, the request fails with `router_error` and does not retrieve documents.
 
 > **Note:** This "router" is a fine-tuned intent classifier and is distinct from the ReAct-lite chat routing described above. They share the word "router" but are unrelated.
 
-### Enable the live router
+### Configure the live router
 
-Set in `.env` (all default to off / fall back to the main model):
+The router is always active. The following optional `.env` settings override the main LLM configuration:
 
-- `ROUTER_ENABLED=true` — turn on the live router LLM call (default `false`)
 - `ROUTER_LLM_PROVIDER` — provider override (`ollama|openai|openrouter|lmstudio`); empty falls back to `LLM_PROVIDER`
 - `ROUTER_OLLAMA_MODEL` / `ROUTER_OPENAI_MODEL` / `ROUTER_OPENROUTER_MODEL` / `ROUTER_LMSTUDIO_MODEL` — per-provider model overrides; empty falls back to the main model
+- `ROUTER_OLLAMA_BASE_URL` — optional Ollama endpoint override
+- `ROUTER_TEMPERATURE` — router sampling temperature (default `0.0`)
 
 ### Training pipeline
 

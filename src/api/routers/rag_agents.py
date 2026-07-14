@@ -20,17 +20,17 @@ from src.api.deps import (
     RagChatTools,
     UpdateSessionTitleRequest,
     _build_chat_trace_outputs,
-    _build_rag_citations,
     _coerce_agent_loop_result,
     _consume_usage_or_429,
-    _merge_citations,
     _raise_rag_validation_error,
     _run_agent_loop,
+    _select_chat_citations,
     _workflow_error_text,
 )
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing import UsageIncrement
 from src.config import settings
+from src.errors import RouterError
 from src.observability import end_workflow_run, start_workflow_run
 from src.rag import (
     CHAT_SCOPE_AGENT,
@@ -100,9 +100,7 @@ async def _require_agent_chat_session(
         user_id=user_id,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
 
 
 async def _files_needing_session_ingest(
@@ -124,11 +122,7 @@ async def _files_needing_session_ingest(
         for attachment in existing
         if attachment.state == "ready" and attachment.filename
     }
-    return [
-        file
-        for file in files
-        if (file.filename or "") not in ready_filenames
-    ]
+    return [file for file in files if (file.filename or "") not in ready_filenames]
 
 
 async def _parse_rag_chat_request(
@@ -251,13 +245,9 @@ async def rag_update_agent(
             agent_id=agent_id,
             user_id=current_user.user_id,
             name=body.name.strip() if body.name is not None else None,
-            description=(
-                body.description.strip() if body.description is not None else None
-            ),
+            description=(body.description.strip() if body.description is not None else None),
             system_instructions=(
-                body.system_instructions.strip()
-                if body.system_instructions is not None
-                else None
+                body.system_instructions.strip() if body.system_instructions is not None else None
             ),
             linked_resource_ids=body.linked_resource_ids,
         )
@@ -327,9 +317,7 @@ async def rag_chat_with_agent(
     timings = RagChatTimings()
     wall_start = time.perf_counter()
 
-    with start_workflow_run(
-        entrypoint="rag_chat", query=normalized_message
-    ) as trace_ctx:
+    with start_workflow_run(entrypoint="rag_chat", query=normalized_message) as trace_ctx:
         try:
             if files:
                 chat_session_id = await ensure_agent_chat_session_id(
@@ -339,9 +327,7 @@ async def rag_chat_with_agent(
                     initial_message=normalized_message,
                 )
                 if chat_session_id is None:
-                    raise HTTPException(
-                        status_code=404, detail=f"Agent '{agent_id}' not found."
-                    )
+                    raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
                 files_to_ingest = await _files_needing_session_ingest(
                     session_id=chat_session_id,
                     agent_id=agent_id,
@@ -378,9 +364,7 @@ async def rag_chat_with_agent(
                     agent_id,
                     current_user.user_id,
                 )
-                raise HTTPException(
-                    status_code=404, detail=f"Agent '{agent_id}' not found."
-                )
+                raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
             if not prepared.resource_ids:
                 logger.info(
                     "[rag_api] agent chat request proceeding without linked ready resources agent_id=%s user_id=%s",
@@ -404,9 +388,7 @@ async def rag_chat_with_agent(
                 )
                 timings.agent_loop_ms = (time.perf_counter() - t_loop) * 1000
             except Exception as exc:
-                logger.exception(
-                    "[rag_api] agent chat loop failed agent_id=%s", agent_id
-                )
+                logger.exception("[rag_api] agent chat loop failed agent_id=%s", agent_id)
                 raise HTTPException(
                     status_code=503,
                     detail={"code": "agent_loop_error", "error": str(exc)},
@@ -431,9 +413,12 @@ async def rag_chat_with_agent(
                 role="user",
                 content=normalized_message,
             )
-            citations = _merge_citations(
-                _build_rag_citations(prepared.rag_context.chunks),
+            citations = _select_chat_citations(
+                prepared.rag_context.chunks,
                 loop_result.citations,
+                router_action=getattr(getattr(prepared, "router_decision", None), "action", None),
+                web_used=loop_result.web_used,
+                rag_context_text=prepared.rag_context.context or "",
             )
             assistant_msg = RagChatMessage(
                 message_id=str(uuid.uuid4()),
@@ -497,6 +482,11 @@ async def rag_chat_with_agent(
             end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
             if isinstance(exc, RagValidationError):
                 _raise_rag_validation_error(exc)
+            if isinstance(exc, RouterError):
+                raise HTTPException(
+                    status_code=503,
+                    detail={"code": "router_error", "message": str(exc)},
+                ) from exc
             raise
 
 
@@ -589,10 +579,7 @@ async def rag_chat_with_agent_stream(
                         )
                     yield f"data: {json.dumps({'type': 'session', 'session_id': prepared.chat_session_id})}\n\n"
                 if prepared is None:
-                    raise HTTPException(
-                        status_code=404, detail=f"Agent '{agent_id}' not found."
-                    )
-                citations = _build_rag_citations(prepared.rag_context.chunks)
+                    raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found.")
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Generating answer…'})}\n\n"
                 loop_task = asyncio.create_task(
                     _run_agent_loop(
@@ -641,9 +628,14 @@ async def rag_chat_with_agent_stream(
                     role="user",
                     content=normalized_message,
                 )
-                citations = _merge_citations(
-                    _build_rag_citations(prepared.rag_context.chunks),
+                citations = _select_chat_citations(
+                    prepared.rag_context.chunks,
                     loop_result.citations,
+                    router_action=getattr(
+                        getattr(prepared, "router_decision", None), "action", None
+                    ),
+                    web_used=loop_result.web_used,
+                    rag_context_text=prepared.rag_context.context or "",
                 )
                 assistant_msg = RagChatMessage(
                     message_id=str(uuid.uuid4()),
@@ -696,10 +688,11 @@ async def rag_chat_with_agent_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             if trace_ctx is not None:
-                end_workflow_run(
-                    trace_ctx, status="error", error=_workflow_error_text(exc)
-                )
-            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+                end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+            error_event = {"type": "error", "error": str(exc)}
+            if isinstance(exc, RouterError):
+                error_event["code"] = "router_error"
+            yield f"data: {json.dumps(error_event)}\n\n"
 
     return StreamingResponse(
         _stream_chat(),
@@ -737,9 +730,7 @@ async def list_rag_agent_chat_session_messages(
         user_id=current_user.user_id,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
 
     messages = await list_rag_chat_messages(session_id, current_user.user_id)
     return {
@@ -844,9 +835,7 @@ async def delete_rag_agent_chat_session_attachment_endpoint(
     return {"session_id": session_id, "attachment_id": attachment_id, "deleted": True}
 
 
-@router.get(
-    "/api/rag/agents/{agent_id}/chat/sessions/{session_id}/attachments", tags=["RAG"]
-)
+@router.get("/api/rag/agents/{agent_id}/chat/sessions/{session_id}/attachments", tags=["RAG"])
 async def list_rag_agent_chat_session_attachments_endpoint(
     agent_id: str,
     session_id: str,
@@ -862,9 +851,7 @@ async def list_rag_agent_chat_session_attachments_endpoint(
         user_id=current_user.user_id,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
 
     attachments = await list_rag_chat_session_attachments(
         session_id=session_id,
@@ -902,9 +889,7 @@ async def update_rag_agent_chat_session_title(
         title=title,
     )
     if not updated:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
     return {"session_id": session_id, "title": title}
 
 
@@ -924,9 +909,7 @@ async def delete_rag_agent_chat_session(
         user_id=current_user.user_id,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
 
     await delete_rag_chat_session_attachments_and_artifacts(
         session_id=session_id,
@@ -939,9 +922,7 @@ async def delete_rag_agent_chat_session(
         user_id=current_user.user_id,
     )
     if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
     return {"session_id": session_id, "deleted": True}
 
 
@@ -961,17 +942,11 @@ async def delete_rag_agent_chat_last_exchange(
         chat_scope=CHAT_SCOPE_AGENT,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
-    deleted, err = await delete_last_exchange(
-        session_id=session_id, user_id=current_user.user_id
-    )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    deleted, err = await delete_last_exchange(session_id=session_id, user_id=current_user.user_id)
     if not deleted:
         if err == "empty":
-            raise HTTPException(
-                status_code=404, detail="Session has no messages to delete."
-            )
+            raise HTTPException(status_code=404, detail="Session has no messages to delete.")
         raise HTTPException(
             status_code=409, detail="Last two messages are not a user/assistant pair."
         )
