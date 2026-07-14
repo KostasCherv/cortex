@@ -1,0 +1,237 @@
+{
+  "version": 1,
+  "project": {
+    "name": "Cortex",
+    "tagline": "Source-grounded AI research and chat",
+    "technologies": [
+      "LangGraph",
+      "GraphRAG",
+      "FastAPI",
+      "React"
+    ],
+    "cta": "Move from a question to evidence-backed follow-up."
+  },
+  "theme": {
+    "accent": "#2563eb",
+    "ink": "#18181b",
+    "canvas": "#f7f7f5"
+  },
+  "capture": {
+    "baseUrl": "http://localhost:5173",
+    "headless": true,
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "storageState": ".promo-video.storage.json",
+    "setup": [
+      {
+        "type": "waitFor",
+        "locator": {
+          "label": "Account menu"
+        },
+        "timeoutMs": 30000
+      },
+      {
+        "type": "waitFor",
+        "locator": {
+          "role": "button",
+          "name": "Chat",
+          "exact": true
+        },
+        "timeoutMs": 30000
+      },
+      {
+        "type": "click",
+        "locator": {
+          "role": "button",
+          "name": "New chat",
+          "exact": true
+        }
+      },
+      {
+        "type": "waitFor",
+        "locator": {
+          "placeholder": "Ask a question..."
+        },
+        "timeoutMs": 30000
+      }
+    ]
+  },
+  "scenes": [
+    {
+      "id": "chat",
+      "title": "Ask in chat first",
+      "caption": "Cortex turns workspace questions into cited, followable answers.",
+      "holdMs": 1200,
+      "actions": [
+        {
+          "type": "type",
+          "locator": {
+            "placeholder": "Ask a question..."
+          },
+          "text": "How should we evaluate retrieval quality before release?",
+          "delayMs": 24
+        },
+        {
+          "type": "click",
+          "locator": {
+            "role": "button",
+            "name": "Send message",
+            "exact": true
+          }
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "role": "button",
+            "name": "Stop generating",
+            "exact": true
+          },
+          "state": "visible",
+          "timeoutMs": 30000
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "role": "button",
+            "name": "Stop generating",
+            "exact": true
+          },
+          "state": "hidden",
+          "timeoutMs": 90000,
+          "speed": 3
+        }
+      ]
+    },
+    {
+      "id": "research",
+      "title": "Deepen it with research",
+      "caption": "Switch to a research run when the answer needs a visible evidence workflow.",
+      "holdMs": 1400,
+      "actions": [
+        {
+          "type": "click",
+          "locator": {
+            "role": "button",
+            "name": "Research",
+            "exact": true
+          }
+        },
+        {
+          "type": "click",
+          "locator": {
+            "role": "button",
+            "name": "New research",
+            "exact": true
+          }
+        },
+        {
+          "type": "type",
+          "locator": {
+            "placeholder": "e.g. Compare Model Context Protocol server frameworks in Python vs TypeScript."
+          },
+          "text": "How does retrieval quality affect grounded AI answers?",
+          "delayMs": 24
+        },
+        {
+          "type": "click",
+          "locator": {
+            "role": "button",
+            "name": "Run research",
+            "exact": true
+          }
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "text": "Searching & Context",
+            "exact": true
+          },
+          "timeoutMs": 30000
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "text": "Follow-up Questions",
+            "exact": true
+          },
+          "timeoutMs": 120000,
+          "speed": 3
+        }
+      ]
+    },
+    {
+      "id": "results",
+      "title": "Follow up on the result",
+      "caption": "The final report keeps follow-up questions grounded to the same source set.",
+      "holdMs": 3200,
+      "actions": [
+        {
+          "type": "waitFor",
+          "locator": {
+            "text": "Follow-up Questions",
+            "exact": true
+          },
+          "timeoutMs": 120000,
+          "speed": 3
+        },
+        {
+          "type": "scroll",
+          "locator": {
+            "text": "Follow-up Questions",
+            "exact": true
+          }
+        },
+        {
+          "type": "type",
+          "locator": {
+            "placeholder": "Ask a follow-up question... (Enter to send, Shift+Enter for newline)"
+          },
+          "text": "Which metric should we watch first?",
+          "delayMs": 22
+        },
+        {
+          "type": "click",
+          "locator": {
+            "role": "button",
+            "name": "Send",
+            "exact": true
+          }
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "text": "Thinking...",
+            "exact": true
+          },
+          "state": "visible",
+          "timeoutMs": 30000
+        },
+        {
+          "type": "waitFor",
+          "locator": {
+            "text": "Thinking...",
+            "exact": true
+          },
+          "state": "hidden",
+          "timeoutMs": 90000,
+          "speed": 3
+        }
+      ]
+    }
+  ],
+  "output": {
+    "directory": "assets/promo",
+    "basename": "cortex-research-promo",
+    "formats": [
+      "mp4",
+      "webm"
+    ],
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "introSeconds": 2,
+    "outroSeconds": 3
+  }
+}

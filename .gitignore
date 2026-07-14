@@ -29,6 +29,7 @@ ui/.vercel
 .DS_Store
 ui/playwright-report/
 ui/test-results/
+.promo-video.storage.json
 supabase/.temp
 ui/.impeccable-live.json
 ui/index.html

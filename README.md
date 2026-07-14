@@ -10,6 +10,11 @@ Cortex combines LangGraph orchestration, GraphRAG retrieval, durable background 
 
 <img width="1722" height="898" alt="Cortex research workspace showing a generated report and source-grounded chat" src="https://github.com/user-attachments/assets/1f01409f-bc58-43ef-bc09-5ec2649acf00" />
 
+## Promo video
+
+Watch Cortex move from workspace chat to a live research run and grounded follow-up questions:
+[MP4](assets/promo/cortex-research-promo.mp4) · [WebM](assets/promo/cortex-research-promo.webm)
+
 ## Why Cortex
 
 Most RAG demos stop at a single retrieval-and-generation call. Cortex treats research as a long-running, stateful workflow: it searches and retrieves sources, enriches them with graph context, reranks evidence, streams progress, produces a structured report, and keeps the result available for grounded follow-up conversation.
