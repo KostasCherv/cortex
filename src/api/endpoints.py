@@ -12,7 +12,7 @@ from fastapi import (
     Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -235,6 +235,20 @@ async def cortex_error_handler(request: Request, exc: CortexError) -> JSONRespon
 async def health():
     """Simple liveness probe."""
     return HealthResponse(status="ok", version="0.1.0")
+
+@app.get("/health/stream", tags=["Meta"])
+async def health_stream():
+    """Emit one SSE event so deployments can verify streaming end to end."""
+
+    async def _probe():
+        yield 'event: ready\ndata: {"status":"ok"}\n\n'
+
+    return StreamingResponse(
+        _probe(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
 
 @app.get(
     "/ready",

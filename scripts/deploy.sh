@@ -63,6 +63,10 @@ if ! grep -q "$TAG" "$TMP_YAML"; then
 fi
 
 echo "▶ Deploying to Cloud Run..."
+PREVIOUS_REVISION=$(gcloud run services describe cortex \
+  --region="$REGION" \
+  --project="$PROJECT" \
+  --format="value(status.latestReadyRevisionName)" 2>/dev/null || true)
 gcloud run services replace "$TMP_YAML" \
   --region="$REGION" \
   --project="$PROJECT"
@@ -82,6 +86,18 @@ SERVICE_URL=$(gcloud run services describe cortex \
   --region="$REGION" \
   --project="$PROJECT" \
   --format="value(status.url)")
+
+echo "▶ Running post-deployment smoke checks..."
+if ! python3 scripts/post_deploy_smoke.py "$SERVICE_URL"; then
+  echo "ERROR: deployment smoke checks failed; the new revision needs investigation."
+  if [[ -n "$PREVIOUS_REVISION" ]]; then
+    echo "Rollback: gcloud run services update-traffic cortex --region=$REGION --project=$PROJECT --to-revisions=$PREVIOUS_REVISION=100"
+  else
+    echo "No previous ready revision was found; inspect revisions before changing traffic."
+  fi
+  echo "Revisions: gcloud run revisions list --service=cortex --region=$REGION --project=$PROJECT"
+  exit 1
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"

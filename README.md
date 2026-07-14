@@ -244,6 +244,16 @@ This script:
 1. Builds a Docker image via Cloud Build and tags it with the current git SHA
 2. Tags the image as `:latest`
 3. Injects the SHA-tagged image into `cloudrun/service.yaml` and runs `gcloud run services replace`
+4. Runs fail-fast smoke checks against `/health`, `/ready`, the authentication boundary, and a one-event SSE probe
+
+The deploy command exits nonzero if a smoke check fails. Set `SMOKE_TEST_TOKEN` to a short-lived user access token to additionally verify an authenticated `GET /sessions`; the token is never printed. Run the checks independently with `python3 scripts/post_deploy_smoke.py https://<service-url>`.
+
+The script does not automatically move traffic after a failed check. To roll back, first identify the last known-good revision, then route all traffic to it:
+
+```bash
+gcloud run revisions list --service=cortex --region=<region> --project=<project>
+gcloud run services update-traffic cortex --region=<region> --project=<project> --to-revisions=<previous-revision>=100
+```
 
 The service manifest at `cloudrun/service.yaml` defines all environment variables. Sensitive values reference Secret Manager secrets via `valueFrom.secretKeyRef`.
 
