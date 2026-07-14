@@ -888,6 +888,12 @@ class SupabaseSessionStore:
                 "p_outbox": outbox_payload,
             },
         )
+        # Upload uses this RPC instead of create_rag_resource; invalidate the list
+        # cache so a follow-up list does not return a pre-upload snapshot.
+        owner_id = str(resource_payload.get("owner_id", ""))
+        workspace_id = str(resource_payload.get("workspace_id", ""))
+        if owner_id and workspace_id:
+            await self._invalidate_rag_resources_list_cache(owner_id, workspace_id)
 
     async def claim_outbox_event(self, event_id: str) -> bool:
         """Atomically transition an outbox event from pending -> dispatching.

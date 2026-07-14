@@ -32,6 +32,15 @@ See [Run locally](#run-locally) below for the full setup, including Inngest (bac
 - Durable ingestion pipeline with transactional outbox, dispatcher, and idempotent workers.
 - End-to-end observability with trace spans across graph nodes and external dependencies.
 
+## Performance & reliability
+
+Measured with k6 against the live Cloud Run deployment and locally (2026-07, full methodology and caveats in [reports/benchmarks/LOAD_TEST_REPORT.md](reports/benchmarks/LOAD_TEST_REPORT.md)):
+
+- Agent-loop turns with a real LLM call: **median 1.2s, p95 2.0s** — latency is provider-bound; framework overhead is single-digit ms (isolated via per-phase `x-rag-perf` timing headers).
+- API layer in production: **13,197 requests at up to 200 req/s, 0% errors**, p95 flat across a 10× load increase.
+- Per-IP rate limiting verified empirically in production: 70 concurrent requests → exactly 60 admitted, remainder rejected with HTTP 429; limit raised via config for the benchmark, then reverted and re-verified.
+- Repeatable harness: k6 scenarios in [load-tests/](load-tests/) with constant-arrival-rate executors and thresholds, plus automated markdown reporting via `scripts/render_k6_report.py` — see [Local benchmarking](#local-benchmarking).
+
 ## Stack and tools
 
 - Orchestration: `LangGraph`
@@ -238,6 +247,16 @@ Key production settings in `service.yaml`:
 - `CORS_ORIGINS` must be a JSON array string: `'["https://your-app.vercel.app"]'`
 - `LANGSMITH_TRACING=true` with `LANGSMITH_API_KEY` secret
 
+Production health checks use separate endpoints:
+
+- `GET /health` is a process-only liveness check and never contacts dependencies.
+- `GET /ready` checks LLM configuration plus Supabase, Neo4j, and optional Redis with
+  per-dependency timeouts. It returns `503` when a critical dependency is not ready and `200`
+  with `status: degraded` when only an optional dependency such as Redis is unavailable.
+- Cloud Run startup and readiness probes use `/ready`; its liveness probe uses `/health`.
+- `READINESS_REQUIRE_SUPABASE=true` and `READINESS_REQUIRE_NEO4J=true` make those production
+  dependencies critical. Both default to `false` so local development can run with them disabled.
+
 ### Frontend — Vercel
 
 ```bash
@@ -397,7 +416,19 @@ Used for generation-level observability, user scoring, and evaluation datasets. 
 uv run pytest -v
 uv run ruff check src
 uv run mypy src
+
+cd ui
+npm run lint
+npm test
+npx playwright install chromium  # first run only
+npm run test:e2e
 ```
+
+The Playwright smoke journey uses local fixtures—no Google, Supabase, or model
+credentials are required. It restores an authenticated browser session, creates a
+research session, consumes paced SSE progress/report events, and verifies the
+completed report. CI retains the HTML report, trace, screenshot, and video when
+the journey fails.
 
 ## Local benchmarking
 
@@ -441,6 +472,25 @@ Additional scenarios:
 Local benchmark numbers are not production-capacity claims. Use them to find bottlenecks, tighten thresholds, and prepare the same scenarios for a production-like environment later.
 
 ## Model evaluation
+
+### Fast AI regression gate
+
+Every pull request runs a credential-free AI contract gate over 20 versioned cases in
+`src/evals/ai_regression_set.json`. The cases protect deterministic production boundaries:
+validated chat-router decisions, RAG/tool citation provenance, and progressive finance-tool
+selection and call planning. CI requires 100% overall and in every category, then uploads a
+commit-keyed JSON score artifact for comparison and audit.
+
+Run the same gate locally:
+
+```bash
+uv run python -m src.evals.regression_gate
+```
+
+Add a uniquely named case to the JSON dataset whenever one of these boundaries gains behavior
+or a production failure needs a permanent regression case. Keep PR cases deterministic and free
+of provider credentials. The model-backed DeepEval comparison below remains the appropriate
+manual evaluation for semantic generation quality; it is intentionally not duplicated in CI.
 
 Requires the `evals` optional extra (`uv sync --extra evals`) for `pandas` and `deepeval`.
 

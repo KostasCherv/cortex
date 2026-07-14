@@ -11,35 +11,55 @@ type Props = {
   authSession: Session | null
   resources: RagResource[]
   onResourcesChange: () => Promise<RagResource[]>
+  onResourceUploaded: (resource: RagResource) => void
 }
 
-export function ResourcesPage({ authSession, resources, onResourcesChange }: Props) {
-  const [loading, setLoading] = useState(false)
+export function ResourcesPage({
+  authSession,
+  resources,
+  onResourcesChange,
+  onResourceUploaded,
+}: Props) {
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
 
-  const load = useCallback(async () => {
-    if (!authSession?.access_token) return
-    setLoading(true)
-    try {
-      await onResourcesChange()
-      setError(null)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load resources.')
-    } finally {
-      setLoading(false)
-    }
-  }, [authSession?.access_token, onResourcesChange])
+  const refresh = useCallback(
+    async (options?: { background?: boolean }) => {
+      if (!authSession?.access_token) return
+      const background = options?.background ?? false
+      if (background) {
+        setRefreshing(true)
+      }
+      try {
+        await onResourcesChange()
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load resources.')
+      } finally {
+        if (background) {
+          setRefreshing(false)
+        }
+      }
+    },
+    [authSession?.access_token, onResourcesChange],
+  )
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (!authSession?.access_token) {
+      setInitialLoading(false)
+      return
+    }
+    void refresh().finally(() => setInitialLoading(false))
+  }, [authSession?.access_token, refresh])
 
   const handleUpload = async (file: File) => {
     if (!authSession?.access_token) return
     try {
-      await uploadRagResource(file, authSession.access_token)
-      await load()
+      const { resource } = await uploadRagResource(file, authSession.access_token)
+      onResourceUploaded(resource)
+      await refresh({ background: true })
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload resource.')
@@ -51,7 +71,7 @@ export function ResourcesPage({ authSession, resources, onResourcesChange }: Pro
     if (!authSession?.access_token) return
     try {
       await deleteRagResource(id, authSession.access_token)
-      await onResourcesChange()
+      await refresh({ background: true })
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete resource.')
@@ -62,12 +82,20 @@ export function ResourcesPage({ authSession, resources, onResourcesChange }: Pro
     <main className="mx-auto max-w-screen-lg space-y-4 px-4 py-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Resources</h1>
-        {authSession && (
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Upload size={14} />
-            Upload file
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {refreshing && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 size={12} className="animate-spin" />
+              Refreshing
+            </span>
+          )}
+          {authSession && (
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
+              <Upload size={14} />
+              Upload file
+            </Button>
+          )}
+        </div>
       </div>
       {error && (
         <p role="alert" className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -76,7 +104,7 @@ export function ResourcesPage({ authSession, resources, onResourcesChange }: Pro
       )}
       {!authSession ? (
         <p className="text-muted-foreground text-sm">Sign in to manage your resources.</p>
-      ) : loading ? (
+      ) : initialLoading ? (
         <div className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">
           <Loader2 size={14} className="animate-spin" />
           Loading resources
