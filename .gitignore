@@ -17,8 +17,7 @@ coverage.xml
 ui/coverage
 .mypy_cache
 chroma_db
-reports
-!reports/
+reports/*
 !reports/benchmarks/
 reports/benchmarks/*
 !reports/benchmarks/*.md
