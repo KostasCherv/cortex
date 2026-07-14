@@ -288,6 +288,8 @@ Production health checks use separate endpoints:
   per-dependency timeouts. It returns `503` when a critical dependency is not ready and `200`
   with `status: degraded` when only an optional dependency such as Redis is unavailable.
 - Cloud Run startup and readiness probes use `/ready`; its liveness probe uses `/health`.
+- The startup probe runs every 10 seconds with a 5-second timeout and allows 30 failures,
+  giving new revisions up to five minutes to become ready.
 - `READINESS_REQUIRE_SUPABASE=true` and `READINESS_REQUIRE_NEO4J=true` make those production
   dependencies critical. Both default to `false` so local development can run with them disabled.
 
