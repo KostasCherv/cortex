@@ -100,7 +100,7 @@ The API runs at `http://localhost:8010` and the UI at `http://localhost:5173`. T
 | Runtime safety | Separate liveness/readiness probes, dependency timeouts, smoke tests, and revision rollback instructions |
 | Quality | Ruff, blocking mypy, pytest coverage, ESLint, UI coverage, and a Playwright browser journey |
 | AI behavior | A credential-free 20-case regression gate requiring 100% across routing, provenance, and tool planning |
-| Observability | LangSmith traces, LangFuse generation telemetry, and optional Prometheus/Grafana benchmark dashboards |
+| Observability | LangSmith traces, LangFuse generation telemetry, opt-in Sentry error capture, and a [documented Cloud Run monitoring and alerting policy](docs/observability.md#production-monitoring) |
 
 Read the [deployment runbook](docs/deployment.md), [testing and quality guide](docs/testing-and-quality.md), and [observability guide](docs/observability.md) for operational details.
 
