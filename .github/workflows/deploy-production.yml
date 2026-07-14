@@ -1,0 +1,150 @@
+name: Deploy production backend
+
+run-name: Deploy production backend from ${{ github.sha }}
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: production-backend
+  cancel-in-progress: false
+
+jobs:
+  guard-main:
+    name: Require main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Reject non-main refs
+        env:
+          DEPLOY_REF: ${{ github.ref }}
+        run: |
+          if [[ "$DEPLOY_REF" != "refs/heads/main" ]]; then
+            echo "Production deployments must run from main; received $DEPLOY_REF." >&2
+            exit 1
+          fi
+
+  verify:
+    name: Verify main
+    needs: guard-main
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Migrate and deploy backend
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: Production
+      url: ${{ steps.backend-url.outputs.service_url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate production configuration
+        shell: bash
+        run: |
+          missing=()
+          for name in \
+            GCP_PROJECT \
+            GCP_REGION \
+            GCP_WORKLOAD_IDENTITY_PROVIDER \
+            GCP_SERVICE_ACCOUNT \
+            SUPABASE_PROJECT_REF \
+            SUPABASE_ACCESS_TOKEN \
+            SUPABASE_DB_PASSWORD
+          do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} )); then
+            printf 'Missing Production configuration: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: 2.109.1
+
+      - name: Link Supabase project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --yes
+
+      - name: Preview Supabase migrations
+        id: migration-preview
+        run: supabase db push --dry-run
+
+      - name: Apply Supabase migrations
+        id: migrations
+        run: supabase db push --yes
+
+      - name: Authenticate to Google Cloud
+        id: gcp-auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+
+      - name: Deploy Cloud Run backend
+        id: backend
+        run: ./scripts/deploy.sh
+
+      - name: Capture backend URL
+        id: backend-url
+        run: |
+          service_url="$(gcloud run services describe cortex \
+            --region="$GCP_REGION" \
+            --project="$GCP_PROJECT" \
+            --format='value(status.url)')"
+          if [[ -z "$service_url" ]]; then
+            echo "Cloud Run did not return a service URL." >&2
+            exit 1
+          fi
+          echo "service_url=$service_url" >> "$GITHUB_OUTPUT"
+
+      - name: Publish deployment summary
+        if: always()
+        env:
+          MIGRATION_PREVIEW_OUTCOME: ${{ steps.migration-preview.outcome }}
+          MIGRATION_OUTCOME: ${{ steps.migrations.outcome }}
+          BACKEND_OUTCOME: ${{ steps.backend.outcome }}
+          SERVICE_URL: ${{ steps.backend-url.outputs.service_url }}
+        run: |
+          {
+            echo "## Production backend deployment"
+            echo
+            echo "- **Commit:** \`$GITHUB_SHA\`"
+            echo "- **Migration preview:** ${MIGRATION_PREVIEW_OUTCOME:-not run}"
+            echo "- **Migrations:** ${MIGRATION_OUTCOME:-not run}"
+            echo "- **Cloud Run deploy and smoke checks:** ${BACKEND_OUTCOME:-not run}"
+            if [[ -n "$SERVICE_URL" ]]; then
+              echo "- **Backend:** $SERVICE_URL"
+              echo "- **Health:** $SERVICE_URL/health"
+              echo "- **Inngest follow-up:** verify the serve URL is $SERVICE_URL/api/inngest"
+            else
+              echo "- **Backend URL:** unavailable"
+            fi
+            echo "- **UI:** deployed independently by Vercel Git integration"
+          } >> "$GITHUB_STEP_SUMMARY"
