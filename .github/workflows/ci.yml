@@ -20,10 +20,8 @@ jobs:
         run: uv run ruff check src tests
       - name: Security scan (bandit)
         run: uv run bandit -c pyproject.toml -r src
-      - name: Typecheck (non-blocking)
-        # 38 pre-existing errors as of this workflow's introduction; tighten
-        # once the backlog is cleared instead of blocking every PR on it.
-        run: uv run mypy src || true
+      - name: Typecheck
+        run: uv run mypy src
       - name: Test
         env:
           # Dummy values so config "is this configured?" checks pass; no real
@@ -33,7 +31,19 @@ jobs:
           SUPABASE_URL: https://example.com
           SUPABASE_SECRET_KEY: dummy-secret-key-for-ci
           SUPABASE_JWKS_URL: https://example.com/auth/v1/.well-known/jwks.json
-        run: uv run python -m pytest tests/ -q
+        run: >-
+          uv run python -m pytest tests/ -q
+          --cov=src
+          --cov-fail-under=73
+          --cov-report=term-missing
+          --cov-report=xml:coverage.xml
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage.xml
+          if-no-files-found: warn
       - name: AI regression gate
         if: always()
         run: uv run python -m src.evals.regression_gate --output reports/ai-regression-${{ github.sha }}.json
@@ -64,8 +74,15 @@ jobs:
         run: npx eslint src --max-warnings=0
       - name: Typecheck
         run: npx tsc --noEmit -p tsconfig.app.json
-      - name: Test
-        run: npx vitest run
+      - name: Test with coverage
+        run: npm run test:coverage
+      - name: Upload UI coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-coverage
+          path: ui/coverage/
+          if-no-files-found: warn
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Browser smoke test

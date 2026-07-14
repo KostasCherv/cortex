@@ -11,9 +11,10 @@ from src.config import settings
 from src.errors import ConfigurationError
 
 try:
-    from langfuse import Langfuse
+    from langfuse import Langfuse as _Langfuse
+    Langfuse: Any = _Langfuse
 except Exception:  # pragma: no cover - optional dependency at runtime
-    Langfuse = None  # type: ignore[assignment]
+    Langfuse = None
 
 
 def _langfuse_ready() -> bool:

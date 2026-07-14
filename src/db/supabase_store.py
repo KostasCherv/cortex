@@ -1221,7 +1221,7 @@ class SupabaseSessionStore:
         rows = response.json()
         if rows:
             await self._invalidate_rag_agents_list_cache(owner_id, workspace_id)
-            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id)
+            await self._invalidate_rag_chat_sessions_list_cache(owner_id, agent_id, "agent")
         return bool(rows)
 
     async def replace_rag_agent_resources(

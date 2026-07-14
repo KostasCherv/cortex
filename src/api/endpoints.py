@@ -2,6 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any, cast
 
 import inngest.fast_api as _inngest_fast_api
 import sentry_sdk
@@ -106,7 +107,7 @@ app.add_middleware(
 
 limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, cast(Any, _rate_limit_exceeded_handler))
 app.add_middleware(SlowAPIMiddleware)
 
 _inngest_fast_api.serve(
@@ -234,7 +235,6 @@ async def cortex_error_handler(request: Request, exc: CortexError) -> JSONRespon
 async def health():
     """Simple liveness probe."""
     return HealthResponse(status="ok", version="0.1.0")
-
 
 @app.get(
     "/ready",
