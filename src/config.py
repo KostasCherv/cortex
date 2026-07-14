@@ -12,47 +12,42 @@ class Settings(BaseSettings):
     )
 
     # LLM
-    llm_provider: str = Field(
-        default="openai", description="LLM provider: 'ollama' or 'openai'"
-    )
+    llm_provider: str = Field(default="openai", description="LLM provider: 'ollama' or 'openai'")
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
     openrouter_api_key: str = Field(default="", description="OpenRouter API key")
-    openrouter_model: str = Field(
-        default="openai/gpt-4o-mini", description="OpenRouter model slug"
-    )
-    ollama_base_url: str = Field(
-        default="http://localhost:11434", description="Ollama base URL"
-    )
+    openrouter_model: str = Field(default="openai/gpt-4o-mini", description="OpenRouter model slug")
+    ollama_base_url: str = Field(default="http://localhost:11434", description="Ollama base URL")
     ollama_model: str = Field(default="llama3.2", description="Ollama model name")
     lmstudio_base_url: str = Field(
         default="http://localhost:1234/v1", description="LM Studio base URL"
     )
     lmstudio_model: str = Field(default="model", description="LM Studio model name")
 
-    # Router LLM (fast action-classification model, separate from the main "brain" model)
-    router_enabled: bool = Field(
-        default=False,
-        description="Enable the live chat action-router LLM call. Off by default.",
-    )
+    # Router LLM (always-on action classification; defaults to the main LLM)
     router_llm_provider: str = Field(
         default="",
         description="Router LLM provider override: 'ollama'|'openai'|'openrouter'|'lmstudio'. Empty falls back to llm_provider.",
     )
     router_openai_model: str = Field(
-        default="", description="OpenAI model override for the router. Empty falls back to openai_model."
+        default="",
+        description="OpenAI model override for the router. Empty falls back to openai_model.",
     )
     router_openrouter_model: str = Field(
-        default="", description="OpenRouter model slug override for the router. Empty falls back to openrouter_model."
+        default="",
+        description="OpenRouter model slug override for the router. Empty falls back to openrouter_model.",
     )
     router_ollama_model: str = Field(
-        default="", description="Ollama model tag override for the router. Empty falls back to ollama_model."
+        default="",
+        description="Ollama model tag override for the router. Empty falls back to ollama_model.",
     )
     router_ollama_base_url: str = Field(
-        default="", description="Ollama base URL override for the router. Empty falls back to ollama_base_url."
+        default="",
+        description="Ollama base URL override for the router. Empty falls back to ollama_base_url.",
     )
     router_lmstudio_model: str = Field(
-        default="", description="LM Studio model override for the router. Empty falls back to lmstudio_model."
+        default="",
+        description="LM Studio model override for the router. Empty falls back to lmstudio_model.",
     )
     router_temperature: float = Field(
         default=0.0, description="Sampling temperature for the router LLM."
@@ -325,12 +320,8 @@ class Settings(BaseSettings):
 
     # Billing / Stripe
     stripe_secret_key: str = Field(default="", description="Stripe secret key.")
-    stripe_webhook_secret: str = Field(
-        default="", description="Stripe webhook signing secret."
-    )
-    stripe_pro_price_id: str = Field(
-        default="", description="Stripe price id for the pro plan."
-    )
+    stripe_webhook_secret: str = Field(default="", description="Stripe webhook signing secret.")
+    stripe_pro_price_id: str = Field(default="", description="Stripe price id for the pro plan.")
     stripe_success_url: str = Field(
         default="http://localhost:5173/billing/success",
         description="Redirect URL after successful checkout.",

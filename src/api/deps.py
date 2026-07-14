@@ -285,9 +285,7 @@ def _build_wikipedia_citations(results: object) -> list[dict]:
         citations.append(
             {
                 "source_title": title,
-                "source_url": (
-                    f"https://en.wikipedia.org/wiki/{page_slug}" if page_slug else None
-                ),
+                "source_url": (f"https://en.wikipedia.org/wiki/{page_slug}" if page_slug else None),
                 "chunk_id": f"wikipedia-{index + 1}",
                 "text": str(row.get("extract") or ""),
                 "source_type": "wikipedia",
@@ -309,9 +307,7 @@ def _build_open_library_citations(results: object) -> list[dict]:
         ]
         citations.append(
             {
-                "source_title": str(
-                    row.get("title") or f"Open Library result {index + 1}"
-                ),
+                "source_title": str(row.get("title") or f"Open Library result {index + 1}"),
                 "source_url": str(row.get("url") or "") or None,
                 "chunk_id": f"open-library-{index + 1}",
                 "text": "\n".join(part for part in text_parts if part),
@@ -365,18 +361,12 @@ def _build_arxiv_tool_citations(
                 seen_ids.add(candidate_id)
             title = str(
                 row.get("title")
-                or (
-                    f"arXiv:{candidate_id}"
-                    if candidate_id
-                    else f"arXiv result {index + 1}"
-                )
+                or (f"arXiv:{candidate_id}" if candidate_id else f"arXiv result {index + 1}")
             )
             url = str(row.get("abs_url") or row.get("pdf_url") or "") or (
                 f"https://arxiv.org/abs/{candidate_id}" if candidate_id else None
             )
-            text = str(
-                row.get("abstract") or row.get("summary") or row.get("content") or ""
-            )
+            text = str(row.get("abstract") or row.get("summary") or row.get("content") or "")
             citations.append(
                 {
                     "source_title": title,
@@ -425,15 +415,19 @@ def _select_chat_citations(
     rag_chunks: list[dict] | None,
     loop_citations: list[dict],
     *,
+    router_action: str | None,
     web_used: bool,
     rag_context_text: str,
 ) -> list[dict]:
     """Choose persisted citations based on which evidence actually supported the answer."""
-    had_rag_chunks = bool(rag_chunks)
-    rag_citations = _build_rag_citations(_filter_relevant_rag_chunks(rag_chunks))
-
     if web_used or _has_tool_or_web_citations(loop_citations):
         return list(loop_citations)
+
+    if router_action != "answer_from_rag":
+        return list(loop_citations)
+
+    had_rag_chunks = bool(rag_chunks)
+    rag_citations = _build_rag_citations(_filter_relevant_rag_chunks(rag_chunks))
 
     if loop_citations and rag_citations:
         return _merge_citations(loop_citations, rag_citations)
@@ -453,9 +447,7 @@ def _select_chat_citations(
     return []
 
 
-def _build_tool_citations(
-    tool_name: str, tool_args: dict, raw_result: object
-) -> list[dict]:
+def _build_tool_citations(tool_name: str, tool_args: dict, raw_result: object) -> list[dict]:
     content, artifact = _normalize_tool_result(raw_result)
     if tool_name in GENERAL_WEB_TOOL_NAMES:
         results = None
@@ -640,9 +632,7 @@ async def _run_agent_loop(
                 tool_result = ""
                 tool_status = "ok"
                 try:
-                    span_tags = (
-                        ["external", "composio"] if composio_stream else ["external"]
-                    )
+                    span_tags = ["external", "composio"] if composio_stream else ["external"]
                     with start_step_span(
                         name=f"agent_loop.tool.{tool_name}",
                         run_type="tool",
@@ -653,9 +643,7 @@ async def _run_agent_loop(
                     ):
                         matched_tool = tool_map.get(tool_name)
                         if matched_tool is None:
-                            raise ValueError(
-                                f"Tool '{tool_name}' not found in catalog."
-                            )
+                            raise ValueError(f"Tool '{tool_name}' not found in catalog.")
                         raw_result = await _invoke_tool_raw_result(matched_tool, tool_args)
                         normalized_content, _ = _normalize_tool_result(raw_result)
                         tool_result = normalized_content[:6000]
@@ -671,13 +659,9 @@ async def _run_agent_loop(
                     logger.warning("[agent_loop] tool %s failed: %s", tool_name, exc)
 
                 if composio_stream and on_event:
-                    await on_event(
-                        {"type": "tool_end", "tool": tool_name, "status": tool_status}
-                    )
+                    await on_event({"type": "tool_end", "tool": tool_name, "status": tool_status})
 
-                loop_messages.append(
-                    ToolMessage(content=tool_result, tool_call_id=tool_id)
-                )
+                loop_messages.append(ToolMessage(content=tool_result, tool_call_id=tool_id))
 
         return AgentLoopResult(
             answer=last_response_text,
@@ -735,7 +719,5 @@ async def _generate_suggestions(query: str, answer: str, context: str) -> list[s
                 suggestions.append(line)
         return suggestions[:3]
     except Exception as exc:
-        logger.warning(
-            "[suggestions] failed to generate follow-up suggestions: %s", exc
-        )
+        logger.warning("[suggestions] failed to generate follow-up suggestions: %s", exc)
         return []

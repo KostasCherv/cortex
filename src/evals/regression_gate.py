@@ -43,6 +43,7 @@ def _evaluate_citation(case: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
     citations = _select_chat_citations(
         data["rag_chunks"],
         data["loop_citations"],
+        router_action=data["router_action"],
         web_used=data["web_used"],
         rag_context_text=data["rag_context_text"],
     )

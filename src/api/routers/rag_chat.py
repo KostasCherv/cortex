@@ -27,6 +27,7 @@ from src.api.deps import (
 from src.auth import AuthenticatedUser, get_authenticated_user
 from src.billing import UsageIncrement
 from src.config import settings
+from src.errors import RouterError
 from src.observability import end_workflow_run, start_workflow_run
 from src.rag import (
     CHAT_SCOPE_WORKSPACE,
@@ -63,9 +64,7 @@ async def _require_workspace_chat_session(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
 
 
 @router.post("/api/rag/chat", tags=["RAG"])
@@ -88,9 +87,7 @@ async def rag_chat_workspace(
 
     timings = RagChatTimings()
     wall_start = time.perf_counter()
-    with start_workflow_run(
-        entrypoint="rag_chat_workspace", query=normalized_message
-    ) as trace_ctx:
+    with start_workflow_run(entrypoint="rag_chat_workspace", query=normalized_message) as trace_ctx:
         try:
             prepared = await prepare_workspace_rag_chat(
                 user_id=current_user.user_id,
@@ -139,6 +136,7 @@ async def rag_chat_workspace(
             citations = _select_chat_citations(
                 prepared.rag_context.chunks,
                 loop_result.citations,
+                router_action=getattr(getattr(prepared, "router_decision", None), "action", None),
                 web_used=loop_result.web_used,
                 rag_context_text=prepared.rag_context.context or "",
             )
@@ -200,6 +198,11 @@ async def rag_chat_workspace(
             )
         except Exception as exc:
             end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+            if isinstance(exc, RouterError):
+                raise HTTPException(
+                    status_code=503,
+                    detail={"code": "router_error", "message": str(exc)},
+                ) from exc
             raise
 
 
@@ -288,6 +291,9 @@ async def rag_chat_workspace_stream(
                 citations = _select_chat_citations(
                     prepared.rag_context.chunks,
                     loop_result.citations,
+                    router_action=getattr(
+                        getattr(prepared, "router_decision", None), "action", None
+                    ),
                     web_used=loop_result.web_used,
                     rag_context_text=prepared.rag_context.context or "",
                 )
@@ -342,10 +348,11 @@ async def rag_chat_workspace_stream(
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except Exception as exc:
             if trace_ctx is not None:
-                end_workflow_run(
-                    trace_ctx, status="error", error=_workflow_error_text(exc)
-                )
-            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+                end_workflow_run(trace_ctx, status="error", error=_workflow_error_text(exc))
+            error_event = {"type": "error", "error": str(exc)}
+            if isinstance(exc, RouterError):
+                error_event["code"] = "router_error"
+            yield f"data: {json.dumps(error_event)}\n\n"
 
     return StreamingResponse(
         _stream_chat(),
@@ -481,9 +488,7 @@ async def list_rag_workspace_chat_session_messages(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
     messages = await list_rag_chat_messages(session_id, current_user.user_id)
     return {
         "session_id": session_id,
@@ -511,9 +516,7 @@ async def update_rag_workspace_chat_session_title(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if not updated:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
     return {"session_id": session_id, "title": title}
 
 
@@ -529,9 +532,7 @@ async def delete_rag_workspace_chat_session(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if not deleted:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
     return {"session_id": session_id, "deleted": True}
 
 
@@ -547,17 +548,11 @@ async def delete_rag_workspace_chat_last_exchange(
         chat_scope=CHAT_SCOPE_WORKSPACE,
     )
     if session is None:
-        raise HTTPException(
-            status_code=404, detail=f"Chat session '{session_id}' not found."
-        )
-    deleted, err = await delete_last_exchange(
-        session_id=session_id, user_id=current_user.user_id
-    )
+        raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found.")
+    deleted, err = await delete_last_exchange(session_id=session_id, user_id=current_user.user_id)
     if not deleted:
         if err == "empty":
-            raise HTTPException(
-                status_code=404, detail="Session has no messages to delete."
-            )
+            raise HTTPException(status_code=404, detail="Session has no messages to delete.")
         raise HTTPException(
             status_code=409, detail="Last two messages are not a user/assistant pair."
         )

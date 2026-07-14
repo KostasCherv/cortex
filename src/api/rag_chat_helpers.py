@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from src.api.rag_chat_timing import RagChatTimings
-from src.errors import StructuredOutputError
+from src.errors import RouterError, StructuredOutputError
 from src.llm.factory import get_router_llm
 from src.llm.output_parsers import (
     ChatActionDecisionPayload,
@@ -61,19 +61,17 @@ _COMPOSIO_META_KEYWORDS = (
     "integrate",
 )
 
+
 def should_use_workspace_resources(
     router_decision: ChatActionDecisionPayload | None,
 ) -> bool:
     """Return whether workspace-wide resources should be retrieved for this turn.
 
-    When the router is unavailable, preserve the existing behavior and allow
-    workspace retrieval. Once routed, only document/knowledge-base questions
-    should load workspace-wide resources; explicit session attachments are
-    still retrieved separately.
+    Only an explicit document/knowledge-base decision may load collection
+    resources. Missing or unknown decisions fail closed; explicit session
+    attachments are still retrieved separately.
     """
-    if router_decision is None:
-        return True
-    return router_decision.action == "answer_from_rag"
+    return getattr(router_decision, "action", None) == "answer_from_rag"
 
 
 _EXTERNAL_INTENT_MARKERS = (
@@ -125,9 +123,7 @@ def build_agent_messages(
     bind_tools: bool = True,
     composio_user_disabled: bool = False,
 ) -> list[BaseMessage]:
-    template_name = (
-        "rag_chat_system" if settings.composio_enabled else "rag_chat_system_no_tools"
-    )
+    template_name = "rag_chat_system" if settings.composio_enabled else "rag_chat_system_no_tools"
     system_content, _ = prompt_registry.render(
         template_name,
         {
@@ -221,9 +217,7 @@ def _get_router_action_schema() -> str:
     if _ROUTER_ACTION_SCHEMA is None:
         import json
 
-        _ROUTER_ACTION_SCHEMA = json.dumps(
-            ChatActionDecisionPayload.model_json_schema(), indent=2
-        )
+        _ROUTER_ACTION_SCHEMA = json.dumps(ChatActionDecisionPayload.model_json_schema(), indent=2)
     return _ROUTER_ACTION_SCHEMA
 
 
@@ -239,18 +233,12 @@ async def classify_chat_action(
     *,
     message: str,
     rag_context: str = "",
-) -> ChatActionDecisionPayload | None:
+) -> ChatActionDecisionPayload:
     """Classify a chat message into a router action using the fast router LLM.
 
-    Returns None if routing is disabled or the router call/parse fails after
-    one repair attempt — callers must treat None as "no router opinion,
-    fall back to existing behavior unchanged". This call never raises and
-    never affects the existing chat flow; it is purely additive plumbing
-    until the router's decision is wired into actual behavior.
+    Routing is mandatory. Provider/model settings default to the main LLM, and
+    failures raise RouterError rather than silently enabling document retrieval.
     """
-    if not settings.router_enabled:
-        return None
-
     user_turn = _format_router_user_turn(message=message, rag_context=rag_context)
     prompt = f"{_ROUTER_ACTION_SYSTEM_PROMPT}\n\n{user_turn}"
 
@@ -267,7 +255,7 @@ async def classify_chat_action(
         raw_text = extract_llm_text(response)
     except Exception as exc:
         logger.warning("[rag_chat] router LLM call failed: %s", exc)
-        return None
+        raise RouterError("Chat router is unavailable.") from exc
 
     try:
         return parse_chat_action_json(raw_text)
@@ -285,16 +273,12 @@ async def classify_chat_action(
                 inputs={"prompt": repair_prompt},
                 tags=["rag_chat", "router", "repair"],
             ):
-                repair_response = await asyncio.wait_for(
-                    llm.ainvoke(repair_prompt), timeout=3.0
-                )
+                repair_response = await asyncio.wait_for(llm.ainvoke(repair_prompt), timeout=3.0)
             repair_text = extract_llm_text(repair_response)
             return parse_chat_action_json(repair_text)
         except Exception as repair_exc:
-            logger.warning(
-                "[rag_chat] router decision parse failed after repair: %s", repair_exc
-            )
-            return None
+            logger.warning("[rag_chat] router decision parse failed after repair: %s", repair_exc)
+            raise RouterError("Chat router returned an invalid decision.") from repair_exc
 
 
 async def ensure_agent_chat_session_id(
@@ -328,7 +312,7 @@ async def prepare_agent_rag_chat(
     agent_bundle = await get_agent_for_chat(agent_id, user_id)
     if agent_bundle is None:
         return None
-    agent, resource_ids = agent_bundle
+    agent, linked_resource_ids = agent_bundle
 
     t_session = time.perf_counter()
     chat_session_id = await create_or_get_chat_session(
@@ -353,7 +337,11 @@ async def prepare_agent_rag_chat(
         for attachment in session_attachments
         if attachment.state == "ready" and attachment.filename
     ]
-    merged_resource_ids = list(dict.fromkeys(resource_ids + session_attachment_resource_ids))
+    router_decision = await classify_chat_action(message=normalized_message)
+    agent_resource_ids = (
+        linked_resource_ids if should_use_workspace_resources(router_decision) else []
+    )
+    merged_resource_ids = list(dict.fromkeys(agent_resource_ids + session_attachment_resource_ids))
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
     if tools is not None:
@@ -379,19 +367,17 @@ async def prepare_agent_rag_chat(
 
     retrieve_task = retrieve_merged_context_for_agent_chat(
         user_id=user_id,
-        agent_resource_ids=resource_ids,
+        agent_resource_ids=agent_resource_ids,
         session_attachment_resource_ids=session_attachment_resource_ids,
         session_attachment_files=session_attachment_files,
         question=normalized_message,
     )
     memory_task = get_user_memory_prompt_block(user_id, normalized_message)
     history_task = list_rag_chat_messages(chat_session_id, user_id)
-    router_task = classify_chat_action(message=normalized_message)
-    rag_context, user_memory_context, history, router_decision = await asyncio.gather(
+    rag_context, user_memory_context, history = await asyncio.gather(
         retrieve_task,
         memory_task,
         history_task,
-        router_task,
     )
     history = trim_chat_history(history)
 

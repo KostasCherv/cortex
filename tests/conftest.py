@@ -18,8 +18,25 @@ def reset_provider():
     """Reset provider singletons between tests to prevent state leaks."""
     yield
     from src.db import provider
+
     provider._session_store = None
     provider._storage_adapter = None
+
+
+@pytest.fixture(autouse=True)
+def mock_chat_router():
+    """Default chat preparation to a deterministic direct-answer route."""
+    from src.llm.output_parsers import ChatActionDecisionPayload
+
+    decision = ChatActionDecisionPayload(
+        action="answer_direct",
+        reason="test default",
+    )
+    with patch(
+        "src.api.rag_chat_helpers.classify_chat_action",
+        new=AsyncMock(return_value=decision),
+    ):
+        yield decision
 
 
 @pytest.fixture(autouse=True)

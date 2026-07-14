@@ -226,6 +226,7 @@ def test_get_memory_returns_single_memory_document():
     data = response.json()
     assert data["content"] == "Prefers concise answers.\nWorks in fintech."
 
+
 def test_put_memory_updates_content():
     with patch(
         "src.api.routers.memory.update_user_memory",
@@ -263,6 +264,7 @@ def test_delete_memory_clears_saved_memory():
 # ---------------------------------------------------------------------------
 # Session endpoint tests
 # ---------------------------------------------------------------------------
+
 
 def test_create_session_returns_session_id():
     mock_session = Session(
@@ -366,7 +368,9 @@ def test_session_research_queues_background_run():
         patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
         patch("src.api.routers.sessions.create_session_run", new=mock_create_session_run),
         patch("src.api.routers.sessions.outbox.enqueue_event", new=mock_enqueue_event),
-        patch("src.api.routers.sessions.outbox.dispatch_outbox_events", new=AsyncMock(return_value=1)),
+        patch(
+            "src.api.routers.sessions.outbox.dispatch_outbox_events", new=AsyncMock(return_value=1)
+        ),
     ):
         response = client.post(
             "/sessions/session-1/research",
@@ -417,7 +421,9 @@ def test_submit_run_feedback_creates_boolean_score_and_marks_run():
     with (
         patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
         patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
-        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
+        patch(
+            "src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)
+        ) as mock_update,
     ):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
@@ -448,9 +454,14 @@ def test_submit_run_feedback_backfills_langfuse_linkage_when_missing():
 
     with (
         patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.routers.sessions.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
+        patch(
+            "src.api.routers.sessions.create_feedback_anchor_for_run",
+            return_value=("trace-backfill", "obs-backfill"),
+        ),
         patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
-        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)) as mock_update,
+        patch(
+            "src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)
+        ) as mock_update,
     ):
         response = client.post(
             "/sessions/session-1/runs/run-1/feedback",
@@ -537,7 +548,10 @@ def test_submit_run_feedback_returns_404_when_backfill_linkage_persist_fails():
 
     with (
         patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
-        patch("src.api.routers.sessions.create_feedback_anchor_for_run", return_value=("trace-backfill", "obs-backfill")),
+        patch(
+            "src.api.routers.sessions.create_feedback_anchor_for_run",
+            return_value=("trace-backfill", "obs-backfill"),
+        ),
         patch("src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=False)),
         patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
     ):
@@ -555,16 +569,30 @@ def test_execute_research_run_marks_completed_and_records():
 
     class FakeGraph:
         async def astream_events(self, _initial_state, version="v2"):
-            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
-            yield {"event": "on_chat_model_stream", "metadata": {"langgraph_node": "report"}, "data": {"chunk": MagicMock(content="Final ")}}
-            yield {"event": "on_chat_model_stream", "metadata": {"langgraph_node": "report"}, "data": {"chunk": MagicMock(content="report")}}
+            yield {
+                "event": "on_chain_start",
+                "metadata": {"langgraph_node": "search_and_memory"},
+                "data": {},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "metadata": {"langgraph_node": "report"},
+                "data": {"chunk": MagicMock(content="Final ")},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "metadata": {"langgraph_node": "report"},
+                "data": {"chunk": MagicMock(content="report")},
+            }
             yield {
                 "event": "on_chain_end",
                 "metadata": {"langgraph_node": "report"},
                 "data": {
                     "output": {
                         "report": "Final report",
-                        "retrieved_contents": [{"url": "https://example.com", "title": "Example", "content": "Chunk"}],
+                        "retrieved_contents": [
+                            {"url": "https://example.com", "title": "Example", "content": "Chunk"}
+                        ],
                         "summaries": [],
                     }
                 },
@@ -660,11 +688,17 @@ def test_execute_research_run_ignores_live_state_persist_errors():
 
     class FakeGraph:
         async def astream_events(self, _initial_state, version="v2"):
-            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
+            yield {
+                "event": "on_chain_start",
+                "metadata": {"langgraph_node": "search_and_memory"},
+                "data": {},
+            }
             yield {
                 "event": "on_chain_end",
                 "metadata": {"langgraph_node": "report"},
-                "data": {"output": {"report": "Final report", "retrieved_contents": [], "summaries": []}},
+                "data": {
+                    "output": {"report": "Final report", "retrieved_contents": [], "summaries": []}
+                },
             }
 
     @contextmanager
@@ -684,7 +718,9 @@ def test_execute_research_run_ignores_live_state_persist_errors():
     with (
         patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=session)),
         patch("src.api.routers.sessions.build_graph", return_value=FakeGraph()),
-        patch("src.api.routers.sessions.update_session_run", new=AsyncMock(side_effect=flaky_update)),
+        patch(
+            "src.api.routers.sessions.update_session_run", new=AsyncMock(side_effect=flaky_update)
+        ),
         patch("src.api.routers.sessions._record_session_run", new=AsyncMock(return_value=None)),
         patch("src.api.routers.sessions.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.routers.sessions.end_workflow_run"),
@@ -713,7 +749,11 @@ def test_execute_research_runs_can_overlap_in_time():
             starts.append((run_id, time.perf_counter()))
             await asyncio.sleep(0.05)
             ends.append((run_id, time.perf_counter()))
-            yield {"event": "on_chain_start", "metadata": {"langgraph_node": "search_and_memory"}, "data": {}}
+            yield {
+                "event": "on_chain_start",
+                "metadata": {"langgraph_node": "search_and_memory"},
+                "data": {},
+            }
             yield {
                 "event": "on_chain_end",
                 "metadata": {"langgraph_node": "report"},
@@ -740,6 +780,7 @@ def test_execute_research_runs_can_overlap_in_time():
         patch("src.api.routers.sessions.start_workflow_run", side_effect=_mock_trace_ctx),
         patch("src.api.routers.sessions.end_workflow_run"),
     ):
+
         async def _run_pair() -> None:
             await asyncio.gather(
                 _execute_research_run(
@@ -777,7 +818,11 @@ def test_record_session_run_raises_when_finalize_update_fails():
                     user_id="user-1",
                     run_id="run-1",
                     query="What is LangGraph?",
-                    final_state={"report": "Final report", "retrieved_contents": [], "summaries": []},
+                    final_state={
+                        "report": "Final report",
+                        "retrieved_contents": [],
+                        "summaries": [],
+                    },
                 )
             )
             assert False, "Expected RuntimeError when run finalization update fails"
@@ -849,7 +894,6 @@ def test_startup_validation_fails_when_arxiv_mcp_is_unavailable():
             asyncio.run(endpoints._run_startup_checks())
 
 
-
 def test_configure_application_logging_sets_src_logger_level():
     root_logger = endpoints.logging.getLogger()
     src_logger = endpoints.logging.getLogger("src")
@@ -878,6 +922,7 @@ def test_configure_application_logging_sets_src_logger_level():
 # Follow-up suggestion tests
 # ---------------------------------------------------------------------------
 
+
 def test_generate_suggestions_returns_list():
     """_generate_suggestions parses numbered lines into a list of strings."""
     from src.api.routers.sessions import _generate_suggestions
@@ -890,7 +935,9 @@ def test_generate_suggestions_returns_list():
 
     with patch("src.api.deps.get_llm", return_value=mock_llm):
         suggestions = asyncio.run(
-            _generate_suggestions("What is LangGraph?", "LangGraph is a library...", "topics: graphs, agents")
+            _generate_suggestions(
+                "What is LangGraph?", "LangGraph is a library...", "topics: graphs, agents"
+            )
         )
 
     assert isinstance(suggestions, list)
@@ -955,8 +1002,14 @@ def test_followup_stream_includes_suggestions_event():
         patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
         patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Here is the answer.", False))),
-        patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=["Q1?", "Q2?", "Q3?"])),
+        patch(
+            "src.api.routers.sessions._run_agent_loop",
+            new=AsyncMock(return_value=("Here is the answer.", False)),
+        ),
+        patch(
+            "src.api.routers.sessions._generate_suggestions",
+            new=AsyncMock(return_value=["Q1?", "Q2?", "Q3?"]),
+        ),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
@@ -972,9 +1025,7 @@ def test_followup_stream_includes_suggestions_event():
     assert "text/event-stream" in response.headers["content-type"]
 
     events = [
-        json.loads(line[6:])
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
     ]
     event_types = [e["type"] for e in events]
     assert "suggestions" in event_types
@@ -997,8 +1048,18 @@ def test_followup_stream_citations_match_reranked_chunks():
     )
 
     raw_chunks = [
-        {"chunk_id": "raw-1", "text": "Less relevant", "source_url": "https://a.com", "source_title": "A"},
-        {"chunk_id": "raw-2", "text": "More relevant", "source_url": "https://b.com", "source_title": "B"},
+        {
+            "chunk_id": "raw-1",
+            "text": "Less relevant",
+            "source_url": "https://a.com",
+            "source_title": "A",
+        },
+        {
+            "chunk_id": "raw-2",
+            "text": "More relevant",
+            "source_url": "https://b.com",
+            "source_title": "B",
+        },
     ]
     reranked_chunks = [raw_chunks[1]]
 
@@ -1007,13 +1068,18 @@ def test_followup_stream_citations_match_reranked_chunks():
         patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.routers.sessions.rerank_chunks", return_value=reranked_chunks),
         patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.sessions._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         mock_graph = MagicMock()
-        mock_graph.query_context.return_value = MagicMock(context="ctx", chunks=raw_chunks, entities=["a"])
+        mock_graph.query_context.return_value = MagicMock(
+            context="ctx", chunks=raw_chunks, entities=["a"]
+        )
         mock_graph_cls.return_value = mock_graph
         response = client.post(
             "/sessions/session-1/followup",
@@ -1022,9 +1088,7 @@ def test_followup_stream_citations_match_reranked_chunks():
 
     assert response.status_code == 200
     events = [
-        json.loads(line[6:])
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
     ]
     citations_event = next(event for event in events if event["type"] == "citations")
     assert citations_event["citations"] == [
@@ -1144,7 +1208,10 @@ def test_followup_stream_returns_answer_from_agent_loop():
         patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
         patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
         patch("src.api.routers.sessions.append_turn", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(return_value=("Online follow-up answer", False))),
+        patch(
+            "src.api.routers.sessions._run_agent_loop",
+            new=AsyncMock(return_value=("Online follow-up answer", False)),
+        ),
         patch("src.api.routers.sessions._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -1159,9 +1226,7 @@ def test_followup_stream_returns_answer_from_agent_loop():
 
     assert response.status_code == 200
     events = [
-        json.loads(line[6:])
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
     ]
     chunk_event = next((e for e in events if e.get("type") == "chunk"), None)
     assert chunk_event is not None
@@ -1217,7 +1282,12 @@ async def _collect_stream(stream):
     return events
 
 
-def _fake_prepared_chat(*, session_id: str = "chat-1", resource_ids: list[str] | None = None):
+def _fake_prepared_chat(
+    *,
+    session_id: str = "chat-1",
+    resource_ids: list[str] | None = None,
+    router_action: str = "answer_from_rag",
+):
     return SimpleNamespace(
         agent=MagicMock(system_instructions="Keep it concise."),
         resource_ids=resource_ids or ["res-1"],
@@ -1229,8 +1299,8 @@ def _fake_prepared_chat(*, session_id: str = "chat-1", resource_ids: list[str] |
         composio_apps=[],
         allow_web_search=True,
         reference_tools={},
+        router_decision=SimpleNamespace(action=router_action),
     )
-
 
 
 def test_rag_chat_calls_agent_loop():
@@ -1248,12 +1318,23 @@ def test_rag_chat_calls_agent_loop():
         yield trace_ctx
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.routers.rag_agents._run_agent_loop", mock_loop),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
@@ -1293,14 +1374,28 @@ def test_rag_chat_stream_calls_agent_loop():
         yield trace_ctx
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(side_effect=loop_with_trace_snapshot),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.routers.rag_agents.start_workflow_run", side_effect=mock_trace_ctx),
@@ -1426,7 +1521,9 @@ def test_rag_agent_chat_stream_uploads_files_before_running_loop():
             new=AsyncMock(side_effect=record_ingest),
         ) as mock_ingest,
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)
+        ) as mock_loop,
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
@@ -1478,8 +1575,12 @@ def test_rag_agent_chat_uploads_files_before_running_loop():
         ) as mock_ingest,
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.routers.rag_agents.enqueue_memory_refresh", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
+        patch(
+            "src.api.routers.rag_agents.enqueue_memory_refresh", new=AsyncMock(return_value=None)
+        ),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)
+        ) as mock_loop,
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
@@ -1519,7 +1620,9 @@ def test_rag_agent_chat_upload_validation_ends_workflow_before_400():
         ),
         patch(
             "src.api.routers.rag_agents.ingest_agent_chat_session_uploads",
-            new=AsyncMock(side_effect=RagValidationError("unsupported_type", "Unsupported file type.")),
+            new=AsyncMock(
+                side_effect=RagValidationError("unsupported_type", "Unsupported file type.")
+            ),
         ),
         patch("src.api.routers.rag_agents.start_workflow_run", side_effect=mock_trace_ctx),
         patch("src.api.routers.rag_agents.end_workflow_run", end_workflow),
@@ -1547,7 +1650,10 @@ def test_rag_chat_session_attachments_returns_scoped_attachments():
         "state": "ready",
     }
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.get_rag_chat_session",
             new=AsyncMock(
@@ -1581,9 +1687,14 @@ def test_rag_chat_session_attachments_returns_scoped_attachments():
 def test_rag_chat_session_attachments_returns_404_for_unknown_session():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents.list_rag_chat_session_attachments", new=AsyncMock()) as mock_list,
+        patch(
+            "src.api.routers.rag_agents.list_rag_chat_session_attachments", new=AsyncMock()
+        ) as mock_list,
     ):
         response = client.get("/api/rag/agents/agent-1/chat/sessions/chat-404/attachments")
 
@@ -1594,7 +1705,10 @@ def test_rag_chat_session_attachments_returns_404_for_unknown_session():
 def test_create_rag_agent_chat_session_returns_new_session_id():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.create_or_get_chat_session",
             new=AsyncMock(return_value="chat-new"),
@@ -1624,7 +1738,10 @@ def test_upload_rag_agent_chat_session_attachments_ingests_files():
         "state": "ready",
     }
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.get_rag_chat_session",
             new=AsyncMock(
@@ -1653,7 +1770,10 @@ def test_upload_rag_agent_chat_session_attachments_ingests_files():
 def test_delete_rag_agent_chat_session_attachment_returns_deleted():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.get_rag_chat_session",
             new=AsyncMock(
@@ -1779,14 +1899,18 @@ def test_rag_agent_chat_stream_skips_ingest_without_files():
         patch("src.api.routers.rag_agents._consume_usage_or_429", new=AsyncMock()),
         patch(
             "src.api.rag_chat_helpers.prepare_agent_rag_chat",
-            new=AsyncMock(return_value=_fake_prepared_chat(resource_ids=["agent-res-1", "session-res-1"])),
+            new=AsyncMock(
+                return_value=_fake_prepared_chat(resource_ids=["agent-res-1", "session-res-1"])
+            ),
         ) as mock_prepare,
         patch(
             "src.api.routers.rag_agents.ingest_agent_chat_session_uploads",
             new=AsyncMock(),
         ) as mock_ingest,
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)) as mock_loop,
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(side_effect=record_loop)
+        ) as mock_loop,
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
@@ -1826,7 +1950,10 @@ def test_rag_agent_chat_stream_skips_reingest_for_ready_filenames():
             new=AsyncMock(),
         ) as mock_ingest,
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
     ):
         response = client.post(
@@ -1852,7 +1979,10 @@ def test_rag_chat_session_delete_cleans_up_attachments_before_session_delete():
         return True
 
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.get_rag_chat_session",
             new=AsyncMock(
@@ -1867,7 +1997,10 @@ def test_rag_chat_session_delete_cleans_up_attachments_before_session_delete():
             "src.api.routers.rag_agents.delete_rag_chat_session_attachments_and_artifacts",
             new=AsyncMock(side_effect=cleanup),
         ) as mock_cleanup,
-        patch("src.api.routers.rag_agents.delete_rag_chat_session", new=AsyncMock(side_effect=delete_session)),
+        patch(
+            "src.api.routers.rag_agents.delete_rag_chat_session",
+            new=AsyncMock(side_effect=delete_session),
+        ),
     ):
         response = client.delete("/api/rag/agents/agent-1/chat/sessions/chat-1")
 
@@ -1884,9 +2017,15 @@ def test_rag_chat_session_delete_cleans_up_attachments_before_session_delete():
 def test_rag_chat_session_delete_returns_404_for_unknown_session_before_cleanup():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents.delete_rag_chat_session_attachments_and_artifacts", new=AsyncMock()) as mock_cleanup,
+        patch(
+            "src.api.routers.rag_agents.delete_rag_chat_session_attachments_and_artifacts",
+            new=AsyncMock(),
+        ) as mock_cleanup,
         patch("src.api.routers.rag_agents.delete_rag_chat_session", new=AsyncMock()) as mock_delete,
     ):
         response = client.delete("/api/rag/agents/agent-1/chat/sessions/chat-404")
@@ -1911,10 +2050,15 @@ async def test_ingest_agent_chat_session_uploads_does_not_create_workspace_rag_r
     mock_store.delete_rag_chat_session_attachments_by_ids = AsyncMock(return_value=[])
     mock_storage = MagicMock()
     mock_storage.upload_bytes = AsyncMock(return_value="supabase://bucket/session/brief.pdf")
-    mock_storage.create_signed_download_url = AsyncMock(return_value="https://signed.example/brief.pdf")
+    mock_storage.create_signed_download_url = AsyncMock(
+        return_value="https://signed.example/brief.pdf"
+    )
 
     with (
-        patch("src.rag.create_resource_and_ingest", new=AsyncMock(side_effect=AssertionError("workspace resource path should not be used"))),
+        patch(
+            "src.rag.create_resource_and_ingest",
+            new=AsyncMock(side_effect=AssertionError("workspace resource path should not be used")),
+        ),
         patch("src.rag.get_session_store", return_value=mock_store),
         patch("src.rag.get_storage_adapter", return_value=mock_storage),
         patch("src.rag.ingest_resource_from_bytes", new=AsyncMock(return_value=1)) as mock_ingest,
@@ -2005,7 +2149,9 @@ async def test_ingest_agent_chat_session_uploads_cleans_up_earlier_files_when_la
         workspace_id="test-user",
     )
     # Both blobs deleted: first.pdf via rollback, second.pdf directly (failed attachment blob cleanup).
-    deleted_uris = [call.kwargs["storage_uri"] for call in mock_storage.delete_object.await_args_list]
+    deleted_uris = [
+        call.kwargs["storage_uri"] for call in mock_storage.delete_object.await_args_list
+    ]
     assert "supabase://bucket/first.pdf" in deleted_uris
     assert "supabase://bucket/second.pdf" in deleted_uris
     # Failed attachment row preserved with state=failed (not deleted).
@@ -2028,12 +2174,23 @@ def test_workspace_rag_chat_calls_agent_loop():
         yield trace_ctx
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=["res-1"]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.routers.rag_chat._run_agent_loop", mock_loop),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
@@ -2172,14 +2329,28 @@ def test_workspace_rag_chat_stream_calls_agent_loop():
         yield trace_ctx
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=["res-1"]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock(side_effect=loop_with_trace_snapshot)),
+        patch(
+            "src.api.routers.rag_chat._run_agent_loop",
+            new=AsyncMock(side_effect=loop_with_trace_snapshot),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
         patch("src.api.routers.rag_chat.start_workflow_run", side_effect=mock_trace_ctx),
@@ -2253,7 +2424,7 @@ def test_rag_upload_dispatches_outbox_after_success():
     mock_dispatch.assert_awaited_once_with(limit=10)
 
 
-def test_rag_chat_returns_agent_reply():
+def test_rag_chat_greeting_returns_agent_reply_without_rag_citation():
     mock_agent = MagicMock()
     mock_agent.system_instructions = "Keep it concise."
 
@@ -2269,14 +2440,28 @@ def test_rag_chat_returns_agent_reply():
     ]
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2289,15 +2474,7 @@ def test_rag_chat_returns_agent_reply():
     assert response.status_code == 200
     payload = response.json()
     assert payload["session_id"] == "chat-1"
-    assert payload["reply"]["citations"] == [
-        {
-            "source_title": "Doc",
-            "source_url": "https://example.com",
-            "chunk_id": "chunk-1",
-            "text": "Retrieved chunk text.",
-            "source_type": "rag",
-        }
-    ]
+    assert payload["reply"]["citations"] == []
 
 
 def test_rag_chat_stream_returns_rich_citations():
@@ -2316,30 +2493,46 @@ def test_rag_chat_stream_returns_rich_citations():
     ]
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.classify_chat_action",
+            new=AsyncMock(return_value=SimpleNamespace(action="answer_from_rag")),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
         mock_mgr.return_value.get_connected_app_names.return_value = []
         response = client.post(
             "/api/rag/agents/agent-1/chat/stream",
-            json={"message": "Hello", "session_id": None},
+            json={"message": "What does the document say?", "session_id": None},
         )
 
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
 
     events = [
-        json.loads(line[6:])
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
     ]
     citations_event = next(event for event in events if event["type"] == "citations")
     assert citations_event["citations"] == [
@@ -2362,14 +2555,28 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch(
             "src.api.deps._generate_suggestions",
             new=AsyncMock(return_value=["Follow-up one?", "Follow-up two?", "Follow-up three?"]),
@@ -2383,30 +2590,50 @@ def test_rag_chat_stream_includes_suggestions_event_before_done():
         )
 
     assert response.status_code == 200
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
     event_types = [event["type"] for event in events]
     assert "suggestions" in event_types
     suggestions_idx = event_types.index("suggestions")
     done_idx = event_types.index("done")
     assert suggestions_idx < done_idx
     suggestions_event = next(event for event in events if event["type"] == "suggestions")
-    assert suggestions_event["suggestions"] == ["Follow-up one?", "Follow-up two?", "Follow-up three?"]
+    assert suggestions_event["suggestions"] == [
+        "Follow-up one?",
+        "Follow-up two?",
+        "Follow-up three?",
+    ]
 
 
-def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing():
+def test_workspace_rag_chat_stream_greeting_does_not_retrieve_or_cite_workspace():
     mock_context = MagicMock()
     mock_context.context = "Context from workspace docs."
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=["res-1"])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=["res-1"]),
+        ) as list_resources,
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_chat._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2417,17 +2644,109 @@ def test_workspace_rag_chat_stream_applies_fallback_citation_when_chunks_missing
         )
 
     assert response.status_code == 200
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    list_resources.assert_not_awaited()
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
     citations_event = next(event for event in events if event["type"] == "citations")
-    assert citations_event["citations"] == [
+    assert citations_event["citations"] == []
+
+
+def test_workspace_rag_chat_returns_503_when_router_fails():
+    from src.errors import RouterError
+
+    with (
+        patch("src.api.routers.rag_chat._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_workspace_rag_chat",
+            new=AsyncMock(side_effect=RouterError("Chat router is unavailable.")),
+        ),
+        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock()) as loop,
+    ):
+        response = client.post("/api/rag/chat", json={"message": "hi"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "router_error",
+        "message": "Chat router is unavailable.",
+    }
+    loop.assert_not_awaited()
+
+
+def test_workspace_rag_chat_stream_emits_router_error_and_stops():
+    from src.errors import RouterError
+
+    with (
+        patch("src.api.routers.rag_chat._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_workspace_rag_chat",
+            new=AsyncMock(side_effect=RouterError("Chat router is unavailable.")),
+        ),
+        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock()) as loop,
+    ):
+        response = client.post("/api/rag/chat/stream", json={"message": "hi"})
+
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    assert events == [
         {
-            "source_title": "workspace resources",
-            "source_url": None,
-            "chunk_id": "workspace-context-fallback",
-            "text": "Context from workspace docs.",
-            "source_type": "rag_fallback",
+            "type": "error",
+            "error": "Chat router is unavailable.",
+            "code": "router_error",
         }
     ]
+    loop.assert_not_awaited()
+
+
+def test_agent_rag_chat_returns_503_when_router_fails():
+    from src.errors import RouterError
+
+    with (
+        patch("src.api.routers.rag_agents._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(side_effect=RouterError("Chat router is unavailable.")),
+        ),
+        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock()) as loop,
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat",
+            json={"message": "hi"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "router_error"
+    loop.assert_not_awaited()
+
+
+def test_agent_rag_chat_stream_emits_router_error_and_stops():
+    from src.errors import RouterError
+
+    with (
+        patch("src.api.routers.rag_agents._consume_usage_or_429", new=AsyncMock()),
+        patch(
+            "src.api.rag_chat_helpers.prepare_agent_rag_chat",
+            new=AsyncMock(side_effect=RouterError("Chat router is unavailable.")),
+        ),
+        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock()) as loop,
+    ):
+        response = client.post(
+            "/api/rag/agents/agent-1/chat/stream",
+            json={"message": "hi"},
+        )
+
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
+    assert events == [
+        {
+            "type": "error",
+            "error": "Chat router is unavailable.",
+            "code": "router_error",
+        }
+    ]
+    loop.assert_not_awaited()
 
 
 def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
@@ -2438,12 +2757,23 @@ def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
         patch(
             "src.api.routers.rag_chat._run_agent_loop",
@@ -2472,7 +2802,9 @@ def test_workspace_rag_chat_stream_includes_tool_citations_for_simple_chat():
         )
 
     assert response.status_code == 200
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
     citations_event = next(event for event in events if event["type"] == "citations")
     assert citations_event["citations"] == [
         {
@@ -2490,14 +2822,28 @@ def test_workspace_rag_chat_allows_no_ready_resources():
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)) as retrieve,
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ) as retrieve,
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock(return_value=("General answer", False))),
+        patch(
+            "src.api.routers.rag_chat._run_agent_loop",
+            new=AsyncMock(return_value=("General answer", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2524,15 +2870,29 @@ def test_rag_chat_persists_suggestions_on_assistant_message():
     append_chat = AsyncMock(return_value=None)
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=append_chat),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Answer", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Answer", False)),
+        ),
         patch(
             "src.api.deps._generate_suggestions",
             new=AsyncMock(return_value=["Next question?", "Another question?"]),
@@ -2573,12 +2933,23 @@ def test_rag_chat_keeps_attached_document_queries_grounded_in_linked_resources()
         return "Your strongest themes are machine learning and Python.", False
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
         patch("src.api.routers.rag_agents._run_agent_loop", side_effect=capture_loop),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
@@ -2601,14 +2972,28 @@ def test_workspace_rag_chat_stream_returns_valid_sse_response():
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.list_workspace_ready_resource_ids", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_workspace_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.list_workspace_ready_resource_ids",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_workspace_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_chat.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_chat.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_chat._run_agent_loop", new=AsyncMock(return_value=("Workspace answer.", False))),
+        patch(
+            "src.api.routers.rag_chat._run_agent_loop",
+            new=AsyncMock(return_value=("Workspace answer.", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2619,7 +3004,9 @@ def test_workspace_rag_chat_stream_returns_valid_sse_response():
         )
 
     assert response.status_code == 200
-    lines = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    lines = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
     chunk_events = [e for e in lines if e.get("type") == "chunk"]
     assert any("Workspace answer." in e["text"] for e in chunk_events)
 
@@ -2632,15 +3019,29 @@ def test_rag_chat_stream_agent_loop_returns_chunks():
     mock_context.chunks = []
 
     with (
-        patch("src.api.rag_chat_helpers.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat", new=AsyncMock(return_value=mock_context)),
-        patch("src.api.rag_chat_helpers.create_or_get_chat_session", new=AsyncMock(return_value="chat-1")),
+        patch(
+            "src.api.rag_chat_helpers.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.retrieve_merged_context_for_agent_chat",
+            new=AsyncMock(return_value=mock_context),
+        ),
+        patch(
+            "src.api.rag_chat_helpers.create_or_get_chat_session",
+            new=AsyncMock(return_value="chat-1"),
+        ),
         patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value={})),
         patch("src.api.rag_chat_helpers.list_rag_chat_messages", new=AsyncMock(return_value=[])),
         patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[])),
-        patch("src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")),
+        patch(
+            "src.api.rag_chat_helpers.get_user_memory_prompt_block", new=AsyncMock(return_value="")
+        ),
         patch("src.api.routers.rag_agents.append_chat_message", new=AsyncMock(return_value=None)),
-        patch("src.api.routers.rag_agents._run_agent_loop", new=AsyncMock(return_value=("Archon is a coding assistant platform.", False))),
+        patch(
+            "src.api.routers.rag_agents._run_agent_loop",
+            new=AsyncMock(return_value=("Archon is a coding assistant platform.", False)),
+        ),
         patch("src.api.deps._generate_suggestions", new=AsyncMock(return_value=[])),
         patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
     ):
@@ -2651,7 +3052,9 @@ def test_rag_chat_stream_agent_loop_returns_chunks():
         )
 
     assert response.status_code == 200
-    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    events = [
+        json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
+    ]
     chunk_events = [e for e in events if e.get("type") == "chunk"]
     assert any("Archon" in e["text"] for e in chunk_events)
 
@@ -2659,7 +3062,10 @@ def test_rag_chat_stream_agent_loop_returns_chunks():
 def test_rag_chat_sessions_returns_agent_scoped_summaries():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.list_rag_chat_sessions",
             new=AsyncMock(
@@ -2707,7 +3113,10 @@ def test_rag_chat_session_messages_returns_scoped_messages():
         "created_at": "2026-04-23T09:00:00+00:00",
     }
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch(
             "src.api.routers.rag_agents.get_rag_chat_session",
             new=AsyncMock(
@@ -2719,7 +3128,10 @@ def test_rag_chat_session_messages_returns_scoped_messages():
                 }
             ),
         ),
-        patch("src.api.routers.rag_agents.list_rag_chat_messages", new=AsyncMock(return_value=[mock_message])),
+        patch(
+            "src.api.routers.rag_agents.list_rag_chat_messages",
+            new=AsyncMock(return_value=[mock_message]),
+        ),
     ):
         response = client.get("/api/rag/agents/agent-1/chat/sessions/chat-1/messages")
 
@@ -2732,7 +3144,10 @@ def test_rag_chat_session_messages_returns_scoped_messages():
 def test_rag_chat_session_messages_returns_404_for_unknown_session():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
         patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value=None)),
     ):
         response = client.get("/api/rag/agents/agent-1/chat/sessions/chat-404/messages")
@@ -2743,8 +3158,14 @@ def test_rag_chat_session_messages_returns_404_for_unknown_session():
 def test_rag_chat_session_title_update():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.routers.rag_agents.update_rag_chat_session_title", new=AsyncMock(return_value=True)),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.routers.rag_agents.update_rag_chat_session_title",
+            new=AsyncMock(return_value=True),
+        ),
     ):
         response = client.patch(
             "/api/rag/agents/agent-1/chat/sessions/chat-1",
@@ -2757,7 +3178,10 @@ def test_rag_chat_session_title_update():
 
 def test_rag_chat_session_title_update_rejects_empty_title():
     mock_agent = MagicMock()
-    with patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))):
+    with patch(
+        "src.api.routers.rag_agents.get_agent_for_chat",
+        new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+    ):
         response = client.patch(
             "/api/rag/agents/agent-1/chat/sessions/chat-1",
             json={"title": "    "},
@@ -2769,10 +3193,21 @@ def test_rag_chat_session_title_update_rejects_empty_title():
 def test_rag_chat_session_delete():
     mock_agent = MagicMock()
     with (
-        patch("src.api.routers.rag_agents.get_agent_for_chat", new=AsyncMock(return_value=(mock_agent, ["res-1"]))),
-        patch("src.api.routers.rag_agents.get_rag_chat_session", new=AsyncMock(return_value={"session_id": "chat-1"})),
-        patch("src.api.routers.rag_agents.delete_rag_chat_session_attachments_and_artifacts", new=AsyncMock()),
-        patch("src.api.routers.rag_agents.delete_rag_chat_session", new=AsyncMock(return_value=True)),
+        patch(
+            "src.api.routers.rag_agents.get_agent_for_chat",
+            new=AsyncMock(return_value=(mock_agent, ["res-1"])),
+        ),
+        patch(
+            "src.api.routers.rag_agents.get_rag_chat_session",
+            new=AsyncMock(return_value={"session_id": "chat-1"}),
+        ),
+        patch(
+            "src.api.routers.rag_agents.delete_rag_chat_session_attachments_and_artifacts",
+            new=AsyncMock(),
+        ),
+        patch(
+            "src.api.routers.rag_agents.delete_rag_chat_session", new=AsyncMock(return_value=True)
+        ),
     ):
         response = client.delete("/api/rag/agents/agent-1/chat/sessions/chat-1")
 
@@ -2917,9 +3352,7 @@ def test_delete_agent_last_exchange_removes_pair():
             new=AsyncMock(return_value=(True, None)),
         ),
     ):
-        response = client.delete(
-            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
-        )
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange")
 
     assert response.status_code == 200
     assert response.json() == {"session_id": "sess-1", "deleted": True}
@@ -2930,9 +3363,7 @@ def test_delete_agent_last_exchange_404_when_session_missing():
         "src.api.routers.rag_agents.get_rag_chat_session",
         new=AsyncMock(return_value=None),
     ):
-        response = client.delete(
-            "/api/rag/agents/agent-1/chat/sessions/missing/last-exchange"
-        )
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/missing/last-exchange")
 
     assert response.status_code == 404
 
@@ -2948,9 +3379,7 @@ def test_delete_agent_last_exchange_404_when_empty():
             new=AsyncMock(return_value=(False, "empty")),
         ),
     ):
-        response = client.delete(
-            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
-        )
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange")
 
     assert response.status_code == 404
 
@@ -2966,9 +3395,7 @@ def test_delete_agent_last_exchange_409_when_pair_invalid():
             new=AsyncMock(return_value=(False, "not_user_assistant_pair")),
         ),
     ):
-        response = client.delete(
-            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
-        )
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange")
 
     assert response.status_code == 409
 
@@ -2976,9 +3403,7 @@ def test_delete_agent_last_exchange_409_when_pair_invalid():
 def test_delete_agent_last_exchange_requires_auth():
     app.dependency_overrides.pop(get_authenticated_user, None)
     try:
-        response = client.delete(
-            "/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange"
-        )
+        response = client.delete("/api/rag/agents/agent-1/chat/sessions/sess-1/last-exchange")
     finally:
         app.dependency_overrides[get_authenticated_user] = _auth_override
 
@@ -2987,6 +3412,7 @@ def test_delete_agent_last_exchange_requires_auth():
 
 def test_rag_chat_request_default_tools():
     from src.api.deps import RagChatRequest
+
     req = RagChatRequest(message="hello")
     assert req.tools.web_search is True
     assert req.tools.composio is False
@@ -2994,6 +3420,7 @@ def test_rag_chat_request_default_tools():
 
 def test_rag_chat_tools_explicit():
     from src.api.deps import RagChatRequest
+
     req = RagChatRequest(message="hello", tools={"web_search": False, "composio": True})
     assert req.tools.web_search is False
     assert req.tools.composio is True
@@ -3009,9 +3436,11 @@ def test_run_agent_loop_returns_result_object():
     mock_response.content = "test answer"
     mock_response.tool_calls = []
 
-    with patch("src.api.deps.get_llm") as mock_get_llm, \
-         patch("src.api.deps.settings") as mock_settings, \
-         patch("src.api.deps.build_agent_tools", return_value=[]):
+    with (
+        patch("src.api.deps.get_llm") as mock_get_llm,
+        patch("src.api.deps.settings") as mock_settings,
+        patch("src.api.deps.build_agent_tools", return_value=[]),
+    ):
         mock_settings.composio_max_agent_turns = 1
         mock_settings.composio_enabled = False
         llm = MagicMock()
@@ -3019,12 +3448,15 @@ def test_run_agent_loop_returns_result_object():
         mock_get_llm.return_value = llm
 
         from src.api.deps import _run_agent_loop
-        result = asyncio.run(_run_agent_loop(
-            messages=[HumanMessage(content="hi")],
-            metadata={},
-            bind_tools=False,
-            allow_web_search=False,
-        ))
+
+        result = asyncio.run(
+            _run_agent_loop(
+                messages=[HumanMessage(content="hi")],
+                metadata={},
+                bind_tools=False,
+                allow_web_search=False,
+            )
+        )
         assert isinstance(result.answer, str)
         assert result.web_used is False
         assert result.citations == []

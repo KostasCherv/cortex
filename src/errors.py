@@ -21,6 +21,10 @@ class LLMError(CortexError):
     """Raised when an LLM call fails."""
 
 
+class RouterError(CortexError):
+    """Raised when the mandatory chat router cannot produce a valid decision."""
+
+
 class StructuredOutputError(CortexError):
     """Raised when structured LLM output parsing or validation fails."""
 
