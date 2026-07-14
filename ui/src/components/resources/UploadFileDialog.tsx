@@ -57,7 +57,7 @@ export function UploadFileDialog({ open, onOpenChange, onUpload }: Props) {
         <div
           {...getRootProps()}
           className={cn(
-            'cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+            'w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border-2 border-dashed p-8 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
             isDragActive
               ? 'border-primary bg-primary/5'
               : 'border-muted-foreground/25 hover:border-primary/50',
@@ -66,7 +66,9 @@ export function UploadFileDialog({ open, onOpenChange, onUpload }: Props) {
           <input {...getInputProps()} />
           <Upload size={32} className="mx-auto mb-3 text-muted-foreground" />
           {file ? (
-            <p className="text-sm font-medium">{file.name}</p>
+            <p className="mx-auto max-w-full truncate px-1 text-sm font-medium" title={file.name}>
+              {file.name}
+            </p>
           ) : (
             <p className="text-sm text-muted-foreground">
               {isDragActive ? 'Drop it here' : 'Drag & drop or click to select'}
