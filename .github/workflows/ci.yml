@@ -34,6 +34,16 @@ jobs:
           SUPABASE_SECRET_KEY: dummy-secret-key-for-ci
           SUPABASE_JWKS_URL: https://example.com/auth/v1/.well-known/jwks.json
         run: uv run python -m pytest tests/ -q
+      - name: AI regression gate
+        if: always()
+        run: uv run python -m src.evals.regression_gate --output reports/ai-regression-${{ github.sha }}.json
+      - name: Upload AI regression score
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-regression-${{ github.sha }}
+          path: reports/ai-regression-${{ github.sha }}.json
+          if-no-files-found: error
 
   ui:
     runs-on: ubuntu-latest
