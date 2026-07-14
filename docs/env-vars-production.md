@@ -28,6 +28,9 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `SUPABASE_SECRET_KEY` | yes | `sb_secret_...` from Dashboard → Settings → API Keys (`SUPABASE_SERVICE_ROLE_KEY` still accepted) |
 | `SUPABASE_JWKS_URL` | no | `https://<project>.supabase.co/auth/v1/.well-known/jwks.json` |
 | `SUPABASE_JWT_SECRET` | yes | |
+| `READINESS_REQUIRE_SUPABASE` | no | Set to `true` in production; `/ready` returns `503` if Supabase is missing or unavailable |
+| `READINESS_REQUIRE_NEO4J` | no | Set to `true` in production; `/ready` returns `503` if Neo4j is missing or unavailable |
+| `READINESS_TIMEOUT_SECONDS` | no | Per-dependency probe timeout; defaults to `2.0` seconds |
 | `INNGEST_EVENT_KEY` | yes | From Inngest dashboard → Keys |
 | `INNGEST_SIGNING_KEY` | yes | From Inngest dashboard → Keys. **Must not be empty in prod.** |
 | `REDIS_URL` | yes | Upstash `rediss://` URL |

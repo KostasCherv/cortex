@@ -38,6 +38,7 @@ from src.inngest_client import (
     inngest_client,
 )
 from src.storage import ensure_rag_storage_ready
+from src.readiness import run_readiness_checks
 from src.api.routers.billing import router as billing_router
 from src.api.routers.internal import router as internal_router
 from src.api.routers.memory import router as memory_router
@@ -203,6 +204,17 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class ReadinessCheckResponse(BaseModel):
+    status: str
+    critical: bool
+
+
+class ReadinessResponse(BaseModel):
+    status: str
+    version: str
+    checks: dict[str, ReadinessCheckResponse]
+
+
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
@@ -224,3 +236,24 @@ async def health():
     return HealthResponse(status="ok", version="0.1.0")
 
 
+@app.get(
+    "/ready",
+    response_model=ReadinessResponse,
+    responses={503: {"model": ReadinessResponse}},
+    tags=["Meta"],
+)
+async def readiness() -> JSONResponse:
+    """Report configuration and bounded live dependency readiness checks."""
+    checks = await run_readiness_checks()
+    unready = any(check.critical and check.status != "ok" for check in checks.values())
+    degraded = any(check.status == "unavailable" for check in checks.values())
+    status = "unready" if unready else "degraded" if degraded else "ready"
+    payload = ReadinessResponse(
+        status=status,
+        version=app.version,
+        checks={
+            name: ReadinessCheckResponse(status=check.status, critical=check.critical)
+            for name, check in checks.items()
+        },
+    )
+    return JSONResponse(status_code=503 if unready else 200, content=payload.model_dump())
