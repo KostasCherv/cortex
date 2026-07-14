@@ -71,6 +71,8 @@ Cloud Run uses `/ready` for startup/readiness and `/health` for liveness. The st
 
 Production normally sets `READINESS_REQUIRE_SUPABASE=true` and `READINESS_REQUIRE_NEO4J=true`. Both default to `false` for flexible local development.
 
+For the metrics, alerts, and uptime checks built on these probes, see [Production monitoring](observability.md#production-monitoring).
+
 ## Rollback
 
 The deploy script does not move traffic after a failed smoke check. To restore a known-good revision:
