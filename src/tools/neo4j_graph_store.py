@@ -209,8 +209,8 @@ class Neo4jGraphStore:
         self, payload: EntityRelationExtractionEnvelope
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         entities_by_name: dict[str, dict[str, Any]] = {}
-        for row in payload.entities:
-            name = row.name.strip()
+        for entity_row in payload.entities:
+            name = entity_row.name.strip()
             normalized = name.lower()
             if normalized in entities_by_name:
                 continue
@@ -218,14 +218,14 @@ class Neo4jGraphStore:
                 "id": hashlib.sha1(normalized.encode("utf-8")).hexdigest(),  # nosec B324 — graph node ID, not a security hash
                 "name": name,
                 "normalized_name": normalized,
-                "entity_type": row.entity_type,
-                "confidence": row.confidence or _DEFAULT_MENTION_CONFIDENCE,
+                "entity_type": entity_row.entity_type,
+                "confidence": entity_row.confidence or _DEFAULT_MENTION_CONFIDENCE,
             }
 
         relations: list[dict[str, Any]] = []
-        for row in payload.relations:
-            source_name = row.source.strip()
-            target_name = row.target.strip()
+        for relation_row in payload.relations:
+            source_name = relation_row.source.strip()
+            target_name = relation_row.target.strip()
             source_key = source_name.lower()
             target_key = target_name.lower()
             if source_key not in entities_by_name or target_key not in entities_by_name:
@@ -236,8 +236,8 @@ class Neo4jGraphStore:
                     "target_id": entities_by_name[target_key]["id"],
                     "source_name": entities_by_name[source_key]["name"],
                     "target_name": entities_by_name[target_key]["name"],
-                    "type": row.type,
-                    "confidence": row.confidence or _DEFAULT_RELATION_CONFIDENCE,
+                    "type": relation_row.type,
+                    "confidence": relation_row.confidence or _DEFAULT_RELATION_CONFIDENCE,
                 }
             )
 
@@ -296,7 +296,7 @@ class Neo4jGraphStore:
                 "Limit entities to the most relevant 20.\n"
                 f"TEXT:\n{chunk_texts[0][:4500]}"
             )
-            parse_payload = parse_entity_relation_extraction_json
+            parse_payload: Any = parse_entity_relation_extraction_json
             schema_text = single_chunk_schema
         else:
             chunk_sections = []
@@ -426,7 +426,8 @@ class Neo4jGraphStore:
             )
 
             if skip_graph_llm:
-                entities, relations = [], []
+                entities: list[dict[str, Any]] = []
+                relations: list[dict[str, Any]] = []
             elif idx < _MAX_LLM_EXTRACTION_CHUNKS and llm_chunk_extractions is not None:
                 entities, relations = llm_chunk_extractions[idx]
             else:

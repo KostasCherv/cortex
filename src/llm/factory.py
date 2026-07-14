@@ -102,12 +102,13 @@ def _build_chat_model(
 
     if provider == "lmstudio":
         from langchain_openai import ChatOpenAI
+        from pydantic import SecretStr
 
         return ChatOpenAI(
             model=model_name or settings.lmstudio_model,
             temperature=temperature,
             base_url=settings.lmstudio_base_url,
-            api_key="lm-studio",
+            api_key=SecretStr("lm-studio"),
             timeout=60,
             **common_kwargs,
         )

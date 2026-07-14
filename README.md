@@ -56,7 +56,7 @@ Measured with k6 against the live Cloud Run deployment and locally (2026-07, ful
 - Frontend: `React 19`, `Vite`, `TypeScript`, `react-markdown`
 - Observability: `LangSmith`, `LangFuse`
 - Billing: `Stripe` (subscriptions, webhooks, customer portal)
-- Quality tooling: `pytest`, `ruff`, `mypy`, `ESLint`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
+- Quality tooling: `pytest`, `ruff`, blocking `mypy` type checks, `ESLint`, `Trivy`, `DSPy` (prompt optimization, optional `evals` extra), `DeepEval` (optional `evals` extra)
 
 ## Architecture
 
@@ -224,6 +224,12 @@ uv run python scripts/dispatch_outbox.py --limit 100
 ```
 
 ## Production deployment
+
+### Supply-chain security
+
+Every pull request and push to `main` builds the production container and scans both the repository and image with Trivy. CI blocks HIGH or CRITICAL vulnerabilities that have an available fix, along with HIGH or CRITICAL configuration and secret findings. Unfixed vulnerabilities remain visible without blocking delivery so the gate stays actionable; Dependabot continues to surface dependency updates as fixes become available.
+
+CI also produces a CycloneDX container SBOM named `cortex-sbom-<commit-sha>` and retains it as a workflow artifact for 30 days. The SBOM records the exact packages shipped in the image for release review and incident response.
 
 ### Backend — Google Cloud Run
 
@@ -424,15 +430,22 @@ Used for generation-level observability, user scoring, and evaluation datasets. 
 
 ```bash
 uv run pytest -v
+uv run pytest --cov=src --cov-fail-under=73 --cov-report=term-missing
 uv run ruff check src
 uv run mypy src
 
 cd ui
 npm run lint
-npm test
+npm run test:coverage
 npx playwright install chromium  # first run only
 npm run test:e2e
 ```
+
+CI enforces the measured coverage baseline rather than an aspirational target:
+backend coverage must remain at least 73%, while UI statements, branches,
+functions, and lines must remain at least 19%, 19%, 12%, and 20%. Coverage
+reports are uploaded as workflow artifacts for each run. Raise these floors as
+the test suite improves.
 
 The Playwright smoke journey uses local fixtures—no Google, Supabase, or model
 credentials are required. It restores an authenticated browser session, creates a

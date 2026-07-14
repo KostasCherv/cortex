@@ -322,7 +322,7 @@ async def prepare_agent_rag_chat(
     normalized_message: str,
     session_id: str | None,
     timings: RagChatTimings,
-    tools: "RagChatTools | None" = None,
+    tools: "RagChatTools | None" = None,  # type: ignore[valid-type]
 ) -> RagChatPrepared | None:
     t0 = time.perf_counter()
     agent_bundle = await get_agent_for_chat(agent_id, user_id)
@@ -428,7 +428,7 @@ async def prepare_workspace_rag_chat(
     normalized_message: str,
     session_id: str | None,
     timings: RagChatTimings,
-    tools: "RagChatTools | None" = None,
+    tools: "RagChatTools | None" = None,  # type: ignore[valid-type]
 ) -> RagChatPrepared:
     t_session = time.perf_counter()
     chat_session_id = await create_or_get_workspace_chat_session(

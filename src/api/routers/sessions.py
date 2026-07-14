@@ -27,6 +27,7 @@ from src.billing import UsageIncrement
 from src.config import settings
 from src.graph.graph import build_graph
 from src.llm.factory import get_llm
+from src.llm.text_utils import extract_llm_text
 from src.observability import end_workflow_run, start_workflow_run
 from src.observability.langfuse import (
     create_feedback_anchor_for_run,
@@ -597,7 +598,7 @@ def _generate_session_title(query: str | None) -> str:
     try:
         llm = get_llm(temperature=0.1)
         result = llm.invoke(prompt)
-        text = result.content if hasattr(result, "content") else str(result)
+        text = extract_llm_text(result)
         candidate = " ".join(text.strip().split())
         if not candidate:
             return fallback

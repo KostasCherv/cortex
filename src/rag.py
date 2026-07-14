@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import UploadFile
+from starlette.datastructures import UploadFile
 
 from src.config import settings
 from src.db.provider import get_session_store, get_storage_adapter
@@ -265,7 +265,7 @@ def _suggest_chat_session_title_sync(message: str | None) -> str:
 
         llm = get_llm(temperature=0.1)
         result = llm.invoke(prompt)
-        text = result.content if hasattr(result, "content") else str(result)
+        text = _llm_result_to_text(result)
         candidate = " ".join(text.strip().split())
         if not candidate:
             return fallback

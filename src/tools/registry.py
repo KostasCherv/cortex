@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field, create_model
-
-if TYPE_CHECKING:
-    pass
-
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -77,14 +73,15 @@ def is_arxiv_mcp_enabled(reference_flags: dict[str, bool] | None = None) -> bool
 
 
 def create_rag_chat_tools_model() -> type[BaseModel]:
-    fields: dict[str, tuple[type, object]] = {
+    fields: dict[str, tuple[Any, Any]] = {
         "web_search": (bool, Field(default=True)),
         "composio": (bool, Field(default=False)),
     }
     for spec in REFERENCE_TOOL_SPECS:
         fields[spec.id] = (bool, Field(default=spec.default_enabled))
 
-    return create_model(
+    create_dynamic_model: Any = create_model
+    return create_dynamic_model(
         "RagChatTools",
         __config__=ConfigDict(frozen=True, extra="forbid"),
         **fields,
