@@ -481,6 +481,71 @@ def test_submit_run_feedback_backfills_langfuse_linkage_when_missing():
     )
 
 
+def test_submit_run_feedback_succeeds_when_langfuse_is_not_configured():
+    mock_session = Session(
+        session_id="session-1",
+        runs=[SessionRun(run_id="run-1", query="q", source_urls=[], report="", created_at="2026")],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch(
+            "src.api.routers.sessions.create_feedback_anchor_for_run",
+            side_effect=RuntimeError("LangFuse is not configured"),
+        ),
+        patch("src.api.routers.sessions.submit_user_feedback_score") as mock_score,
+        patch(
+            "src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)
+        ) as mock_update,
+    ):
+        response = client.post(
+            "/sessions/session-1/runs/run-1/feedback",
+            json={"helpful": False},
+        )
+
+    assert response.status_code == 200
+    mock_score.assert_not_called()
+    assert mock_update.await_args.kwargs["patch"]["feedback_helpful"] is False
+
+
+def test_submit_run_feedback_succeeds_when_langfuse_score_fails():
+    mock_session = Session(
+        session_id="session-1",
+        runs=[
+            SessionRun(
+                run_id="run-1",
+                query="q",
+                source_urls=[],
+                report="",
+                created_at="2026",
+                langfuse_trace_id="trace-1",
+            )
+        ],
+        conversation=[],
+        created_at="2026",
+    )
+
+    with (
+        patch("src.api.routers.sessions.get_session", new=AsyncMock(return_value=mock_session)),
+        patch(
+            "src.api.routers.sessions.submit_user_feedback_score",
+            side_effect=RuntimeError("LangFuse unavailable"),
+        ),
+        patch(
+            "src.api.routers.sessions.update_session_run", new=AsyncMock(return_value=True)
+        ) as mock_update,
+    ):
+        response = client.post(
+            "/sessions/session-1/runs/run-1/feedback",
+            json={"helpful": True},
+        )
+
+    assert response.status_code == 200
+    assert mock_update.await_args.kwargs["patch"]["feedback_helpful"] is True
+
+
 def test_submit_run_feedback_rejects_duplicate_submission():
     mock_session = Session(
         session_id="session-1",

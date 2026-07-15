@@ -115,3 +115,5 @@ spec:
             # langsmith-api-key / langfuse-* secrets when tracing matters.
             - name: LANGSMITH_TRACING
               value: "false"
+            - name: LANGFUSE_ENABLED
+              value: "false"
