@@ -495,9 +495,19 @@ async def test_prepare_agent_loads_linked_resources_even_for_direct_router_decis
     from src.api.rag_chat_timing import RagChatTimings
 
     agent = MagicMock(system_instructions="system")
+    agent.name = "CV Agent"
+    agent.description = "Resume advice grounded in the linked CV."
     rag_context = MagicMock(context="attachment context", chunks=[])
+    router_decision = ChatActionDecisionPayload(
+        action="answer_direct",
+        reason="test decision",
+    )
 
     with (
+        patch(
+            "src.api.rag_chat_helpers.classify_chat_action",
+            new=AsyncMock(return_value=router_decision),
+        ) as mock_router,
         patch(
             "src.api.rag_chat_helpers.get_agent_for_chat",
             new=AsyncMock(return_value=(agent, ["agent-res-1"])),
@@ -543,6 +553,13 @@ async def test_prepare_agent_loads_linked_resources_even_for_direct_router_decis
 
     assert result is not None
     assert result.resource_ids == ["agent-res-1", "attachment-res-1"]
+    mock_router.assert_awaited_once_with(
+        message="hi",
+        resource_scope=(
+            'Custom agent "CV Agent" has 1 linked uploaded resource and '
+            "1 ready session attachment. Agent description: Resume advice grounded in the linked CV."
+        ),
+    )
     mock_retrieve.assert_awaited_once_with(
         user_id="user-1",
         agent_resource_ids=["agent-res-1"],

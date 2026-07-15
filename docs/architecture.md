@@ -67,6 +67,7 @@ Routing policy:
 - Greetings and other social turns normally resolve directly.
 - Weak or empty RAG context does not automatically trigger web search.
 - Missing pre-retrieved RAG context does not mean resources are absent; explicit requests about uploaded documents route to `answer_from_rag`, then retrieval runs.
+- Custom-agent routing receives the agent name, description, and linked/attached resource counts so short domain questions can still select `answer_from_rag` and retain citations.
 - Web search is selected for external, fresh, or otherwise web-dependent information.
 - A URL in the message or history is available context, not an automatic fetch instruction.
 - Direct URL fetching happens only when inspecting the resource is necessary.
