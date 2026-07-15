@@ -71,7 +71,7 @@ Routing policy:
 - Direct URL fetching happens only when inspecting the resource is necessary.
 - Agent chat, workspace chat, and streaming/non-streaming endpoints use the same policy.
 
-Workspace and agent document collections are deny-by-default: Cortex retrieves them only when the router explicitly selects `answer_from_rag`. Session attachments remain available as explicitly scoped resources. A routing failure after one structured-output repair returns `router_error` and does not retrieve documents.
+The workspace-wide document collection is deny-by-default: Cortex retrieves it only when the router explicitly selects `answer_from_rag`. A custom agent's linked resources and session attachments are explicitly scoped resources, so they remain available on every turn. A routing failure after one structured-output repair returns `router_error` and does not retrieve documents.
 
 ## Reliable ingestion
 

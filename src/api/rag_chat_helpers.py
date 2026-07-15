@@ -368,9 +368,10 @@ async def prepare_agent_rag_chat(
         if attachment.state == "ready" and attachment.filename
     ]
     router_decision = await classify_chat_action(message=normalized_message)
-    agent_resource_ids = (
-        linked_resource_ids if should_use_workspace_resources(router_decision) else []
-    )
+    # A custom agent's links are an explicit part of its saved configuration,
+    # so they are always in scope. Router gating applies only to the generic
+    # workspace collection, where no narrower resource selection was made.
+    agent_resource_ids = linked_resource_ids
     merged_resource_ids = list(dict.fromkeys(agent_resource_ids + session_attachment_resource_ids))
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()

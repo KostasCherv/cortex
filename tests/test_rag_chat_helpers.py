@@ -490,7 +490,7 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
 
 
 @pytest.mark.asyncio
-async def test_prepare_agent_direct_answer_skips_linked_resources_but_keeps_attachments():
+async def test_prepare_agent_loads_linked_resources_even_for_direct_router_decision():
     from src.api.rag_chat_helpers import prepare_agent_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
 
@@ -542,10 +542,10 @@ async def test_prepare_agent_direct_answer_skips_linked_resources_but_keeps_atta
         )
 
     assert result is not None
-    assert result.resource_ids == ["attachment-res-1"]
+    assert result.resource_ids == ["agent-res-1", "attachment-res-1"]
     mock_retrieve.assert_awaited_once_with(
         user_id="user-1",
-        agent_resource_ids=[],
+        agent_resource_ids=["agent-res-1"],
         session_attachment_resource_ids=["attachment-res-1"],
         session_attachment_files=["brief.pdf"],
         question="hi",
