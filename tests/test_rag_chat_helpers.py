@@ -616,6 +616,19 @@ def test_router_has_no_disable_flag():
     assert "router_enabled" not in Settings.model_fields
 
 
+def test_router_turn_does_not_treat_missing_context_as_missing_resources():
+    from src.api.rag_chat_helpers import _format_router_user_turn
+
+    turn = _format_router_user_turn(
+        message="Using only my uploaded resources, summarize the key findings.",
+        rag_context="",
+    )
+
+    assert "Resource availability: unknown" in turn
+    assert "context is retrieved after routing" in turn
+    assert "Available RAG context: no" not in turn
+
+
 @pytest.mark.asyncio
 async def test_classify_chat_action_parses_valid_response():
     from unittest.mock import AsyncMock, patch
