@@ -50,18 +50,27 @@ Available under **Cloud Run → cortex → Metrics** in the Google Cloud console
 
 Probe outcomes appear in Cloud Logging (`resource.type="cloud_run_revision"`); a failing readiness probe logs the `/ready` 503 body, which names the failing dependency.
 
-### Recommended alerting policy
+### Production alerting baseline
 
-The following is the documented operational policy for this deployment. Alert policies and uptime checks are created per project in Cloud Monitoring and are **not** provisioned by the deploy scripts — verify they exist in your project before relying on them.
+Alert policies and the uptime check are provisioned per project by the idempotent setup script. The notification email must be verified before relying on delivery:
 
-Create in **Cloud Monitoring → Alerting → Create policy** (or `gcloud alpha monitoring policies create`):
+```bash
+GCP_PROJECT=<project-id> \
+ALERT_EMAIL=<operator-email> \
+./scripts/setup_alerting.sh --dry-run
 
-1. **5xx ratio** — `request_count` filtered to `response_code_class = "5xx"` above 1% of total requests over a 5-minute window. Catches elevated errors regardless of cause.
-2. **p95 latency** — `request_latencies` p95 above 5 s over 10 minutes for non-SSE routes. Long-lived `/research` SSE streams inflate raw latency percentiles, so scope the alert or set the threshold with streaming in mind.
-3. **Instance crash / probe failure** — log-based alert on `resource.type="cloud_run_revision"` with `severity>=ERROR` matching container exit or readiness-probe failure messages. This is the signal that `/ready` is returning 503.
-4. **Uptime check** — **Cloud Monitoring → Uptime checks** against `GET /health` on the service URL, one-minute cadence, with an attached alert on failure. This detects the service being fully down even when no traffic is arriving to generate error metrics.
+GCP_PROJECT=<project-id> \
+ALERT_EMAIL=<operator-email> \
+./scripts/setup_alerting.sh
+```
 
-Route notification channels (email, PagerDuty, Slack) per project in **Alerting → Notification channels**.
+The script creates or updates:
+
+1. **Backend uptime** — checks `GET /health` each minute from the USA, Europe, and Asia-Pacific. Two failing regions for one minute opens an incident.
+2. **5xx burst** — `request_count` filtered to `response_code_class = "5xx"`, aggregated across revisions. Three errors within five minutes opens an incident.
+3. **Instance crash / probe failure** — log-match alert for container termination and startup, liveness, or readiness-probe failures, with a 15-minute notification rate limit.
+
+Policies auto-close after 30 healthy minutes. The email channel is named `cortex-ops-email`; test it in **Cloud Monitoring → Alerting → Notification channels** after setup.
 
 ### How degradation is detected
 
@@ -69,14 +78,29 @@ Which signal fires for which failure class:
 
 - **Critical dependency outage** (Supabase, Neo4j, LLM config) — `/ready` returns 503, Cloud Run marks the instance unready, and the probe-failure log alert fires. New revisions fail their startup probe and never receive traffic.
 - **Elevated request errors** — the 5xx-ratio alert fires; drill into Cloud Logging for the failing route, and Sentry (when `SENTRY_DSN` is set) captures the exception with stack trace, error-capture only.
-- **Latency regression** — the p95 alert fires; LangSmith traces show which graph node or external call slowed down.
+- **Latency regression** — investigate Cloud Run latency metrics manually; long-lived SSE routes make a single global p95 alarm noisy.
 - **LLM-provider failure** — surfaces as elevated 5xx plus errored runs in LangSmith/LangFuse traces; the provider's own status page confirms.
-- **Ingestion backlog** — the `outbox-dispatcher` Inngest function runs every two minutes; a stall shows as failed or missing runs in the Inngest dashboard and as `document_outbox` rows stuck in `pending` in Supabase. There is no automatic alert for this today; check the Inngest dashboard when uploads stop completing.
+- **Ingestion backlog** — the `outbox-dispatcher` Inngest function runs every two minutes. Configure an Inngest email alert for terminal failures and no successful run for six minutes. A zero-dispatch run is successful, so idle traffic does not alert. Final outbox delivery failures are also sent to Sentry.
 - **Service fully down** — the `/health` uptime check fails within a minute even with zero user traffic.
 
 ### Error tracking
 
-Setting `SENTRY_DSN` enables Sentry for unhandled-exception capture (error-capture only — tracing stays with LangSmith/LangFuse, PII and stack-trace locals are not sent). See [Production configuration](env-vars-production.md).
+Setting `SENTRY_DSN` enables Sentry for unhandled and selected handled-exception capture (error-capture only — tracing stays with LangSmith/LangFuse, PII and stack-trace locals are not sent). Production uses the Cloud Run revision as the Sentry release. Configure one Sentry issue alert for a new or regressed issue in `production`, delivered by email with a 30-minute per-issue cooldown. See [Production configuration](env-vars-production.md).
+
+Handled-exception metadata is allowlisted to operational identifiers such as run, session, job, and outbox event IDs. Prompts, chat messages, documents, tokens, and authorization values are never attached.
+
+### Inngest alert activation
+
+In the Inngest production environment, create email alerts for:
+
+- terminal failure in `rag-ingestion`, `research-run`, `user-memory-refresh`, or `outbox-dispatcher`;
+- no successful `outbox-dispatcher` run for six minutes.
+
+Test the rule in a non-production Inngest environment before enabling production delivery.
+
+### Cost guardrails
+
+The baseline uses built-in Cloud Run metrics, one standard uptime check, one metric policy, one log-match policy, the Sentry Developer plan, and Inngest's existing alerting. At current low traffic it should remain within free allowances except for additional Secret Manager versions and future GCP metric-alert evaluation charges. Do not replace the uptime check with a synthetic monitor or deploy the benchmark Prometheus/Grafana stack to production.
 
 ## Benchmark dashboards
 
@@ -92,4 +116,3 @@ It provides:
 - Grafana at `http://localhost:3000`
 
 This stack is benchmark-only and is never deployed to production — Cloud Run's built-in metrics already cover the production signals (see [Production monitoring](#production-monitoring)). The k6 scenarios and reporting workflow are documented in the [load-test guide](../load-tests/README.md).
-

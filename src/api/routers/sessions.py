@@ -28,6 +28,7 @@ from src.graph.graph import build_graph
 from src.llm.factory import get_llm
 from src.llm.text_utils import extract_llm_text
 from src.observability import end_workflow_run, start_workflow_run
+from src.observability.sentry import capture_handled_exception
 from src.observability.langfuse import (
     create_feedback_anchor_for_run,
     create_trace_id_for_workflow,
@@ -384,6 +385,16 @@ async def _stream_session_run(
                 run_id=run_id, user_id=user_id, session_id=session_id
             )
         except Exception as exc:
+            logger.exception(
+                "[run_stream] failed to refresh run_id=%s session_id=%s",
+                run_id,
+                session_id,
+            )
+            capture_handled_exception(
+                exc,
+                operation="sse.run_refresh",
+                identifiers={"run_id": run_id, "session_id": session_id},
+            )
             error_payload = {
                 "type": "error",
                 "error": f"Could not refresh run state: {exc}",
@@ -530,6 +541,16 @@ async def _stream_followup(
     try:
         loop_result = _coerce_agent_loop_result(loop_task.result())
     except Exception as exc:
+        logger.exception(
+            "[followup_stream] agent loop failed run_id=%s session_id=%s",
+            run_id,
+            session.session_id,
+        )
+        capture_handled_exception(
+            exc,
+            operation="sse.agent_loop",
+            identifiers={"run_id": run_id, "session_id": session.session_id},
+        )
         yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
         return
 

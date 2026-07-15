@@ -113,5 +113,12 @@ spec:
             # --- Observability ---
             # ponytail: observability off for the free-tier deploy; re-add
             # langsmith-api-key / langfuse-* secrets when tracing matters.
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: sentry-dsn
+                  key: latest
+            - name: SENTRY_ENVIRONMENT
+              value: "production"
             - name: LANGSMITH_TRACING
               value: "false"

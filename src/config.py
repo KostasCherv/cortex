@@ -220,6 +220,10 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(
         default="", description="Sentry DSN for error tracking; empty disables it"
     )
+    sentry_environment: str = Field(
+        default="development",
+        description="Sentry environment name used to scope issue alerts.",
+    )
     readiness_timeout_seconds: float = Field(
         default=2.0,
         gt=0,

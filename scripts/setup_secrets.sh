@@ -9,8 +9,8 @@
 # automatically. Otherwise populate each secret manually:
 #   echo -n "sk-..." | gcloud secrets versions add openai-api-key --data-file=-
 #
-# NOTE: the lean set below is 7 secrets. Secret Manager's free tier covers
-# 6 active versions; the 7th costs ~$0.06/month. When rotating a value,
+# NOTE: the lean set below is 8 secrets. Secret Manager's free tier covers
+# 6 active versions; each additional active version costs ~$0.06/month. When rotating a value,
 # destroy the old version to avoid accumulating billable versions:
 #   gcloud secrets versions destroy <N> --secret=<name>
 
@@ -52,6 +52,7 @@ secrets=(
   inngest-event-key
   inngest-signing-key
   internal-dispatch-secret
+  sentry-dsn
 )
 
 echo ""
@@ -100,6 +101,7 @@ if [[ -f "$ENV_FILE" ]]; then
   populate supabase-secret-key SUPABASE_SECRET_KEY
   populate inngest-event-key INNGEST_EVENT_KEY
   populate inngest-signing-key INNGEST_SIGNING_KEY
+  populate sentry-dsn SENTRY_DSN
 else
   echo ""
   echo "No .env.prod found — populate secrets manually (see instructions below)."

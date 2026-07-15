@@ -77,6 +77,7 @@ async def test_dispatch_schedules_retry_on_transient_failure():
     with (
         patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
+        patch("src.outbox.capture_handled_exception") as mock_capture,
     ):
         count = await dispatch_outbox_events()
 
@@ -86,6 +87,7 @@ async def test_dispatch_schedules_retry_on_transient_failure():
     assert update_patch["attempts"] == 1
     assert "next_attempt_at" in update_patch
     assert update_patch["last_error"] == "network error"
+    mock_capture.assert_not_called()
 
 
 async def test_dispatch_permanently_fails_after_max_attempts():
@@ -97,6 +99,7 @@ async def test_dispatch_permanently_fails_after_max_attempts():
     with (
         patch("src.outbox.get_session_store", return_value=mock_store),
         patch("src.inngest_client.inngest_client", mock_inngest),
+        patch("src.outbox.capture_handled_exception") as mock_capture,
     ):
         count = await dispatch_outbox_events()
 
@@ -104,6 +107,28 @@ async def test_dispatch_permanently_fails_after_max_attempts():
     update_patch = mock_store.update_outbox_event.await_args[0][1]
     assert update_patch["status"] == "failed"
     assert update_patch["attempts"] == 5
+    mock_capture.assert_called_once()
+    assert mock_capture.call_args.kwargs["operation"] == "outbox.delivery_terminal"
+    assert mock_capture.call_args.kwargs["identifiers"] == {
+        "event_id": "evt-1",
+        "event_name": "rag/ingestion.requested",
+    }
+
+
+async def test_dispatch_reports_pre_fetch_failure():
+    mock_store = _make_store(rows=[])
+    mock_store.reset_stuck_dispatching_events.side_effect = RuntimeError("database offline")
+
+    with (
+        patch("src.outbox.get_session_store", return_value=mock_store),
+        patch("src.inngest_client.inngest_client", AsyncMock()),
+        patch("src.outbox.capture_handled_exception") as mock_capture,
+    ):
+        count = await dispatch_outbox_events()
+
+    assert count == 0
+    mock_capture.assert_called_once()
+    assert mock_capture.call_args.kwargs["operation"] == "outbox.pre_dispatch_fetch"
 
 
 async def test_dispatch_processes_multiple_events():
