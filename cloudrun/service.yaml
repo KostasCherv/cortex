@@ -46,6 +46,8 @@ spec:
               value: "openai"
             - name: OPENAI_MODEL
               value: "gpt-4o-mini"
+            - name: ROUTER_TIMEOUT_SECONDS
+              value: "10.0"
             - name: EMBEDDING_PROVIDER
               value: "openai"
             - name: EMBEDDING_MODEL

@@ -281,10 +281,17 @@ async def classify_chat_action(
             inputs={"prompt": prompt},
             tags=["rag_chat", "router"],
         ):
-            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=3.0)
+            response = await asyncio.wait_for(
+                llm.ainvoke(prompt),
+                timeout=settings.router_timeout_seconds,
+            )
         raw_text = extract_llm_text(response)
     except Exception as exc:
-        logger.warning("[rag_chat] router LLM call failed: %s", exc)
+        logger.warning(
+            "[rag_chat] router LLM call failed (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
         raise RouterError("Chat router is unavailable.") from exc
 
     try:
@@ -303,7 +310,10 @@ async def classify_chat_action(
                 inputs={"prompt": repair_prompt},
                 tags=["rag_chat", "router", "repair"],
             ):
-                repair_response = await asyncio.wait_for(llm.ainvoke(repair_prompt), timeout=3.0)
+                repair_response = await asyncio.wait_for(
+                    llm.ainvoke(repair_prompt),
+                    timeout=settings.router_timeout_seconds,
+                )
             repair_text = extract_llm_text(repair_response)
             return parse_chat_action_json(repair_text)
         except Exception as repair_exc:

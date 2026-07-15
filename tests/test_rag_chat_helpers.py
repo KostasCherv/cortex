@@ -630,6 +630,29 @@ async def test_classify_chat_action_parses_valid_response():
 
 
 @pytest.mark.asyncio
+async def test_classify_chat_action_uses_configured_router_timeout():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(content='{"action": "answer_direct", "reason": "greeting"}')
+    )
+
+    async def passthrough(awaitable, *, timeout):
+        assert timeout == 10.0
+        return await awaitable
+
+    with (
+        patch("src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm),
+        patch("src.api.rag_chat_helpers.asyncio.wait_for", side_effect=passthrough),
+        patch("src.api.rag_chat_helpers.settings") as mock_settings,
+    ):
+        mock_settings.router_prompt_path = ""
+        mock_settings.router_timeout_seconds = 10.0
+        result = await classify_chat_action(message="hello")
+
+    assert result.action == "answer_direct"
+
+
+@pytest.mark.asyncio
 async def test_classify_chat_action_repairs_invalid_json_once():
     from unittest.mock import AsyncMock, patch
 

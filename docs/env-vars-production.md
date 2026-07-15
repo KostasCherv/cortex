@@ -12,6 +12,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
+| `ROUTER_TIMEOUT_SECONDS` | no | Maximum duration of each router LLM request; production uses `10.0` |
 | `EMBEDDING_PROVIDER` | no | `openai` |
 | `EMBEDDING_MODEL` | no | `text-embedding-3-small` |
 | `EMBEDDING_DIMENSIONS` | no | `1536` |

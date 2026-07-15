@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     router_temperature: float = Field(
         default=0.0, description="Sampling temperature for the router LLM."
     )
+    router_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description="Maximum duration of each router LLM request.",
+    )
     router_prompt_path: str = Field(
         default="",
         description=(
