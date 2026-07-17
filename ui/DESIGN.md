@@ -46,7 +46,7 @@ avatar, badge, button, card, checkbox, dialog, dropdown-menu, input, label, popo
 |---|---|
 | `ui/` | shadcn primitives (above) — generic, no app-specific logic |
 | `research/` | Research-session UI: sidebar, query composer/form, streaming progress, report viewer with feedback |
-| `chat/` | Chat thread machinery: `GenericChat` composes `ChatThreadContainer` + a transport, plus Streamdown-based markdown rendering and the tool menu |
+| `chat/` | Chat thread machinery: `GenericChat` composes `ChatThreadContainer` + a transport, plus Streamdown-based markdown rendering and the tool menu. `chatStreamStore.ts` is a session-keyed module store (`useSyncExternalStore`) that owns stream lifecycles so multiple sessions can stream in parallel and survive session switches (capped at `MAX_CONCURRENT_STREAMS`); `AgentRail` session rows show a pulse dot for sessions streaming in the background |
 | `shell/` | Top-level app shell: `AppShell` wires auth/health/pages together, `AgentRail` is the left nav rail (agents, theme toggle, billing) |
 | `layout/` | Cross-page chrome: `Navbar` (top bar, theme toggle, user menu), the theme system (`ThemeProvider`, `theme-context.ts`), and shared `HealthDot` status indicator |
 | `resources/` | RAG resource management: table + upload dialog |

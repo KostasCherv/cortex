@@ -34,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useStreamingSessionIds } from '@/components/chat/chatStreamStore'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useTheme } from '@/hooks/useTheme'
@@ -350,6 +351,7 @@ function AgentSessionList({
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [pending, setPending] = useState(true)
+  const streamingSessionIds = useStreamingSessionIds()
   const fetchedTokenRef = useRef(-1)
   const [contextMenu, setContextMenu] = useState<{
     id: string
@@ -426,7 +428,12 @@ function AgentSessionList({
           aria-current={activeSessionId === s.session_id ? 'page' : undefined}
           title={s.title || s.last_message_preview || 'New chat'}
         >
-          {s.title || s.last_message_preview || 'New chat'}
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            {streamingSessionIds.includes(s.session_id) && (
+              <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" aria-label="Streaming" />
+            )}
+            <span className="truncate">{s.title || s.last_message_preview || 'New chat'}</span>
+          </span>
         </button>
       ))}
       {contextMenu && (
@@ -587,6 +594,7 @@ function WorkspaceChatSessionList({
 }) {
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [pending, setPending] = useState(true)
+  const streamingSessionIds = useStreamingSessionIds()
   const fetchedTokenRef = useRef(-1)
   const [contextMenu, setContextMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null)
 
@@ -652,7 +660,12 @@ function WorkspaceChatSessionList({
               : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
           )}
         >
-          {s.title || s.last_message_preview || 'New chat'}
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            {streamingSessionIds.includes(s.session_id) && (
+              <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" aria-label="Streaming" />
+            )}
+            <span className="truncate">{s.title || s.last_message_preview || 'New chat'}</span>
+          </span>
         </button>
       ))}
       {contextMenu && (

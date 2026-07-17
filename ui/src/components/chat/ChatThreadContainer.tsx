@@ -9,7 +9,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type { RagChatMessage, SessionAttachment } from '@/types'
 import type { ChatTransport } from './transports'
-import { getStopEditState, replaceLastEditableUserMessage } from './chatThreadState'
+import {
+  consumeStream,
+  getStreamStartBlocker,
+  peekStream,
+  sessionStreamKey,
+  startChatStream,
+  stopChatStream,
+  useChatStream,
+} from './chatStreamStore'
+import { removeLastExchange } from './chatThreadState'
 import { ToolMenuButton } from './ToolMenuButton'
 import { defaultToolConfig } from './toolConfig'
 import type { ToolConfig } from './toolConfig'
@@ -192,10 +201,8 @@ export function ChatThreadContainer({
 }: Props) {
   const [messages, setMessages] = useState<RagChatMessage[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [pendingStreamKey, setPendingStreamKey] = useState<string | null>(null)
   const [input, setInput] = useState('')
-  const [chatting, setChatting] = useState(false)
-  const [streamingText, setStreamingText] = useState('')
-  const [streamingStatus, setStreamingStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [webUsedLastReply, setWebUsedLastReply] = useState(false)
   const [latestSuggestions, setLatestSuggestions] = useState<string[]>([])
@@ -209,12 +216,16 @@ export function ChatThreadContainer({
   const messagesRequestRef = useRef(0)
   const loadedSessionRef = useRef<string | null>(null)
   const currentTransportKeyRef = useRef(transport.key)
-  const chatAbortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  // Tracks whether the last user+assistant exchange in `messages` has been persisted server-side.
-  // Set to true in onDone; reset to false when a new send begins.
-  const lastExchangePersistedRef = useRef(false)
+
+  // Stream lifecycle lives in chatStreamStore, keyed by session, so streams
+  // survive session switches and multiple sessions can stream in parallel.
+  const currentStreamKey = sessionId
+    ? sessionStreamKey(transport.key, sessionId)
+    : pendingStreamKey
+  const stream = useChatStream(currentStreamKey)
+  const chatting = stream?.status === 'streaming'
 
   useEffect(() => {
     currentTransportKeyRef.current = transport.key
@@ -222,14 +233,11 @@ export function ChatThreadContainer({
 
   useEffect(() => {
     messagesRequestRef.current += 1
-    chatAbortRef.current?.abort()
-    chatAbortRef.current = null
     loadedSessionRef.current = null
-    lastExchangePersistedRef.current = false
     setSessionId(null)
+    setPendingStreamKey(null)
     setMessages([])
     setInput('')
-    setStreamingText('')
     setError(null)
     setWebUsedLastReply(false)
     setLatestSuggestions([])
@@ -246,7 +254,13 @@ export function ChatThreadContainer({
 
   const openSession = useCallback(
     async (nextSessionId: string) => {
-      if (loadedSessionRef.current === nextSessionId) return
+      // A stream that finished in the background is already persisted server-side:
+      // drop the store entry and refetch so the messages include that exchange.
+      const streamKey = sessionStreamKey(transport.key, nextSessionId)
+      const finished = peekStream(streamKey)
+      const hadFinishedStream = finished !== undefined && finished.status !== 'streaming'
+      if (hadFinishedStream) consumeStream(streamKey)
+      if (!hadFinishedStream && loadedSessionRef.current === nextSessionId) return
       const requestId = ++messagesRequestRef.current
       try {
         const res = await transport.loadSessionMessages(nextSessionId, accessToken)
@@ -254,8 +268,16 @@ export function ChatThreadContainer({
         loadedSessionRef.current = res.session_id
         setSessionId(res.session_id)
         setMessages(res.messages)
-        setError(null)
-        lastExchangePersistedRef.current = true
+        setLatestSuggestions([])
+        setWebUsedLastReply(false)
+        if (finished?.status === 'error') {
+          // the stream failed while this session was in the background: surface
+          // the error and give the user their question back
+          setError(finished.error ?? 'Chat failed.')
+          setInput(finished.question)
+        } else {
+          setError(null)
+        }
 
         if (transport.loadSessionAttachments) {
           try {
@@ -358,8 +380,8 @@ export function ChatThreadContainer({
     if (!activeSessionId) {
       if (activeSessionId === null && loadedSessionRef.current !== null) {
         loadedSessionRef.current = null
-        lastExchangePersistedRef.current = false
         setSessionId(null)
+        setPendingStreamKey(null)
         setMessages([])
         setSessionAttachments([])
       }
@@ -368,172 +390,107 @@ export function ChatThreadContainer({
     void openSession(activeSessionId)
   }, [activeSessionId, openSession])
 
-  const send = async (
-    overrideText?: string,
-    opts?: {
-      skipOptimisticAppend?: boolean
-      previouslyPersisted?: boolean
-      restoreDraftOnFailure?: { input: string; editingMessageId: string }
-    },
-  ) => {
+  // A stream started without a session adopts the server-assigned id once it arrives.
+  useEffect(() => {
+    if (!stream?.resolvedSessionId || sessionId === stream.resolvedSessionId) return
+    loadedSessionRef.current = stream.resolvedSessionId
+    setSessionId(stream.resolvedSessionId)
+    onSessionActivated(stream.resolvedSessionId)
+  }, [stream, sessionId, onSessionActivated])
+
+  // When the stream for the session being viewed finishes, fold its result into the thread.
+  useEffect(() => {
+    if (!stream || stream.status === 'streaming') return
+    const finished = stream
+    if (finished.status === 'done') {
+      const finalSessionId = finished.resolvedSessionId ?? sessionId ?? 'pending'
+      setMessages((prev) => {
+        // ponytail: naive content dedupe covers the rare race where a refetch
+        // already delivered this exchange before the store entry was consumed
+        const last = prev.at(-1)
+        if (last?.role === 'assistant' && last.content === finished.streamingText.trim()) return prev
+        const userMessage: RagChatMessage = {
+          message_id: `tmp-user-${crypto.randomUUID()}`,
+          session_id: finalSessionId,
+          agent_id: null,
+          owner_id: '',
+          role: 'user',
+          content: finished.displayQuestion,
+          citations: [],
+          created_at: new Date().toISOString(),
+        }
+        const assistantMessage: RagChatMessage = {
+          message_id: `tmp-assistant-${crypto.randomUUID()}`,
+          session_id: finalSessionId,
+          agent_id: null,
+          owner_id: '',
+          role: 'assistant',
+          content: finished.streamingText.trim(),
+          citations: finished.citations,
+          suggestions: finished.suggestions,
+          created_at: new Date().toISOString(),
+        }
+        return [...prev, userMessage, assistantMessage]
+      })
+      setLatestSuggestions(finished.suggestions)
+      if (finished.webUsed) setWebUsedLastReply(true)
+      if (finished.resolvedSessionId) void refreshSessionAttachments(finished.resolvedSessionId)
+    } else {
+      setError(finished.error ?? 'Chat failed.')
+    }
+    consumeStream(finished.key)
+  }, [stream, sessionId, refreshSessionAttachments])
+
+  const send = (overrideText?: string) => {
     const text = overrideText ?? input
     if (!text.trim() || chatting || uploadingAttachments) return
     const question = text.trim()
-    const requestId = ++messagesRequestRef.current
-    lastExchangePersistedRef.current = false
 
     const readyAttachmentNames = sessionAttachments
       .filter((attachment) => attachment.state === 'ready')
       .map((attachment) => attachment.filename)
-
-    if (!opts?.skipOptimisticAppend) {
-      const optimisticUserMessage: RagChatMessage = {
-        message_id: `tmp-user-${requestId}`,
-        session_id: sessionId ?? 'pending',
-        agent_id: null,
-        owner_id: '',
-        role: 'user',
-        content: readyAttachmentNames.length > 0
-          ? `${question}\n\n📎 ${readyAttachmentNames.join(', ')}`
-          : question,
-        citations: [],
-        created_at: new Date().toISOString(),
-      }
-      setMessages((prev) => [...prev, optimisticUserMessage])
-    }
+    const displayQuestion = readyAttachmentNames.length > 0
+      ? `${question}\n\n📎 ${readyAttachmentNames.join(', ')}`
+      : question
 
     setInput('')
-    setStreamingText('')
-    setStreamingStatus(null)
-    setChatting(true)
     setError(null)
     setLatestSuggestions([])
 
-    chatAbortRef.current?.abort()
-    const controller = new AbortController()
-    chatAbortRef.current = controller
-
-    if (opts?.previouslyPersisted && sessionId !== null) {
-      try {
-        await transport.deleteLastExchange(sessionId, accessToken)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to delete previous exchange.')
-        if (opts.restoreDraftOnFailure) {
-          setInput(opts.restoreDraftOnFailure.input)
-          setEditingMessageId(opts.restoreDraftOnFailure.editingMessageId)
-        }
-        setChatting(false)
-        if (chatAbortRef.current === controller) chatAbortRef.current = null
-        return
-      }
-    }
-
-    let streamedSessionId = sessionId
-    let accumulated = ''
-    let finalCitations: RagChatMessage['citations'] = []
-    let pendingSuggestions: string[] = []
-    let streamFailed = false
-
     try {
-      await transport.streamMessage(question, sessionId, accessToken, {
-        signal: controller.signal,
-        onSession: (nextSessionId) => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          streamedSessionId = nextSessionId
-          loadedSessionRef.current = nextSessionId
-          setSessionId(nextSessionId)
-          if (!sessionId) onSessionActivated(nextSessionId)
-        },
-        onStatus: (message) => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          if (controller.signal.aborted) return
-          setStreamingStatus(message)
-        },
-        onChunk: (textChunk) => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          if (controller.signal.aborted) return
-          accumulated += textChunk
-          setStreamingStatus(null)
-          setStreamingText((prev) => prev + textChunk)
-        },
-        onCitations: (citations) => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          if (controller.signal.aborted) return
-          finalCitations = citations
-        },
-        onSuggestions: (suggestions) => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          if (controller.signal.aborted) return
-          pendingSuggestions = suggestions
-          setLatestSuggestions(suggestions)
-        },
-        onWebUsed: () => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          setWebUsedLastReply(true)
-        },
-        onDone: () => {
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          const finalSessionId = streamedSessionId ?? sessionId ?? 'pending'
-          const assistantMessage: RagChatMessage = {
-            message_id: `tmp-assistant-${requestId}`,
-            session_id: finalSessionId,
-            agent_id: null,
-            owner_id: '',
-            role: 'assistant',
-            content: accumulated.trim(),
-            citations: finalCitations,
-            suggestions: pendingSuggestions,
-            created_at: new Date().toISOString(),
-          }
-          loadedSessionRef.current = finalSessionId
-          setSessionId(finalSessionId)
-          setMessages((prev) => [...prev, assistantMessage])
-          setStreamingText('')
-          setStreamingStatus(null)
-          lastExchangePersistedRef.current = true
-          onSessionsChanged()
-          if (finalSessionId !== 'pending') {
-            void refreshSessionAttachments(finalSessionId)
-          }
-        },
-        onError: (streamError) => {
-          streamFailed = true
-          if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
-          setError(streamError)
-          setStreamingText('')
-          setStreamingStatus(null)
-        },
-      }, toolConfig)
+      const key = startChatStream({
+        transport,
+        sessionId,
+        question,
+        displayQuestion,
+        accessToken,
+        toolConfig,
+        onSessionsChanged,
+      })
+      if (!sessionId) setPendingStreamKey(key)
     } catch (err) {
-      if (controller.signal.aborted) return
-      if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
-        setError(err instanceof Error ? err.message : 'Chat failed.')
-        setStreamingText('')
-        setStreamingStatus(null)
-      }
-    } finally {
-      if (chatAbortRef.current === controller) chatAbortRef.current = null
-      if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
-        setChatting(false)
-        if (streamFailed) onSessionsChanged()
-      }
+      setError(err instanceof Error ? err.message : 'Chat failed.')
+      setInput(question)
     }
   }
 
   const submitEdit = async () => {
     const text = input.trim()
-    if (!text || !editingMessageId) return
-    const previouslyPersisted = lastExchangePersistedRef.current && sessionId !== null
+    if (!text || !editingMessageId || sessionId === null) return
+    const blocker = getStreamStartBlocker(sessionStreamKey(transport.key, sessionId))
+    if (blocker) {
+      setError(blocker)
+      return
+    }
+    try {
+      await transport.deleteLastExchange(sessionId, accessToken)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete previous exchange.')
+      return
+    }
     setEditingMessageId(null)
-    setMessages((prev) => {
-      return replaceLastEditableUserMessage(prev, text)
-    })
-    setInput('')
-    await send(text, {
-      skipOptimisticAppend: true,
-      previouslyPersisted,
-      restoreDraftOnFailure: { input: text, editingMessageId },
-    })
+    setMessages((prev) => removeLastExchange(prev))
+    send(text)
   }
 
   const suggestions = useMemo(
@@ -605,13 +562,18 @@ export function ChatThreadContainer({
               </div>
             ),
           )}
-          {chatting && (
-            <div className="flex gap-2 items-start">
-              <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
-              <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
-                <ChatMarkdown content={streamingText || streamingStatus || 'Thinking...'} />
+          {stream && (
+            <>
+              <div className="flex flex-col items-end gap-1">
+                <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{stream.displayQuestion}</div>
               </div>
-            </div>
+              <div className="flex gap-2 items-start">
+                <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
+                  <ChatMarkdown content={stream.streamingText || stream.streamingStatus || 'Thinking...'} />
+                </div>
+              </div>
+            </>
           )}
           <div ref={bottomRef} />
         </div>
@@ -735,15 +697,10 @@ export function ChatThreadContainer({
               size="icon"
               variant="secondary"
               onClick={() => {
-                chatAbortRef.current?.abort()
-                setStreamingText('')
-                setChatting(false)
+                const question = stream?.question ?? ''
+                if (currentStreamKey) stopChatStream(currentStreamKey)
                 setError(null)
-                const stopEditState = getStopEditState(messages)
-                if (stopEditState) {
-                  setInput(stopEditState.draft)
-                  setEditingMessageId(stopEditState.editingMessageId)
-                }
+                if (question) setInput(question)
               }}
               aria-label="Stop generating"
             >
