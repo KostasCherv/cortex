@@ -1,7 +1,31 @@
 """Application settings loaded from environment variables."""
 
-from pydantic import AliasChoices, Field, field_validator
+import json
+
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_bundled_secret(
+    raw: str,
+    config_name: str,
+    required: tuple[str, ...],
+) -> dict[str, str]:
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{config_name} must be valid JSON.") from exc
+    if not isinstance(config, dict):
+        raise ValueError(f"{config_name} must be a JSON object.")
+
+    values: dict[str, str] = {}
+    for name in required:
+        value = config.get(name)
+        if not isinstance(value, str) or not value:
+            fields = ", ".join(required)
+            raise ValueError(f"{config_name} must include non-empty {fields} values.")
+        values[name] = value
+    return values
 
 
 class Settings(BaseSettings):
@@ -13,6 +37,10 @@ class Settings(BaseSettings):
 
     # LLM
     llm_provider: str = Field(default="openai", description="LLM provider: 'ollama' or 'openai'")
+    provider_config_json: str = Field(
+        default="",
+        description="JSON object containing provider, cache, and observability settings for production.",
+    )
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
     openrouter_api_key: str = Field(default="", description="OpenRouter API key")
@@ -331,6 +359,13 @@ class Settings(BaseSettings):
     )
 
     # Billing / Stripe
+    billing_config_json: str = Field(
+        default="",
+        description=(
+            "JSON object containing Stripe secret_key, webhook_secret, and pro_price_id. "
+            "Used in production to keep billing credentials in one secret version."
+        ),
+    )
     stripe_secret_key: str = Field(default="", description="Stripe secret key.")
     stripe_webhook_secret: str = Field(default="", description="Stripe webhook signing secret.")
     stripe_pro_price_id: str = Field(default="", description="Stripe price id for the pro plan.")
@@ -346,6 +381,79 @@ class Settings(BaseSettings):
         default="http://localhost:5173",
         description="Return URL from Stripe customer portal.",
     )
+
+    @model_validator(mode="after")
+    def apply_provider_config(self) -> "Settings":
+        """Load bundled provider/cache credentials while preserving local split-variable support."""
+        if not self.provider_config_json.strip():
+            return self
+        values = _parse_bundled_secret(
+            self.provider_config_json,
+            "PROVIDER_CONFIG_JSON",
+            ("openai_api_key", "tavily_api_key"),
+        )
+        for name, value in values.items():
+            setattr(self, name, value)
+        redis_url = json.loads(self.provider_config_json).get("redis_url")
+        if redis_url is not None:
+            if not isinstance(redis_url, str) or not redis_url:
+                raise ValueError("PROVIDER_CONFIG_JSON redis_url must be a non-empty string.")
+            self.redis_url = redis_url
+        langfuse = json.loads(self.provider_config_json)
+        langfuse_fields = {
+            "langfuse_public_key": "langfuse_public_key",
+            "langfuse_secret_key": "langfuse_secret_key",  # nosec B105 — schema field name, not a credential
+            "langfuse_base_url": "langfuse_host",
+        }
+        for source, target in langfuse_fields.items():
+            value = langfuse.get(source)
+            if value is not None:
+                if not isinstance(value, str) or not value:
+                    raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
+                setattr(self, target, value)
+        langsmith_fields = {
+            "langsmith_api_key": "langsmith_api_key",
+            "langsmith_project": "langsmith_project",
+            "langsmith_endpoint": "langsmith_endpoint",
+            "langsmith_redaction_mode": "langsmith_redaction_mode",
+        }
+        for source, target in langsmith_fields.items():
+            value = langfuse.get(source)
+            if value is not None:
+                if not isinstance(value, str) or not value:
+                    raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
+                setattr(self, target, value)
+        langsmith_tracing = langfuse.get("langsmith_tracing")
+        if langsmith_tracing is not None:
+            if isinstance(langsmith_tracing, bool):
+                self.langsmith_tracing = langsmith_tracing
+            elif isinstance(langsmith_tracing, str) and langsmith_tracing.lower() in {"true", "false"}:
+                self.langsmith_tracing = langsmith_tracing.lower() == "true"
+            else:
+                raise ValueError("PROVIDER_CONFIG_JSON langsmith_tracing must be true or false.")
+        langsmith_sampling_rate = langfuse.get("langsmith_sampling_rate")
+        if langsmith_sampling_rate is not None:
+            try:
+                self.langsmith_sampling_rate = float(langsmith_sampling_rate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "PROVIDER_CONFIG_JSON langsmith_sampling_rate must be a number."
+                ) from exc
+        return self
+
+    @model_validator(mode="after")
+    def apply_billing_config(self) -> "Settings":
+        """Load bundled Stripe credentials while preserving local split-variable support."""
+        if not self.billing_config_json.strip():
+            return self
+        values = _parse_bundled_secret(
+            self.billing_config_json,
+            "BILLING_CONFIG_JSON",
+            ("stripe_secret_key", "stripe_webhook_secret", "stripe_pro_price_id"),
+        )
+        for name, value in values.items():
+            setattr(self, name, value)
+        return self
 
     # Redis cache
     redis_url: str = Field(
