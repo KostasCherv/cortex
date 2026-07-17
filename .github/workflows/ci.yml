@@ -40,7 +40,7 @@ jobs:
           --cov-report=xml:coverage.xml
       - name: Upload backend coverage
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: backend-coverage
           path: coverage.xml
@@ -50,7 +50,7 @@ jobs:
         run: uv run python -m src.evals.regression_gate --output reports/ai-regression-${{ github.sha }}.json
       - name: Upload AI regression score
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ai-regression-${{ github.sha }}
           path: reports/ai-regression-${{ github.sha }}.json
@@ -64,7 +64,7 @@ jobs:
         working-directory: ui
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -79,7 +79,7 @@ jobs:
         run: npm run test:coverage
       - name: Upload UI coverage
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: ui-coverage
           path: ui/coverage/
@@ -90,7 +90,7 @@ jobs:
         run: npx playwright test
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: playwright-failure-artifacts
           path: |
@@ -115,7 +115,7 @@ jobs:
           output: cortex-sbom.cdx.json
           scanners: vuln
       - name: Upload container SBOM
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cortex-sbom-${{ github.sha }}
           path: cortex-sbom.cdx.json
