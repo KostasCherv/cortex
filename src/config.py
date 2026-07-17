@@ -399,7 +399,7 @@ class Settings(BaseSettings):
         langfuse = json.loads(self.provider_config_json)
         langfuse_fields = {
             "langfuse_public_key": "langfuse_public_key",
-            "langfuse_secret_key": "langfuse_secret_key",
+            "langfuse_secret_key": "langfuse_secret_key",  # nosec B105 — schema field name, not a credential
             "langfuse_base_url": "langfuse_host",
         }
         for source, target in langfuse_fields.items():
