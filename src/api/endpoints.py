@@ -1,6 +1,7 @@
 """FastAPI application — /health, /research (SSE), and session endpoints."""
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
@@ -22,6 +23,7 @@ from slowapi.util import get_remote_address
 from src.tools.arxiv_mcp import ensure_arxiv_mcp_available
 
 from src.errors import CortexError
+from src.observability.sentry import capture_handled_exception
 from src.config import settings
 from src.cache.client import get_cache
 from src.sessions import (
@@ -78,9 +80,13 @@ async def _lifespan(app: FastAPI):
     await _shutdown_background_clients()
 
 
-if settings.sentry_dsn:
+def _configure_sentry() -> None:
+    if not settings.sentry_dsn:
+        return
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        release=os.environ.get("K_REVISION") or None,
         # Tracing is already covered by LangFuse/LangSmith; Sentry here is
         # error-capture only.
         traces_sample_rate=0.0,
@@ -89,6 +95,9 @@ if settings.sentry_dsn:
         # and RAG document content — don't ship them to Sentry.
         include_local_variables=False,
     )
+
+
+_configure_sentry()
 
 app = FastAPI(
     title="Cortex API",
@@ -223,6 +232,11 @@ class ReadinessResponse(BaseModel):
 
 @app.exception_handler(CortexError)
 async def cortex_error_handler(request: Request, exc: CortexError) -> JSONResponse:
+    capture_handled_exception(
+        exc,
+        operation="http.cortex_error",
+        identifiers={"method": request.method, "path": request.url.path},
+    )
     raise HTTPException(status_code=500, detail=str(exc))
 
 

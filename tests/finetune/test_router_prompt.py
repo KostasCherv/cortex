@@ -17,7 +17,8 @@ def test_system_prompt_contains_all_actions():
 def test_format_user_turn_no_context():
     result = format_user_turn(message="What is a P/E ratio?")
     assert "User message: What is a P/E ratio?" in result
-    assert "Available RAG context: no" in result
+    assert "Resource availability: unknown" in result
+    assert "context is retrieved after routing" in result
     assert "Conversation history: none" in result
 
 

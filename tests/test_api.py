@@ -983,6 +983,25 @@ def test_configure_application_logging_sets_src_logger_level():
         src_logger.propagate = old_src_propagate
 
 
+def test_configure_sentry_is_error_only_and_uses_cloud_run_revision():
+    with (
+        patch("src.api.endpoints.settings.sentry_dsn", "https://public@example.invalid/1"),
+        patch("src.api.endpoints.settings.sentry_environment", "production"),
+        patch.dict("src.api.endpoints.os.environ", {"K_REVISION": "cortex-00011-test"}),
+        patch("src.api.endpoints.sentry_sdk.init") as mock_init,
+    ):
+        endpoints._configure_sentry()
+
+    mock_init.assert_called_once_with(
+        dsn="https://public@example.invalid/1",
+        environment="production",
+        release="cortex-00011-test",
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        include_local_variables=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Follow-up suggestion tests
 # ---------------------------------------------------------------------------
@@ -1345,6 +1364,108 @@ async def _collect_stream(stream):
     async for item in stream:
         events.append(item)
     return events
+
+
+
+def test_run_stream_reports_refresh_failure_without_changing_sse_error_shape():
+    failure = RuntimeError("database unavailable")
+    with (
+        patch(
+            "src.api.routers.sessions.get_session_run",
+            new=AsyncMock(side_effect=failure),
+        ),
+        patch("src.api.routers.sessions.capture_handled_exception") as mock_capture,
+    ):
+        events = asyncio.run(
+            _collect_stream(
+                sessions_router_module._stream_session_run(
+                    session_id="session-1",
+                    run_id="run-1",
+                    user_id="user-1",
+                )
+            )
+        )
+
+    payload = json.loads(events[0].removeprefix("data: "))
+    assert payload == {
+        "type": "error",
+        "error": "Could not refresh run state: database unavailable",
+    }
+    mock_capture.assert_called_once_with(
+        failure,
+        operation="sse.run_refresh",
+        identifiers={"run_id": "run-1", "session_id": "session-1"},
+    )
+
+
+def test_followup_stream_reports_agent_loop_failure_without_changing_sse_error_shape():
+    mock_session = Session(
+        session_id="session-1",
+        runs=[
+            SessionRun(
+                run_id="run-1",
+                query="q",
+                source_urls=[],
+                report="",
+                created_at="2026",
+            )
+        ],
+        conversation=[],
+        created_at="2026",
+    )
+    failure = RuntimeError("agent failed")
+
+    with (
+        patch("src.api.routers.sessions.Neo4jGraphStore") as mock_graph_cls,
+        patch("src.api.routers.sessions.rerank_chunks", return_value=[]),
+        patch(
+            "src.api.routers.sessions.get_user_memory_prompt_block",
+            new=AsyncMock(return_value=""),
+        ),
+        patch("src.api.routers.sessions._run_agent_loop", new=AsyncMock(side_effect=failure)),
+        patch("src.api.routers.sessions.get_composio_toolset_manager") as mock_mgr,
+        patch("src.api.routers.sessions.capture_handled_exception") as mock_capture,
+    ):
+        mock_mgr.return_value.get_connected_app_names.return_value = []
+        mock_graph = MagicMock()
+        mock_graph.query_context.return_value = MagicMock(context="", chunks=[], entities=[])
+        mock_graph_cls.return_value = mock_graph
+        events = asyncio.run(
+            _collect_stream(
+                sessions_router_module._stream_followup(
+                    session=mock_session,
+                    user_id="user-1",
+                    question="What happened?",
+                    run_id="run-1",
+                )
+            )
+        )
+
+    payloads = [json.loads(event.removeprefix("data: ")) for event in events]
+    assert {"type": "error", "error": "agent failed"} in payloads
+    mock_capture.assert_called_once_with(
+        failure,
+        operation="sse.agent_loop",
+        identifiers={"run_id": "run-1", "session_id": "session-1"},
+    )
+
+
+def test_cortex_error_handler_reports_exception_and_preserves_500_response():
+    from src.errors import CortexError
+
+    request = SimpleNamespace(method="GET", url=SimpleNamespace(path="/research"))
+    failure = CortexError("research failed")
+    with patch("src.api.endpoints.capture_handled_exception") as mock_capture:
+        with pytest.raises(Exception) as exc_info:
+            asyncio.run(endpoints.cortex_error_handler(request, failure))
+
+    assert getattr(exc_info.value, "status_code", None) == 500
+    assert getattr(exc_info.value, "detail", None) == "research failed"
+    mock_capture.assert_called_once_with(
+        failure,
+        operation="http.cortex_error",
+        identifiers={"method": "GET", "path": "/research"},
+    )
 
 
 def _fake_prepared_chat(

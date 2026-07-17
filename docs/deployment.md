@@ -116,6 +116,19 @@ Registered functions:
 - `research-run` — triggered by `research/run.requested`
 - `outbox-dispatcher` — scheduled every two minutes
 
+After syncing the functions, enable the production failure and missing-dispatcher email alerts described in [Production monitoring](observability.md#inngest-alert-activation).
+
+## Alerting activation
+
+Provision or refresh the Cloud Monitoring baseline after the backend service exists:
+
+```bash
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh --dry-run
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh
+```
+
+The script configures the `/health` uptime check, 5xx burst policy, runtime/probe log alert, and email notification channel. Verify the email channel and send a test notification before treating the alarms as operational.
+
 ## Supabase migrations
 
 The production workflow applies migrations automatically. For manual maintenance:
@@ -130,4 +143,3 @@ npx supabase db push
 Every pull request and push to `main` builds the production container. CI scans the repository and image with Trivy, blocking HIGH or CRITICAL findings that have an available fix as well as serious configuration and secret findings.
 
 CI also generates a CycloneDX container SBOM named `cortex-sbom-<commit-sha>` and retains it for 30 days. See [Testing and quality](testing-and-quality.md) for the complete release gates.
-

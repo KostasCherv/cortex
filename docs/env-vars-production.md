@@ -8,7 +8,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 
 | Env Var | Secret Manager | Notes |
 |---|---|---|
-| `OPENAI_API_KEY` | yes | Required when `LLM_PROVIDER=openai` |
+| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with provider, Redis, Langfuse, LangSmith, and Sentry settings: `openai_api_key`, `tavily_api_key`, `redis_url`, `langfuse_public_key`, `langfuse_secret_key`, `langfuse_base_url`, `langsmith_api_key`, `langsmith_project`, `langsmith_endpoint`, `langsmith_redaction_mode`, `langsmith_sampling_rate`, `langsmith_tracing`, and `sentry_dsn`. Required when `LLM_PROVIDER=openai`. |
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
@@ -16,7 +16,6 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `EMBEDDING_PROVIDER` | no | `openai` |
 | `EMBEDDING_MODEL` | no | `text-embedding-3-small` |
 | `EMBEDDING_DIMENSIONS` | no | `1536` |
-| `TAVILY_API_KEY` | yes | |
 | `ALPHA_VANTAGE_API_KEY` | yes | Required when `ASSET_PRICE_PROVIDER=alphavantage_mcp` |
 | `ASSET_PRICE_PROVIDER` | no | `alphavantage_mcp` |
 | `ALPHA_VANTAGE_MCP_URL` | no | Optional full remote MCP URL override |
@@ -32,12 +31,9 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `READINESS_REQUIRE_SUPABASE` | no | Set to `true` in production; `/ready` returns `503` if Supabase is missing or unavailable |
 | `READINESS_REQUIRE_NEO4J` | no | Set to `true` in production; `/ready` returns `503` if Neo4j is missing or unavailable |
 | `READINESS_TIMEOUT_SECONDS` | no | Per-dependency probe timeout; defaults to `2.0` seconds |
-| `INNGEST_EVENT_KEY` | yes | From Inngest dashboard → Keys |
-| `INNGEST_SIGNING_KEY` | yes | From Inngest dashboard → Keys. **Must not be empty in prod.** |
-| `REDIS_URL` | yes | Upstash `rediss://` URL |
-| `STRIPE_SECRET_KEY` | yes | |
-| `STRIPE_WEBHOOK_SECRET` | yes | Update Stripe webhook URL to `https://<cloud-run-url>/api/billing/webhook` after first deploy |
-| `STRIPE_PRO_PRICE_ID` | no | |
+| `INNGEST_CONFIG_JSON` | yes | Secret JSON with `inngest_event_key` and `inngest_signing_key` from the Inngest dashboard. |
+| `REDIS_CACHE_TTL_DB_LIST_SECONDS` | no | Cache TTL for DB-heavy list/read-all responses; production uses `30`. `REDIS_URL` is supplied through `PROVIDER_CONFIG_JSON`. |
+| `BILLING_CONFIG_JSON` | yes | Secret JSON with `stripe_secret_key`, `stripe_webhook_secret`, and `stripe_pro_price_id`. This bundles Stripe credentials into one Secret Manager version. |
 | `STRIPE_SUCCESS_URL` | no | `https://<frontend>/billing/success` |
 | `STRIPE_CANCEL_URL` | no | `https://<frontend>/billing/cancel` |
 | `STRIPE_PORTAL_RETURN_URL` | no | `https://<frontend>` |
@@ -49,12 +45,12 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | Env Var | Secret Manager | Notes |
 |---|---|---|
 | `COHERE_API_KEY` | yes | Enables cross-encoder reranking |
-| `LANGFUSE_PUBLIC_KEY` | yes | |
-| `LANGFUSE_SECRET_KEY` | yes | |
-| `LANGFUSE_ENABLED` | no | Set to `true` only when both LangFuse keys are configured; otherwise feedback remains stored locally |
+| `LANGFUSE_ENABLED` | no | Production sets this to `true`; Langfuse credentials and base URL are supplied through `PROVIDER_CONFIG_JSON`. |
+| `LANGSMITH_*` | no | LangSmith tracing, API key, project, endpoint, redaction mode, and sampling rate are supplied through `PROVIDER_CONFIG_JSON`. |
 | `LANGFUSE_ENV` | no | `prod` |
 | `LANGFUSE_RELEASE` | no | Git SHA or semver, e.g. `v1.2.3` |
-| `SENTRY_DSN` | yes | Error tracking; unset disables it entirely |
+| `SENTRY_DSN` | no | Local/split-variable fallback. Production stores `sentry_dsn` inside `PROVIDER_CONFIG_JSON`; unset disables Sentry entirely. |
+| `SENTRY_ENVIRONMENT` | no | Sentry issue environment; production deploys set this to `production` |
 | `RATE_LIMIT_DEFAULT` | no | Per-IP request limit, e.g. `60/minute` (default) |
 
 ### Variables that must NOT be set in production
@@ -91,19 +87,16 @@ PROJECT=cortex-496709
 REGION=your-region
 
 secrets=(
-  openai-api-key
-  tavily-api-key
+  provider-config
   cohere-api-key
   neo4j-uri
   neo4j-username
   neo4j-password
   supabase-secret-key
   supabase-jwt-secret
-  inngest-event-key
-  inngest-signing-key
+  inngest-config
   redis-url
-  stripe-secret-key
-  stripe-webhook-secret
+  billing-config
   internal-dispatch-secret
   langfuse-public-key
   langfuse-secret-key
@@ -132,7 +125,22 @@ After the Cloud Run service is deployed:
 3. Set **Serve URL** to `https://<cloud-run-url>/api/inngest`
 4. Confirm **Event Key** and **Signing Key** match what was set in Cloud Run secrets
 5. Click **Sync** — all three functions should appear: `rag-ingestion`, `research-run`, `outbox-dispatcher`
-6. Verify `outbox-dispatcher` shows a cron trigger of `* * * * *`
+6. Verify `outbox-dispatcher` shows a cron trigger of `*/2 * * * *`
+
+Configure email alerts for terminal failures in every registered function and for no successful `outbox-dispatcher` run within six minutes. A dispatcher run returning zero events is healthy and must count as successful.
+
+## Alerting post-deploy wiring
+
+After creating a Sentry Python/FastAPI project, add its DSN as the `sentry_dsn` field in the existing `provider-config` JSON secret. This keeps production at six active Secret Manager versions. Then deploy and configure a Sentry email issue alert for new or regressed production issues with a 30-minute per-issue cooldown.
+
+Provision Google Cloud alerts with:
+
+```bash
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh --dry-run
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh
+```
+
+Verify the email channel and test notification delivery in Cloud Monitoring. The setup script is safe to rerun and updates resources with matching display names.
 
 ---
 

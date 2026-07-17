@@ -6,11 +6,10 @@
 #    or: ./scripts/setup_secrets.sh my-project
 #
 # If .env.prod exists at the repo root, secret values are populated from it
-# automatically. Otherwise populate each secret manually:
-#   echo -n "sk-..." | gcloud secrets versions add openai-api-key --data-file=-
+# automatically. Otherwise populate each secret manually.
 #
-# NOTE: the lean set below is 7 secrets. Secret Manager's free tier covers
-# 6 active versions; the 7th costs ~$0.06/month. When rotating a value,
+# NOTE: the set below is 6 secrets, matching Secret Manager's free active-version
+# allowance. Related credentials are stored as JSON configuration bundles. When rotating a value,
 # destroy the old version to avoid accumulating billable versions:
 #   gcloud secrets versions destroy <N> --secret=<name>
 
@@ -39,18 +38,15 @@ gcloud services enable \
   --quiet
 
 # ── Create secrets (idempotent) ───────────────────────────────────────────────
-# Lean set: only real credentials. Non-sensitive config (Neo4j URI/username,
-# Supabase URL) lives as plain env vars in cloudrun/service.yaml.
-# Optional services (Redis, Stripe, Cohere, LangSmith, LangFuse) are disabled
-# in this deploy; add their secrets back alongside service.yaml if enabled.
+# Related credentials share JSON configuration secrets to stay within the six
+# free active versions. Non-sensitive config remains in cloudrun/service.yaml.
 
 secrets=(
-  openai-api-key
-  tavily-api-key
+  provider-config
   neo4j-password
   supabase-secret-key
-  inngest-event-key
-  inngest-signing-key
+  inngest-config
+  billing-config
   internal-dispatch-secret
 )
 
@@ -94,12 +90,67 @@ if [[ -f "$ENV_FILE" ]]; then
     echo "  ✓ $secret"
   }
 
-  populate openai-api-key OPENAI_API_KEY
-  populate tavily-api-key TAVILY_API_KEY
+  populate_bundle() {
+    local secret="$1"
+    shift
+    local payload
+    payload="$(python3 - "$@" <<'PY'
+import json
+import os
+import sys
+
+values = {}
+for mapping in sys.argv[1:]:
+    field, env_var = mapping.split("=", 1)
+    value = os.environ.get(env_var, "")
+    if value:
+        values[field] = value
+print(json.dumps(values, separators=(",", ":")))
+PY
+)"
+    echo -n "$payload" | gcloud secrets versions add "$secret" \
+      --project="$PROJECT" --data-file=- --quiet >/dev/null
+    echo "  ✓ $secret"
+  }
+
+  if [[ -n "${OPENAI_API_KEY:-}" && -n "${TAVILY_API_KEY:-}" ]]; then
+    populate_bundle provider-config \
+      openai_api_key=OPENAI_API_KEY \
+      tavily_api_key=TAVILY_API_KEY \
+      redis_url=REDIS_URL \
+      langfuse_public_key=LANGFUSE_PUBLIC_KEY \
+      langfuse_secret_key=LANGFUSE_SECRET_KEY \
+      langfuse_base_url=LANGFUSE_HOST \
+      langsmith_api_key=LANGSMITH_API_KEY \
+      langsmith_project=LANGSMITH_PROJECT \
+      langsmith_endpoint=LANGSMITH_ENDPOINT \
+      langsmith_redaction_mode=LANGSMITH_REDACTION_MODE \
+      langsmith_sampling_rate=LANGSMITH_SAMPLING_RATE \
+      langsmith_tracing=LANGSMITH_TRACING \
+      sentry_dsn=SENTRY_DSN
+  else
+    echo "  ! provider-config (OPENAI_API_KEY or TAVILY_API_KEY empty — populate manually)"
+  fi
+
   populate neo4j-password NEO4J_PASSWORD
   populate supabase-secret-key SUPABASE_SECRET_KEY
-  populate inngest-event-key INNGEST_EVENT_KEY
-  populate inngest-signing-key INNGEST_SIGNING_KEY
+
+  if [[ -n "${INNGEST_EVENT_KEY:-}" && -n "${INNGEST_SIGNING_KEY:-}" ]]; then
+    populate_bundle inngest-config \
+      inngest_event_key=INNGEST_EVENT_KEY \
+      inngest_signing_key=INNGEST_SIGNING_KEY
+  else
+    echo "  ! inngest-config (INNGEST_EVENT_KEY or INNGEST_SIGNING_KEY empty — populate manually)"
+  fi
+
+  if [[ -n "${STRIPE_SECRET_KEY:-}" && -n "${STRIPE_WEBHOOK_SECRET:-}" && -n "${STRIPE_PRO_PRICE_ID:-}" ]]; then
+    populate_bundle billing-config \
+      stripe_secret_key=STRIPE_SECRET_KEY \
+      stripe_webhook_secret=STRIPE_WEBHOOK_SECRET \
+      stripe_pro_price_id=STRIPE_PRO_PRICE_ID
+  else
+    echo "  ! billing-config (one or more Stripe values empty — populate manually)"
+  fi
 else
   echo ""
   echo "No .env.prod found — populate secrets manually (see instructions below)."
@@ -123,13 +174,22 @@ echo "  ✓ done"
 # ── Generate internal dispatch secret ────────────────────────────────────────
 
 echo ""
-echo "Generating internal-dispatch-secret value..."
-DISPATCH_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
-echo -n "$DISPATCH_SECRET" | gcloud secrets versions add internal-dispatch-secret \
+echo "Checking internal-dispatch-secret value..."
+ACTIVE_DISPATCH_VERSION=$(gcloud secrets versions list internal-dispatch-secret \
   --project="$PROJECT" \
-  --data-file=- \
-  --quiet
-echo "  ✓ internal-dispatch-secret set"
+  --filter="state=ENABLED" \
+  --format="value(name)" \
+  --limit=1)
+if [[ -n "$ACTIVE_DISPATCH_VERSION" ]]; then
+  echo "  ✓ internal-dispatch-secret already populated"
+else
+  DISPATCH_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+  echo -n "$DISPATCH_SECRET" | gcloud secrets versions add internal-dispatch-secret \
+    --project="$PROJECT" \
+    --data-file=- \
+    --quiet
+  echo "  ✓ internal-dispatch-secret set"
+fi
 
 # ── Instructions ─────────────────────────────────────────────────────────────
 

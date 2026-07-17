@@ -17,7 +17,7 @@ JSON schema:
 
 Routing rules:
 - answer_direct: question answerable from general knowledge, no live data or documents needed
-- answer_from_rag: question about uploaded documents or the knowledge base
+- answer_from_rag: question about uploaded documents or the knowledge base; select this even when no context has been retrieved yet, because retrieval happens after routing
 - web_search: needs current or live information (news, recent events, live prices)
 - asset_price: user wants current price or quote for a specific stock or crypto (symbols required)
 - search_finance_tools: user needs financial ratios, statements, or structured data via a tool (query required)
@@ -34,9 +34,13 @@ def format_user_turn(
     parts: list[str] = [f"User message: {message.strip()}"]
 
     if rag_context.strip():
-        parts.append(f"Available RAG context: yes — {rag_context.strip()}")
+        parts.append(f"Pre-retrieved RAG context: yes — {rag_context.strip()}")
     else:
-        parts.append("Available RAG context: no")
+        parts.append(
+            "Pre-retrieved RAG context: none. Resource availability: unknown; "
+            "context is retrieved after routing. If the message asks about uploaded "
+            "documents or the knowledge base, choose answer_from_rag."
+        )
 
     if history:
         last = history[-1]
