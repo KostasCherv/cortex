@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="openai", description="LLM provider: 'ollama' or 'openai'")
     provider_config_json: str = Field(
         default="",
-        description="JSON object containing provider, cache, and Langfuse settings for production.",
+        description="JSON object containing provider, cache, and observability settings for production.",
     )
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
@@ -408,6 +408,34 @@ class Settings(BaseSettings):
                 if not isinstance(value, str) or not value:
                     raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
                 setattr(self, target, value)
+        langsmith_fields = {
+            "langsmith_api_key": "langsmith_api_key",
+            "langsmith_project": "langsmith_project",
+            "langsmith_endpoint": "langsmith_endpoint",
+            "langsmith_redaction_mode": "langsmith_redaction_mode",
+        }
+        for source, target in langsmith_fields.items():
+            value = langfuse.get(source)
+            if value is not None:
+                if not isinstance(value, str) or not value:
+                    raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
+                setattr(self, target, value)
+        langsmith_tracing = langfuse.get("langsmith_tracing")
+        if langsmith_tracing is not None:
+            if isinstance(langsmith_tracing, bool):
+                self.langsmith_tracing = langsmith_tracing
+            elif isinstance(langsmith_tracing, str) and langsmith_tracing.lower() in {"true", "false"}:
+                self.langsmith_tracing = langsmith_tracing.lower() == "true"
+            else:
+                raise ValueError("PROVIDER_CONFIG_JSON langsmith_tracing must be true or false.")
+        langsmith_sampling_rate = langfuse.get("langsmith_sampling_rate")
+        if langsmith_sampling_rate is not None:
+            try:
+                self.langsmith_sampling_rate = float(langsmith_sampling_rate)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "PROVIDER_CONFIG_JSON langsmith_sampling_rate must be a number."
+                ) from exc
         return self
 
     @model_validator(mode="after")

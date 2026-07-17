@@ -55,6 +55,12 @@ def test_provider_config_json_overrides_split_provider_variables():
         "langfuse_public_key": "pk-bundled",
         "langfuse_secret_key": "sk-bundled",
         "langfuse_base_url": "https://langfuse.example.test",
+        "langsmith_api_key": "lsv2_bundled",
+        "langsmith_project": "cortex-prod",
+        "langsmith_endpoint": "https://api.smith.example.test",
+        "langsmith_redaction_mode": "metadata_only",
+        "langsmith_sampling_rate": "0.25",
+        "langsmith_tracing": "true",
     }
     with patch.dict(
         "os.environ",
@@ -71,3 +77,9 @@ def test_provider_config_json_overrides_split_provider_variables():
     assert s.langfuse_public_key == "pk-bundled"
     assert s.langfuse_secret_key == "sk-bundled"
     assert s.langfuse_host == "https://langfuse.example.test"
+    assert s.langsmith_api_key == "lsv2_bundled"
+    assert s.langsmith_project == "cortex-prod"
+    assert s.langsmith_endpoint == "https://api.smith.example.test"
+    assert s.langsmith_redaction_mode == "metadata_only"
+    assert s.langsmith_sampling_rate == 0.25
+    assert s.langsmith_tracing is True
