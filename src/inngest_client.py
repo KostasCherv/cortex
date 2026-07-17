@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 
 import inngest
 import inngest.fast_api
+
+
+def _apply_bundled_inngest_config() -> None:
+    """Expose bundled credentials under the names expected by the Inngest SDK."""
+    raw = os.environ.get("INNGEST_CONFIG_JSON", "").strip()
+    if not raw:
+        return
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("INNGEST_CONFIG_JSON must be valid JSON.") from exc
+    if not isinstance(config, dict):
+        raise ValueError("INNGEST_CONFIG_JSON must be a JSON object.")
+    for name in ("inngest_event_key", "inngest_signing_key"):
+        value = config.get(name)
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"INNGEST_CONFIG_JSON must include a non-empty {name} value.")
+        os.environ[name.upper()] = value
+
+
+_apply_bundled_inngest_config()
 
 _is_production = os.environ.get("INNGEST_DEV", "").strip() != "1"
 

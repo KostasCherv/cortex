@@ -8,7 +8,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 
 | Env Var | Secret Manager | Notes |
 |---|---|---|
-| `OPENAI_API_KEY` | yes | Required when `LLM_PROVIDER=openai` |
+| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with `openai_api_key` and `tavily_api_key`. Required when `LLM_PROVIDER=openai`. |
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
@@ -16,7 +16,6 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `EMBEDDING_PROVIDER` | no | `openai` |
 | `EMBEDDING_MODEL` | no | `text-embedding-3-small` |
 | `EMBEDDING_DIMENSIONS` | no | `1536` |
-| `TAVILY_API_KEY` | yes | |
 | `ALPHA_VANTAGE_API_KEY` | yes | Required when `ASSET_PRICE_PROVIDER=alphavantage_mcp` |
 | `ASSET_PRICE_PROVIDER` | no | `alphavantage_mcp` |
 | `ALPHA_VANTAGE_MCP_URL` | no | Optional full remote MCP URL override |
@@ -32,12 +31,9 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `READINESS_REQUIRE_SUPABASE` | no | Set to `true` in production; `/ready` returns `503` if Supabase is missing or unavailable |
 | `READINESS_REQUIRE_NEO4J` | no | Set to `true` in production; `/ready` returns `503` if Neo4j is missing or unavailable |
 | `READINESS_TIMEOUT_SECONDS` | no | Per-dependency probe timeout; defaults to `2.0` seconds |
-| `INNGEST_EVENT_KEY` | yes | From Inngest dashboard → Keys |
-| `INNGEST_SIGNING_KEY` | yes | From Inngest dashboard → Keys. **Must not be empty in prod.** |
+| `INNGEST_CONFIG_JSON` | yes | Secret JSON with `inngest_event_key` and `inngest_signing_key` from the Inngest dashboard. |
 | `REDIS_URL` | yes | Upstash `rediss://` URL |
-| `STRIPE_SECRET_KEY` | yes | |
-| `STRIPE_WEBHOOK_SECRET` | yes | Update Stripe webhook URL to `https://<cloud-run-url>/api/billing/webhook` after first deploy |
-| `STRIPE_PRO_PRICE_ID` | no | |
+| `BILLING_CONFIG_JSON` | yes | Secret JSON with `stripe_secret_key`, `stripe_webhook_secret`, and `stripe_pro_price_id`. This bundles Stripe credentials into one Secret Manager version. |
 | `STRIPE_SUCCESS_URL` | no | `https://<frontend>/billing/success` |
 | `STRIPE_CANCEL_URL` | no | `https://<frontend>/billing/cancel` |
 | `STRIPE_PORTAL_RETURN_URL` | no | `https://<frontend>` |
@@ -91,19 +87,16 @@ PROJECT=cortex-496709
 REGION=your-region
 
 secrets=(
-  openai-api-key
-  tavily-api-key
+  provider-config
   cohere-api-key
   neo4j-uri
   neo4j-username
   neo4j-password
   supabase-secret-key
   supabase-jwt-secret
-  inngest-event-key
-  inngest-signing-key
+  inngest-config
   redis-url
-  stripe-secret-key
-  stripe-webhook-secret
+  billing-config
   internal-dispatch-secret
   langfuse-public-key
   langfuse-secret-key

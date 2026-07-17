@@ -4,7 +4,7 @@ Cortex uses Stripe Hosted Checkout, signed webhooks, and the customer portal for
 
 ## Configuration
 
-Required variables:
+Required local-development variables:
 
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
@@ -12,6 +12,11 @@ Required variables:
 - `STRIPE_SUCCESS_URL`
 - `STRIPE_CANCEL_URL`
 - `STRIPE_PORTAL_RETURN_URL`
+
+In production, Cloud Run uses one `BILLING_CONFIG_JSON` Secret Manager value containing
+`stripe_secret_key`, `stripe_webhook_secret`, and `stripe_pro_price_id`; the three redirect
+URLs remain ordinary environment variables. This keeps the Stripe credentials within one
+active secret version.
 
 Store production secret values in Google Secret Manager. See [Production configuration](env-vars-production.md).
 
@@ -46,4 +51,3 @@ flowchart LR
 ```
 
 Webhook events are the authoritative source for subscription state. The backend verifies the Stripe signature before updating `user_subscriptions`; research and chat quota guards then read the synchronized subscription and usage state.
-
