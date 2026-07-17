@@ -52,6 +52,9 @@ def test_provider_config_json_overrides_split_provider_variables():
         "openai_api_key": "sk-bundled",
         "tavily_api_key": "tvly-bundled",
         "redis_url": "rediss://bundled",
+        "langfuse_public_key": "pk-bundled",
+        "langfuse_secret_key": "sk-bundled",
+        "langfuse_base_url": "https://langfuse.example.test",
     }
     with patch.dict(
         "os.environ",
@@ -65,3 +68,6 @@ def test_provider_config_json_overrides_split_provider_variables():
     assert s.openai_api_key == "sk-bundled"
     assert s.tavily_api_key == "tvly-bundled"
     assert s.redis_url == "rediss://bundled"
+    assert s.langfuse_public_key == "pk-bundled"
+    assert s.langfuse_secret_key == "sk-bundled"
+    assert s.langfuse_host == "https://langfuse.example.test"

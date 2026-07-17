@@ -120,9 +120,7 @@ spec:
                   name: internal-dispatch-secret
                   key: latest
             # --- Observability ---
-            # ponytail: observability off for the free-tier deploy; re-add
-            # langsmith-api-key / langfuse-* secrets when tracing matters.
             - name: LANGSMITH_TRACING
               value: "false"
             - name: LANGFUSE_ENABLED
-              value: "false"
+              value: "true"

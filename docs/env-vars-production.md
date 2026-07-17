@@ -8,7 +8,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 
 | Env Var | Secret Manager | Notes |
 |---|---|---|
-| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with `openai_api_key`, `tavily_api_key`, and `redis_url`. Required when `LLM_PROVIDER=openai`. |
+| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with `openai_api_key`, `tavily_api_key`, `redis_url`, `langfuse_public_key`, `langfuse_secret_key`, and `langfuse_base_url`. Required when `LLM_PROVIDER=openai`. |
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
@@ -45,9 +45,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | Env Var | Secret Manager | Notes |
 |---|---|---|
 | `COHERE_API_KEY` | yes | Enables cross-encoder reranking |
-| `LANGFUSE_PUBLIC_KEY` | yes | |
-| `LANGFUSE_SECRET_KEY` | yes | |
-| `LANGFUSE_ENABLED` | no | Set to `true` only when both LangFuse keys are configured; otherwise feedback remains stored locally |
+| `LANGFUSE_ENABLED` | no | Production sets this to `true`; Langfuse credentials and base URL are supplied through `PROVIDER_CONFIG_JSON`. |
 | `LANGFUSE_ENV` | no | `prod` |
 | `LANGFUSE_RELEASE` | no | Git SHA or semver, e.g. `v1.2.3` |
 | `SENTRY_DSN` | yes | Error tracking; unset disables it entirely |

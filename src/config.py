@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="openai", description="LLM provider: 'ollama' or 'openai'")
     provider_config_json: str = Field(
         default="",
-        description="JSON object containing provider API keys and the Redis URL for production.",
+        description="JSON object containing provider, cache, and Langfuse settings for production.",
     )
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
@@ -396,6 +396,18 @@ class Settings(BaseSettings):
             if not isinstance(redis_url, str) or not redis_url:
                 raise ValueError("PROVIDER_CONFIG_JSON redis_url must be a non-empty string.")
             self.redis_url = redis_url
+        langfuse = json.loads(self.provider_config_json)
+        langfuse_fields = {
+            "langfuse_public_key": "langfuse_public_key",
+            "langfuse_secret_key": "langfuse_secret_key",
+            "langfuse_base_url": "langfuse_host",
+        }
+        for source, target in langfuse_fields.items():
+            value = langfuse.get(source)
+            if value is not None:
+                if not isinstance(value, str) or not value:
+                    raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
+                setattr(self, target, value)
         return self
 
     @model_validator(mode="after")
