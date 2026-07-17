@@ -53,7 +53,7 @@ gcloud container images add-tag "$TAG" "$LATEST" --quiet
 # ── Deploy ────────────────────────────────────────────────────────────────────
 
 # Inject the SHA-tagged image (and project id) so Cloud Run sees a spec change
-TMP_YAML=$(mktemp /tmp/service-XXXXXX.yaml)
+TMP_YAML=$(mktemp /tmp/service-XXXXXX)
 sed "s|gcr.io/PROJECT_ID/cortex:latest|$TAG|g" "$SERVICE_YAML" > "$TMP_YAML"
 
 if ! grep -q "$TAG" "$TMP_YAML"; then

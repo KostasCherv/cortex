@@ -793,7 +793,7 @@ async def submit_run_feedback(
     body: RunFeedbackRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
-    """Record simple user feedback for a completed run in LangFuse."""
+    """Record user feedback locally and mirror it to LangFuse when available."""
     session = await get_session(session_id, current_user.user_id)
     if session is None:
         raise HTTPException(
@@ -816,6 +816,15 @@ async def submit_run_feedback(
             status_code=409,
             detail="Feedback can only be submitted for completed runs.",
         )
+    comment: str | None = None
+    if body.comment is not None:
+        trimmed = " ".join(body.comment.strip().split())
+        if not trimmed:
+            raise HTTPException(status_code=400, detail="Feedback comment cannot be empty.")
+        if len(trimmed) > 500:
+            raise HTTPException(status_code=400, detail="Feedback comment is too long.")
+        comment = trimmed
+
     trace_id = run.langfuse_trace_id
     observation_id = run.langfuse_observation_id
     if not trace_id:
@@ -827,67 +836,47 @@ async def submit_run_feedback(
                 query=run.query,
                 report=run.report,
             )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502, detail=f"Could not link run to LangFuse: {exc}"
-            )
-        if not trace_id:
-            raise HTTPException(
-                status_code=502, detail="Could not link run to LangFuse."
-            )
-        linkage_updated = await update_session_run(
-            run_id=run_id,
-            user_id=current_user.user_id,
-            session_id=session_id,
-            patch={
-                "langfuse_trace_id": trace_id,
-                "langfuse_observation_id": observation_id,
-            },
-        )
-        if not linkage_updated:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Run '{run_id}' not found in session '{session_id}'.",
-            )
-
-    comment: str | None = None
-    if body.comment is not None:
-        trimmed = " ".join(body.comment.strip().split())
-        if not trimmed:
-            raise HTTPException(
-                status_code=400, detail="Feedback comment cannot be empty."
-            )
-        if len(trimmed) > 500:
-            raise HTTPException(status_code=400, detail="Feedback comment is too long.")
-        comment = trimmed
-
-    try:
-        submit_user_feedback_score(
-            trace_id=trace_id,
-            observation_id=observation_id,
-            helpful=body.helpful,
-            comment=comment,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Could not submit LangFuse feedback: {exc}"
-        )
+        except Exception:
+            # LangFuse is optional. A missing or unavailable observability backend
+            # must not prevent the product from accepting user feedback.
+            logger.warning("Could not create LangFuse feedback anchor", exc_info=True)
+            trace_id = None
+            observation_id = None
 
     submitted_at = datetime.now(UTC).isoformat()
+    patch: dict[str, object] = {
+        "feedback_submitted_at": submitted_at,
+        "feedback_helpful": body.helpful,
+    }
+    if trace_id:
+        patch.update(
+            {
+                "langfuse_trace_id": trace_id,
+                "langfuse_observation_id": observation_id,
+            }
+        )
     updated = await update_session_run(
         run_id=run_id,
         user_id=current_user.user_id,
         session_id=session_id,
-        patch={
-            "feedback_submitted_at": submitted_at,
-            "feedback_helpful": body.helpful,
-        },
+        patch=patch,
     )
     if not updated:
         raise HTTPException(
             status_code=404,
             detail=f"Run '{run_id}' not found in session '{session_id}'.",
         )
+
+    if trace_id:
+        try:
+            submit_user_feedback_score(
+                trace_id=trace_id,
+                observation_id=observation_id,
+                helpful=body.helpful,
+                comment=comment,
+            )
+        except Exception:
+            logger.warning("Could not mirror user feedback to LangFuse", exc_info=True)
 
     return {
         "session_id": session_id,

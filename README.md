@@ -8,12 +8,10 @@
 
 Cortex combines LangGraph orchestration, GraphRAG retrieval, durable background jobs, and end-to-end observability in a FastAPI and React application.
 
-<img width="1722" height="898" alt="Cortex research workspace showing a generated report and source-grounded chat" src="https://github.com/user-attachments/assets/1f01409f-bc58-43ef-bc09-5ec2649acf00" />
+<video src="https://github.com/user-attachments/assets/fe5c280c-bbdc-4d49-8e9c-655a256b6b6f" controls></video>
 
-## Promo video
 
-Watch Cortex move from workspace chat to a live research run and grounded follow-up questions:
-[MP4](assets/promo/cortex-research-promo.mp4) · [WebM](assets/promo/cortex-research-promo.webm)
+
 
 ## Why Cortex
 

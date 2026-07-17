@@ -5,6 +5,7 @@ import { AgentChat } from '@/components/agents/AgentChat'
 import { GenericChat } from '@/components/chat/GenericChat'
 import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { AgentRail } from '@/components/shell/AgentRail'
+import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
 import { MemoryPage } from '@/pages/MemoryPage'
 import { ResearchPage } from '@/pages/ResearchPage'
@@ -254,8 +255,13 @@ export function AppShell() {
               onSessionsChanged={handleSessionsChanged}
             />
           ) : (
-            <main className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-              Sign in to start a workspace chat.
+            <main className="flex h-full items-center justify-center px-6">
+              <div className="flex flex-col items-center gap-4 text-center">
+                <p className="text-sm text-muted-foreground">Sign in to start a workspace chat.</p>
+                <Button size="sm" onClick={() => void signInWithGoogle()}>
+                  Sign in with Google
+                </Button>
+              </div>
             </main>
           ))}
         {activeView.type === 'research' && (

@@ -490,14 +490,24 @@ async def test_prepare_agent_with_explicit_tools_deduplicates_merged_resource_id
 
 
 @pytest.mark.asyncio
-async def test_prepare_agent_direct_answer_skips_linked_resources_but_keeps_attachments():
+async def test_prepare_agent_loads_linked_resources_even_for_direct_router_decision():
     from src.api.rag_chat_helpers import prepare_agent_rag_chat
     from src.api.rag_chat_timing import RagChatTimings
 
     agent = MagicMock(system_instructions="system")
+    agent.name = "CV Agent"
+    agent.description = "Resume advice grounded in the linked CV."
     rag_context = MagicMock(context="attachment context", chunks=[])
+    router_decision = ChatActionDecisionPayload(
+        action="answer_direct",
+        reason="test decision",
+    )
 
     with (
+        patch(
+            "src.api.rag_chat_helpers.classify_chat_action",
+            new=AsyncMock(return_value=router_decision),
+        ) as mock_router,
         patch(
             "src.api.rag_chat_helpers.get_agent_for_chat",
             new=AsyncMock(return_value=(agent, ["agent-res-1"])),
@@ -542,10 +552,17 @@ async def test_prepare_agent_direct_answer_skips_linked_resources_but_keeps_atta
         )
 
     assert result is not None
-    assert result.resource_ids == ["attachment-res-1"]
+    assert result.resource_ids == ["agent-res-1", "attachment-res-1"]
+    mock_router.assert_awaited_once_with(
+        message="hi",
+        resource_scope=(
+            'Custom agent "CV Agent" has 1 linked uploaded resource and '
+            "1 ready session attachment. Agent description: Resume advice grounded in the linked CV."
+        ),
+    )
     mock_retrieve.assert_awaited_once_with(
         user_id="user-1",
-        agent_resource_ids=[],
+        agent_resource_ids=["agent-res-1"],
         session_attachment_resource_ids=["attachment-res-1"],
         session_attachment_files=["brief.pdf"],
         question="hi",
@@ -616,6 +633,19 @@ def test_router_has_no_disable_flag():
     assert "router_enabled" not in Settings.model_fields
 
 
+def test_router_turn_does_not_treat_missing_context_as_missing_resources():
+    from src.api.rag_chat_helpers import _format_router_user_turn
+
+    turn = _format_router_user_turn(
+        message="Using only my uploaded resources, summarize the key findings.",
+        rag_context="",
+    )
+
+    assert "Resource availability: unknown" in turn
+    assert "context is retrieved after routing" in turn
+    assert "Available RAG context: no" not in turn
+
+
 @pytest.mark.asyncio
 async def test_classify_chat_action_parses_valid_response():
     from unittest.mock import AsyncMock, patch
@@ -627,6 +657,29 @@ async def test_classify_chat_action_parses_valid_response():
     with patch("src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm):
         result = await classify_chat_action(message="hello")
         assert result.action == "answer_direct"
+
+
+@pytest.mark.asyncio
+async def test_classify_chat_action_uses_configured_router_timeout():
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = AsyncMock(
+        return_value=MagicMock(content='{"action": "answer_direct", "reason": "greeting"}')
+    )
+
+    async def passthrough(awaitable, *, timeout):
+        assert timeout == 10.0
+        return await awaitable
+
+    with (
+        patch("src.api.rag_chat_helpers.get_router_llm", return_value=mock_llm),
+        patch("src.api.rag_chat_helpers.asyncio.wait_for", side_effect=passthrough),
+        patch("src.api.rag_chat_helpers.settings") as mock_settings,
+    ):
+        mock_settings.router_prompt_path = ""
+        mock_settings.router_timeout_seconds = 10.0
+        result = await classify_chat_action(message="hello")
+
+    assert result.action == "answer_direct"
 
 
 @pytest.mark.asyncio

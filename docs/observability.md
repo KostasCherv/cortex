@@ -85,7 +85,7 @@ Which signal fires for which failure class:
 
 ### Error tracking
 
-Setting `SENTRY_DSN` enables Sentry for unhandled and selected handled-exception capture (error-capture only — tracing stays with LangSmith/LangFuse, PII and stack-trace locals are not sent). Production uses the Cloud Run revision as the Sentry release. Configure one Sentry issue alert for a new or regressed issue in `production`, delivered by email with a 30-minute per-issue cooldown. See [Production configuration](env-vars-production.md).
+Setting `SENTRY_DSN` locally, or `sentry_dsn` inside the production `PROVIDER_CONFIG_JSON` secret, enables Sentry for unhandled and selected handled-exception capture (error-capture only — tracing stays with LangSmith/LangFuse, PII and stack-trace locals are not sent). Production uses the Cloud Run revision as the Sentry release. Configure one Sentry issue alert for a new or regressed issue in `production`, delivered by email with a 30-minute per-issue cooldown. See [Production configuration](env-vars-production.md).
 
 Handled-exception metadata is allowlisted to operational identifiers such as run, session, job, and outbox event IDs. Prompts, chat messages, documents, tokens, and authorization values are never attached.
 

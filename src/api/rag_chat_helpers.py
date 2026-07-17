@@ -203,7 +203,7 @@ JSON schema:
 
 Routing rules:
 - answer_direct: question answerable from general knowledge, no live data or documents needed
-- answer_from_rag: question about uploaded documents or the knowledge base
+- answer_from_rag: question about uploaded documents or the knowledge base; select this even when no context has been retrieved yet, because retrieval happens after routing
 - web_search: needs current or live information (news, recent events, live prices)
 - asset_price: user wants current price or quote for a specific stock or crypto (symbols required)
 - search_finance_tools: user needs financial ratios, statements, or structured data via a tool (query required)
@@ -251,25 +251,63 @@ def _get_router_action_schema() -> str:
     return _ROUTER_ACTION_SCHEMA
 
 
-def _format_router_user_turn(*, message: str, rag_context: str) -> str:
+def _format_router_user_turn(
+    *,
+    message: str,
+    rag_context: str,
+    resource_scope: str = "",
+) -> str:
     if rag_context.strip():
-        context_line = f"Available RAG context: yes — {rag_context.strip()}"
+        context_line = f"Pre-retrieved RAG context: yes — {rag_context.strip()}"
     else:
-        context_line = "Available RAG context: no"
-    return f"User message: {message.strip()}\n{context_line}"
+        context_line = (
+            "Pre-retrieved RAG context: none. Resource availability: unknown; "
+            "context is retrieved after routing. If the message asks about uploaded "
+            "documents or the knowledge base, choose answer_from_rag."
+        )
+    lines = [f"User message: {message.strip()}"]
+    if resource_scope.strip():
+        lines.append(f"Resource scope: {resource_scope.strip()}")
+    lines.append(context_line)
+    return "\n".join(lines)
+
+
+def _format_agent_resource_scope(
+    *,
+    agent: Any,
+    linked_resource_count: int,
+    attachment_count: int,
+) -> str:
+    raw_name = getattr(agent, "name", "")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else "Custom agent"
+    linked_label = "resource" if linked_resource_count == 1 else "resources"
+    attachment_label = "attachment" if attachment_count == 1 else "attachments"
+    scope = (
+        f'Custom agent "{name}" has {linked_resource_count} linked uploaded {linked_label} '
+        f"and {attachment_count} ready session {attachment_label}."
+    )
+    raw_description = getattr(agent, "description", "")
+    if isinstance(raw_description, str) and raw_description.strip():
+        scope += f" Agent description: {raw_description.strip()[:500]}"
+    return scope
 
 
 async def classify_chat_action(
     *,
     message: str,
     rag_context: str = "",
+    resource_scope: str = "",
 ) -> ChatActionDecisionPayload:
     """Classify a chat message into a router action using the fast router LLM.
 
     Routing is mandatory. Provider/model settings default to the main LLM, and
     failures raise RouterError rather than silently enabling document retrieval.
     """
-    user_turn = _format_router_user_turn(message=message, rag_context=rag_context)
+    user_turn = _format_router_user_turn(
+        message=message,
+        rag_context=rag_context,
+        resource_scope=resource_scope,
+    )
     prompt = f"{get_router_system_prompt()}\n\n{user_turn}"
 
     try:
@@ -281,10 +319,17 @@ async def classify_chat_action(
             inputs={"prompt": prompt},
             tags=["rag_chat", "router"],
         ):
-            response = await asyncio.wait_for(llm.ainvoke(prompt), timeout=3.0)
+            response = await asyncio.wait_for(
+                llm.ainvoke(prompt),
+                timeout=settings.router_timeout_seconds,
+            )
         raw_text = extract_llm_text(response)
     except Exception as exc:
-        logger.warning("[rag_chat] router LLM call failed: %s", exc)
+        logger.warning(
+            "[rag_chat] router LLM call failed (%s): %s",
+            type(exc).__name__,
+            exc,
+        )
         raise RouterError("Chat router is unavailable.") from exc
 
     try:
@@ -303,7 +348,10 @@ async def classify_chat_action(
                 inputs={"prompt": repair_prompt},
                 tags=["rag_chat", "router", "repair"],
             ):
-                repair_response = await asyncio.wait_for(llm.ainvoke(repair_prompt), timeout=3.0)
+                repair_response = await asyncio.wait_for(
+                    llm.ainvoke(repair_prompt),
+                    timeout=settings.router_timeout_seconds,
+                )
             repair_text = extract_llm_text(repair_response)
             return parse_chat_action_json(repair_text)
         except Exception as repair_exc:
@@ -367,10 +415,18 @@ async def prepare_agent_rag_chat(
         for attachment in session_attachments
         if attachment.state == "ready" and attachment.filename
     ]
-    router_decision = await classify_chat_action(message=normalized_message)
-    agent_resource_ids = (
-        linked_resource_ids if should_use_workspace_resources(router_decision) else []
+    router_decision = await classify_chat_action(
+        message=normalized_message,
+        resource_scope=_format_agent_resource_scope(
+            agent=agent,
+            linked_resource_count=len(linked_resource_ids),
+            attachment_count=len(session_attachment_resource_ids),
+        ),
     )
+    # A custom agent's links are an explicit part of its saved configuration,
+    # so they are always in scope. Router gating applies only to the generic
+    # workspace collection, where no narrower resource selection was made.
+    agent_resource_ids = linked_resource_ids
     merged_resource_ids = list(dict.fromkeys(agent_resource_ids + session_attachment_resource_ids))
 
     composio_apps = get_composio_toolset_manager().get_connected_app_names()
