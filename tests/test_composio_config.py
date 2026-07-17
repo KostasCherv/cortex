@@ -48,7 +48,11 @@ def test_billing_config_json_overrides_split_stripe_variables():
 
 
 def test_provider_config_json_overrides_split_provider_variables():
-    bundled = {"openai_api_key": "sk-bundled", "tavily_api_key": "tvly-bundled"}
+    bundled = {
+        "openai_api_key": "sk-bundled",
+        "tavily_api_key": "tvly-bundled",
+        "redis_url": "rediss://bundled",
+    }
     with patch.dict(
         "os.environ",
         {
@@ -60,3 +64,4 @@ def test_provider_config_json_overrides_split_provider_variables():
         s = Settings(_env_file=None)
     assert s.openai_api_key == "sk-bundled"
     assert s.tavily_api_key == "tvly-bundled"
+    assert s.redis_url == "rediss://bundled"

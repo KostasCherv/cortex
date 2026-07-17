@@ -8,7 +8,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 
 | Env Var | Secret Manager | Notes |
 |---|---|---|
-| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with `openai_api_key` and `tavily_api_key`. Required when `LLM_PROVIDER=openai`. |
+| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with `openai_api_key`, `tavily_api_key`, and `redis_url`. Required when `LLM_PROVIDER=openai`. |
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
@@ -32,7 +32,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `READINESS_REQUIRE_NEO4J` | no | Set to `true` in production; `/ready` returns `503` if Neo4j is missing or unavailable |
 | `READINESS_TIMEOUT_SECONDS` | no | Per-dependency probe timeout; defaults to `2.0` seconds |
 | `INNGEST_CONFIG_JSON` | yes | Secret JSON with `inngest_event_key` and `inngest_signing_key` from the Inngest dashboard. |
-| `REDIS_URL` | yes | Upstash `rediss://` URL |
+| `REDIS_CACHE_TTL_DB_LIST_SECONDS` | no | Cache TTL for DB-heavy list/read-all responses; production uses `30`. `REDIS_URL` is supplied through `PROVIDER_CONFIG_JSON`. |
 | `BILLING_CONFIG_JSON` | yes | Secret JSON with `stripe_secret_key`, `stripe_webhook_secret`, and `stripe_pro_price_id`. This bundles Stripe credentials into one Secret Manager version. |
 | `STRIPE_SUCCESS_URL` | no | `https://<frontend>/billing/success` |
 | `STRIPE_CANCEL_URL` | no | `https://<frontend>/billing/cancel` |

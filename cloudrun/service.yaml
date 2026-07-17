@@ -99,6 +99,11 @@ spec:
                 secretKeyRef:
                   name: billing-config
                   key: latest
+            # --- Redis cache ---
+            # REDIS_URL is bundled into PROVIDER_CONFIG_JSON to stay within the
+            # Secret Manager free active-version allowance.
+            - name: REDIS_CACHE_TTL_DB_LIST_SECONDS
+              value: "30"
             - name: STRIPE_SUCCESS_URL
               value: "https://cortex-ai-prod.vercel.app/billing/success"
             - name: STRIPE_CANCEL_URL

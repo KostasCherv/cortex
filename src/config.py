@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="openai", description="LLM provider: 'ollama' or 'openai'")
     provider_config_json: str = Field(
         default="",
-        description="JSON object containing OpenAI and Tavily API keys for production.",
+        description="JSON object containing provider API keys and the Redis URL for production.",
     )
     openai_api_key: str = Field(default="", description="OpenAI API key")
     openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model name")
@@ -381,7 +381,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def apply_provider_config(self) -> "Settings":
-        """Load bundled provider credentials while preserving local split-variable support."""
+        """Load bundled provider/cache credentials while preserving local split-variable support."""
         if not self.provider_config_json.strip():
             return self
         values = _parse_bundled_secret(
@@ -391,6 +391,11 @@ class Settings(BaseSettings):
         )
         for name, value in values.items():
             setattr(self, name, value)
+        redis_url = json.loads(self.provider_config_json).get("redis_url")
+        if redis_url is not None:
+            if not isinstance(redis_url, str) or not redis_url:
+                raise ValueError("PROVIDER_CONFIG_JSON redis_url must be a non-empty string.")
+            self.redis_url = redis_url
         return self
 
     @model_validator(mode="after")
