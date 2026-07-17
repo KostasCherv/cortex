@@ -18,10 +18,13 @@ def _parse_bundled_secret(
     if not isinstance(config, dict):
         raise ValueError(f"{config_name} must be a JSON object.")
 
-    values = {name: config.get(name) for name in required}
-    if any(not isinstance(value, str) or not value for value in values.values()):
-        fields = ", ".join(required)
-        raise ValueError(f"{config_name} must include non-empty {fields} values.")
+    values: dict[str, str] = {}
+    for name in required:
+        value = config.get(name)
+        if not isinstance(value, str) or not value:
+            fields = ", ".join(required)
+            raise ValueError(f"{config_name} must include non-empty {fields} values.")
+        values[name] = value
     return values
 
 
