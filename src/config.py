@@ -253,6 +253,10 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(
         default="", description="Sentry DSN for error tracking; empty disables it"
     )
+    sentry_environment: str = Field(
+        default="development",
+        description="Sentry environment name used to scope issue alerts.",
+    )
     readiness_timeout_seconds: float = Field(
         default=2.0,
         gt=0,
@@ -399,14 +403,14 @@ class Settings(BaseSettings):
             if not isinstance(redis_url, str) or not redis_url:
                 raise ValueError("PROVIDER_CONFIG_JSON redis_url must be a non-empty string.")
             self.redis_url = redis_url
-        langfuse = json.loads(self.provider_config_json)
+        provider_config = json.loads(self.provider_config_json)
         langfuse_fields = {
             "langfuse_public_key": "langfuse_public_key",
             "langfuse_secret_key": "langfuse_secret_key",  # nosec B105 — schema field name, not a credential
             "langfuse_base_url": "langfuse_host",
         }
         for source, target in langfuse_fields.items():
-            value = langfuse.get(source)
+            value = provider_config.get(source)
             if value is not None:
                 if not isinstance(value, str) or not value:
                     raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
@@ -418,12 +422,12 @@ class Settings(BaseSettings):
             "langsmith_redaction_mode": "langsmith_redaction_mode",
         }
         for source, target in langsmith_fields.items():
-            value = langfuse.get(source)
+            value = provider_config.get(source)
             if value is not None:
                 if not isinstance(value, str) or not value:
                     raise ValueError(f"PROVIDER_CONFIG_JSON {source} must be a non-empty string.")
                 setattr(self, target, value)
-        langsmith_tracing = langfuse.get("langsmith_tracing")
+        langsmith_tracing = provider_config.get("langsmith_tracing")
         if langsmith_tracing is not None:
             if isinstance(langsmith_tracing, bool):
                 self.langsmith_tracing = langsmith_tracing
@@ -431,7 +435,7 @@ class Settings(BaseSettings):
                 self.langsmith_tracing = langsmith_tracing.lower() == "true"
             else:
                 raise ValueError("PROVIDER_CONFIG_JSON langsmith_tracing must be true or false.")
-        langsmith_sampling_rate = langfuse.get("langsmith_sampling_rate")
+        langsmith_sampling_rate = provider_config.get("langsmith_sampling_rate")
         if langsmith_sampling_rate is not None:
             try:
                 self.langsmith_sampling_rate = float(langsmith_sampling_rate)
@@ -439,6 +443,11 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "PROVIDER_CONFIG_JSON langsmith_sampling_rate must be a number."
                 ) from exc
+        sentry_dsn = provider_config.get("sentry_dsn")
+        if sentry_dsn is not None:
+            if not isinstance(sentry_dsn, str) or not sentry_dsn:
+                raise ValueError("PROVIDER_CONFIG_JSON sentry_dsn must be a non-empty string.")
+            self.sentry_dsn = sentry_dsn
         return self
 
     @model_validator(mode="after")

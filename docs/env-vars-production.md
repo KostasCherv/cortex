@@ -8,7 +8,7 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 
 | Env Var | Secret Manager | Notes |
 |---|---|---|
-| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with provider, Redis, Langfuse, and LangSmith settings: `openai_api_key`, `tavily_api_key`, `redis_url`, `langfuse_public_key`, `langfuse_secret_key`, `langfuse_base_url`, `langsmith_api_key`, `langsmith_project`, `langsmith_endpoint`, `langsmith_redaction_mode`, `langsmith_sampling_rate`, and `langsmith_tracing`. Required when `LLM_PROVIDER=openai`. |
+| `PROVIDER_CONFIG_JSON` | yes | Secret JSON with provider, Redis, Langfuse, LangSmith, and Sentry settings: `openai_api_key`, `tavily_api_key`, `redis_url`, `langfuse_public_key`, `langfuse_secret_key`, `langfuse_base_url`, `langsmith_api_key`, `langsmith_project`, `langsmith_endpoint`, `langsmith_redaction_mode`, `langsmith_sampling_rate`, `langsmith_tracing`, and `sentry_dsn`. Required when `LLM_PROVIDER=openai`. |
 | `OPENROUTER_API_KEY` | yes | Required when `LLM_PROVIDER=openrouter` |
 | `LLM_PROVIDER` | no | `openai` or `openrouter` |
 | `OPENAI_MODEL` | no | e.g. `gpt-4o-mini` |
@@ -49,7 +49,8 @@ All secrets should be stored in **Google Secret Manager** and referenced via `va
 | `LANGSMITH_*` | no | LangSmith tracing, API key, project, endpoint, redaction mode, and sampling rate are supplied through `PROVIDER_CONFIG_JSON`. |
 | `LANGFUSE_ENV` | no | `prod` |
 | `LANGFUSE_RELEASE` | no | Git SHA or semver, e.g. `v1.2.3` |
-| `SENTRY_DSN` | yes | Error tracking; unset disables it entirely |
+| `SENTRY_DSN` | no | Local/split-variable fallback. Production stores `sentry_dsn` inside `PROVIDER_CONFIG_JSON`; unset disables Sentry entirely. |
+| `SENTRY_ENVIRONMENT` | no | Sentry issue environment; production deploys set this to `production` |
 | `RATE_LIMIT_DEFAULT` | no | Per-IP request limit, e.g. `60/minute` (default) |
 
 ### Variables that must NOT be set in production
@@ -124,7 +125,22 @@ After the Cloud Run service is deployed:
 3. Set **Serve URL** to `https://<cloud-run-url>/api/inngest`
 4. Confirm **Event Key** and **Signing Key** match what was set in Cloud Run secrets
 5. Click **Sync** — all three functions should appear: `rag-ingestion`, `research-run`, `outbox-dispatcher`
-6. Verify `outbox-dispatcher` shows a cron trigger of `* * * * *`
+6. Verify `outbox-dispatcher` shows a cron trigger of `*/2 * * * *`
+
+Configure email alerts for terminal failures in every registered function and for no successful `outbox-dispatcher` run within six minutes. A dispatcher run returning zero events is healthy and must count as successful.
+
+## Alerting post-deploy wiring
+
+After creating a Sentry Python/FastAPI project, add its DSN as the `sentry_dsn` field in the existing `provider-config` JSON secret. This keeps production at six active Secret Manager versions. Then deploy and configure a Sentry email issue alert for new or regressed production issues with a 30-minute per-issue cooldown.
+
+Provision Google Cloud alerts with:
+
+```bash
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh --dry-run
+GCP_PROJECT=<project-id> ALERT_EMAIL=<operator-email> ./scripts/setup_alerting.sh
+```
+
+Verify the email channel and test notification delivery in Cloud Monitoring. The setup script is safe to rerun and updates resources with matching display names.
 
 ---
 

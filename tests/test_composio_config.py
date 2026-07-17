@@ -61,6 +61,7 @@ def test_provider_config_json_overrides_split_provider_variables():
         "langsmith_redaction_mode": "metadata_only",
         "langsmith_sampling_rate": "0.25",
         "langsmith_tracing": "true",
+        "sentry_dsn": "https://public@example.invalid/1",
     }
     with patch.dict(
         "os.environ",
@@ -83,3 +84,4 @@ def test_provider_config_json_overrides_split_provider_variables():
     assert s.langsmith_redaction_mode == "metadata_only"
     assert s.langsmith_sampling_rate == 0.25
     assert s.langsmith_tracing is True
+    assert s.sentry_dsn == "https://public@example.invalid/1"

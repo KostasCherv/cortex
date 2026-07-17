@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.db.provider import get_session_store
+from src.observability.sentry import capture_handled_exception
 
 _MAX_ATTEMPTS = 5
 
@@ -66,7 +67,8 @@ async def dispatch_outbox_events(limit: int = 50) -> int:
         await store.reset_stuck_dispatching_events()
         rows = await store.fetch_pending_outbox_events(limit=limit)
     except Exception as exc:
-        logger.warning("[outbox] pre-dispatch fetch failed: %s", exc)
+        logger.exception("[outbox] pre-dispatch fetch failed")
+        capture_handled_exception(exc, operation="outbox.pre_dispatch_fetch")
         return 0
     dispatched = 0
 
@@ -100,6 +102,17 @@ async def dispatch_outbox_events(limit: int = 50) -> int:
                         "attempts": new_attempts,
                         "last_error": str(exc),
                     },
+                )
+                logger.exception(
+                    "[outbox] terminal delivery failure event_id=%s event_name=%s attempts=%s",
+                    event_id,
+                    event_name,
+                    new_attempts,
+                )
+                capture_handled_exception(
+                    exc,
+                    operation="outbox.delivery_terminal",
+                    identifiers={"event_id": event_id, "event_name": event_name},
                 )
             else:
                 next_at = (

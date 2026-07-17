@@ -120,6 +120,8 @@ spec:
                   name: internal-dispatch-secret
                   key: latest
             # --- Observability ---
+            - name: SENTRY_ENVIRONMENT
+              value: "production"
             - name: LANGSMITH_TRACING
               value: "false"
             - name: LANGFUSE_ENABLED
