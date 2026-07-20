@@ -1,9 +1,13 @@
 name: Deploy production backend
 
-run-name: Deploy production backend from ${{ github.sha }}
+run-name: Deploy production backend from ${{ github.event.workflow_run.head_sha || github.sha }}
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 concurrency:
   group: production-backend
@@ -16,25 +20,30 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Reject non-main refs
+      - name: Reject non-main refs and unsuccessful CI runs
         env:
           DEPLOY_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
-          if [[ "$DEPLOY_REF" != "refs/heads/main" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+            if [[ "$WORKFLOW_RUN_BRANCH" != "main" ]]; then
+              echo "Production deployments must run from main; CI ran on $WORKFLOW_RUN_BRANCH." >&2
+              exit 1
+            fi
+            if [[ "$WORKFLOW_RUN_CONCLUSION" != "success" ]]; then
+              echo "CI did not succeed (conclusion: $WORKFLOW_RUN_CONCLUSION); skipping deploy." >&2
+              exit 1
+            fi
+          elif [[ "$DEPLOY_REF" != "refs/heads/main" ]]; then
             echo "Production deployments must run from main; received $DEPLOY_REF." >&2
             exit 1
           fi
 
-  verify:
-    name: Verify main
-    needs: guard-main
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci.yml
-
   deploy:
     name: Migrate and deploy backend
-    needs: verify
+    needs: guard-main
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:
@@ -54,6 +63,8 @@ jobs:
       SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Validate production configuration
         shell: bash
@@ -127,6 +138,7 @@ jobs:
       - name: Publish deployment summary
         if: always()
         env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           MIGRATION_PREVIEW_OUTCOME: ${{ steps.migration-preview.outcome }}
           MIGRATION_OUTCOME: ${{ steps.migrations.outcome }}
           BACKEND_OUTCOME: ${{ steps.backend.outcome }}
@@ -135,7 +147,7 @@ jobs:
           {
             echo "## Production backend deployment"
             echo
-            echo "- **Commit:** \`$GITHUB_SHA\`"
+            echo "- **Commit:** \`$DEPLOY_SHA\`"
             echo "- **Migration preview:** ${MIGRATION_PREVIEW_OUTCOME:-not run}"
             echo "- **Migrations:** ${MIGRATION_OUTCOME:-not run}"
             echo "- **Cloud Run deploy and smoke checks:** ${BACKEND_OUTCOME:-not run}"
