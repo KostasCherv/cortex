@@ -73,6 +73,21 @@ Production normally sets `READINESS_REQUIRE_SUPABASE=true` and `READINESS_REQUIR
 
 For the metrics, alerts, and uptime checks built on these probes, see [Production monitoring](observability.md#production-monitoring).
 
+### Neo4j Aura keep-alive
+
+AuraDB Free pauses after 72 hours without query activity, which takes `/ready` (and therefore the whole service) down. Two things prevent this:
+
+- The `/ready` Neo4j check runs a real `RETURN 1` query, not just a driver handshake, so each probe counts as Aura activity.
+- A Cloud Scheduler job pings `/ready` every 12 hours, covering periods when the service is scaled to zero. Recreate it if needed:
+
+```bash
+gcloud scheduler jobs create http neo4j-keepalive \
+  --project=<project> --location=us-central1 \
+  --schedule="0 */12 * * *" \
+  --uri="https://<service-url>/ready" \
+  --http-method=GET --attempt-deadline=60s
+```
+
 ## Rollback
 
 The deploy script does not move traffic after a failed smoke check. To restore a known-good revision:

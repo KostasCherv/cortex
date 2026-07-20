@@ -30,7 +30,8 @@ def _llm_configuration_check() -> ReadinessCheck:
         "openai": _configured(settings.openai_api_key),
         "openrouter": _configured(settings.openrouter_api_key),
         "ollama": _configured(settings.ollama_base_url) and _configured(settings.ollama_model),
-        "lmstudio": _configured(settings.lmstudio_base_url) and _configured(settings.lmstudio_model),
+        "lmstudio": _configured(settings.lmstudio_base_url)
+        and _configured(settings.lmstudio_model),
     }.get(provider, False)
     return ReadinessCheck(status="ok" if configured else "misconfigured", critical=True)
 
@@ -62,7 +63,12 @@ def _verify_neo4j_connectivity() -> None:
         notifications_min_severity="OFF",
     )
     try:
-        driver.verify_connectivity()
+        # Run a real query (not just verify_connectivity) so scheduled /ready
+        # pings count as activity for AuraDB Free's 72h auto-pause timer.
+        driver.execute_query(
+            "RETURN 1",
+            database_=settings.neo4j_database or None,
+        )
     finally:
         driver.close()
 
@@ -91,9 +97,7 @@ async def _redis_check() -> ReadinessCheck:
     if cache is None:
         return ReadinessCheck(status="disabled", critical=False)
     try:
-        reachable = await asyncio.wait_for(
-            cache.ping(), timeout=settings.readiness_timeout_seconds
-        )
+        reachable = await asyncio.wait_for(cache.ping(), timeout=settings.readiness_timeout_seconds)
     except Exception:
         reachable = False
     return ReadinessCheck(status="ok" if reachable else "unavailable", critical=False)
