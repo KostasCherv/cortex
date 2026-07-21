@@ -19,7 +19,7 @@ Use `success`/`destructive` for semantic status (ready/online vs. failed/offline
 Dark mode is **class-based, not media-query-based**: `@custom-variant dark (&:where(.dark, .dark *))` gates `.dark` variants on a literal `.dark` class on `<html>`, not `prefers-color-scheme` alone.
 
 - [`ThemeProvider`](src/components/layout/ThemeProvider.tsx) mounts at the app root ([src/main.tsx](src/main.tsx)), toggles `.dark` on `document.documentElement`, and persists the choice to `localStorage['theme']`. `prefers-color-scheme` is only the initial default before a user has chosen.
-- [`theme-context.ts`](src/components/layout/theme-context.ts) + [`useTheme`](src/hooks/useTheme.ts) expose the current theme and a toggle to components (see the sun/moon toggle in [`Navbar.tsx`](src/components/layout/Navbar.tsx) or [`AgentRail.tsx`](src/components/shell/AgentRail.tsx)).
+- [`theme-context.ts`](src/components/layout/theme-context.ts) + [`useTheme`](src/hooks/useTheme.ts) expose the current theme and a toggle to components (see the sun/moon toggle in [`AgentRail.tsx`](src/components/shell/AgentRail.tsx)).
 
 ## Component conventions
 
@@ -48,6 +48,6 @@ avatar, badge, button, card, checkbox, dialog, dropdown-menu, input, label, popo
 | `research/` | Research-session UI: sidebar, query composer/form, streaming progress, report viewer with feedback |
 | `chat/` | Chat thread machinery: `GenericChat` composes `ChatThreadContainer` + a transport, plus Streamdown-based markdown rendering and the tool menu. `chatStreamStore.ts` is a session-keyed module store (`useSyncExternalStore`) that owns stream lifecycles so multiple sessions can stream in parallel and survive session switches (capped at `MAX_CONCURRENT_STREAMS`); `AgentRail` session rows show a pulse dot for sessions streaming in the background |
 | `shell/` | Top-level app shell: `AppShell` wires auth/health/pages together, `AgentRail` is the left nav rail (agents, theme toggle, billing) |
-| `layout/` | Cross-page chrome: `Navbar` (top bar, theme toggle, user menu), the theme system (`ThemeProvider`, `theme-context.ts`), and shared `HealthDot` status indicator |
+| `layout/` | Theme system (`ThemeProvider`, `theme-context.ts`) and shared `HealthDot` status indicator |
 | `resources/` | RAG resource management: table + upload dialog |
 | `agents/` | RAG agent management: card, chat, create-agent sheet |
