@@ -17,23 +17,33 @@ const SheetOverlay = React.forwardRef<
   React.ComponentRef<typeof SheetPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
-  <SheetPrimitive.Overlay ref={ref} className={cn('fixed inset-0 z-50 bg-foreground/45', className)} {...props} />
+  <SheetPrimitive.Overlay
+    ref={ref}
+    className={cn(
+      'fixed inset-0 z-50 bg-foreground/45 opacity-0 transition-opacity duration-200 data-[state=open]:opacity-100',
+      className,
+    )}
+    {...props}
+  />
 ))
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName
 
-const sheetVariants = cva('fixed z-50 gap-4 bg-background p-6 shadow-lg', {
-  variants: {
-    side: {
-      top: 'inset-x-0 top-0 border-b',
-      bottom: 'inset-x-0 bottom-0 border-t',
-      left: 'inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm',
-      right: 'inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm',
+const sheetVariants = cva(
+  'fixed z-50 gap-4 bg-background p-6 shadow-lg transition-[transform,opacity] duration-300 ease-in-out data-[state=closed]:opacity-0 data-[state=open]:opacity-100',
+  {
+    variants: {
+      side: {
+        top: 'inset-x-0 top-0 border-b -translate-y-full data-[state=open]:translate-y-0',
+        bottom: 'inset-x-0 bottom-0 border-t translate-y-full data-[state=open]:translate-y-0',
+        left: 'inset-y-0 left-0 h-full w-3/4 border-r sm:max-w-sm -translate-x-full data-[state=open]:translate-x-0',
+        right: 'inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm translate-x-full data-[state=open]:translate-x-0',
+      },
+    },
+    defaultVariants: {
+      side: 'right',
     },
   },
-  defaultVariants: {
-    side: 'right',
-  },
-})
+)
 
 interface SheetContentProps
   extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
