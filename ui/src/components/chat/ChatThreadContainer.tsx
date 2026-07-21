@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Paperclip, SendHorizontal, Square, X } from 'lucide-react'
+import { Loader2, Paperclip, SendHorizontal, Square, X } from 'lucide-react'
 import { assistantAvatarClassName, assistantBubbleClassName, ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -200,6 +200,7 @@ export function ChatThreadContainer({
   resourceLabel,
 }: Props) {
   const [messages, setMessages] = useState<RagChatMessage[]>([])
+  const [loadingSession, setLoadingSession] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [pendingStreamKey, setPendingStreamKey] = useState<string | null>(null)
   const [input, setInput] = useState('')
@@ -237,6 +238,7 @@ export function ChatThreadContainer({
     setSessionId(null)
     setPendingStreamKey(null)
     setMessages([])
+    setLoadingSession(false)
     setInput('')
     setError(null)
     setWebUsedLastReply(false)
@@ -262,6 +264,7 @@ export function ChatThreadContainer({
       if (hadFinishedStream) consumeStream(streamKey)
       if (!hadFinishedStream && loadedSessionRef.current === nextSessionId) return
       const requestId = ++messagesRequestRef.current
+      setLoadingSession(true)
       try {
         const res = await transport.loadSessionMessages(nextSessionId, accessToken)
         if (requestId !== messagesRequestRef.current || currentTransportKeyRef.current !== transport.key) return
@@ -293,6 +296,8 @@ export function ChatThreadContainer({
         if (requestId === messagesRequestRef.current && currentTransportKeyRef.current === transport.key) {
           setError(err instanceof Error ? err.message : 'Failed to load chat session.')
         }
+      } finally {
+        if (requestId === messagesRequestRef.current) setLoadingSession(false)
       }
     },
     [accessToken, transport],
@@ -385,6 +390,8 @@ export function ChatThreadContainer({
         setMessages([])
         setSessionAttachments([])
       }
+      messagesRequestRef.current += 1
+      setLoadingSession(false)
       return
     }
     void openSession(activeSessionId)
@@ -521,7 +528,15 @@ export function ChatThreadContainer({
 
       <ScrollArea className="min-h-0 flex-1 px-6 py-6 max-md:px-4">
         <div className="space-y-4">
-          {messages.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyState}</p>}
+          {messages.length === 0 && loadingSession && (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground animate-fade-in">
+              <Loader2 size={14} className="animate-spin" />
+              Loading discussion...
+            </div>
+          )}
+          {messages.length === 0 && !loadingSession && (
+            <p className="py-8 text-center text-sm text-muted-foreground animate-fade-in">{emptyState}</p>
+          )}
           {messages.map((m) =>
             m.role === 'user' ? (
               <div key={m.message_id} className="flex flex-col items-end gap-1">
@@ -570,7 +585,14 @@ export function ChatThreadContainer({
               <div className="flex gap-2 items-start">
                 <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
                 <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
-                  <ChatMarkdown content={stream.streamingText || stream.streamingStatus || 'Thinking...'} />
+                  {stream.streamingText || stream.streamingStatus ? (
+                    <ChatMarkdown content={stream.streamingText || stream.streamingStatus || ''} />
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                      <Loader2 size={14} className="animate-spin" />
+                      Thinking...
+                    </span>
+                  )}
                 </div>
               </div>
             </>

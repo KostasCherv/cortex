@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import {
   createCheckoutSession,
@@ -28,6 +29,7 @@ type Props = {
 
 export function ResearchPage({ authSession, activeSessionId, onSessionActivated, onSessionsChanged }: Props) {
   const [runStatus, setRunStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle')
+  const [loadingSession, setLoadingSession] = useState(false)
   const [report, setReport] = useState('')
   const [lastQuery, setLastQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -70,6 +72,7 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
   }, [])
 
   const resetViewState = useCallback(() => {
+    setLoadingSession(false)
     setSessionId(null)
     setRunId(null)
     setConversation([])
@@ -204,6 +207,8 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
       setStreamingReport('')
       setLatestNode(null)
       setReport('')
+      setRunStatus('idle')
+      setLoadingSession(true)
       try {
         const detail = await getSession(selectedSessionId, authSession.access_token)
         syncFromSessionDetail(detail)
@@ -212,6 +217,8 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
         }
       } catch (sessionError) {
         setError(sessionError instanceof Error ? sessionError.message : 'Failed to load session.')
+      } finally {
+        setLoadingSession(false)
       }
     },
     [authSession, startPolling, syncFromSessionDetail],
@@ -343,7 +350,12 @@ export function ResearchPage({ authSession, activeSessionId, onSessionActivated,
 
   return (
     <div className="flex h-dvh flex-col max-md:h-full">
-      {!hasContent ? (
+      {loadingSession ? (
+        <div className="flex flex-1 items-center justify-center gap-2 px-6 py-8 text-sm text-muted-foreground animate-fade-in">
+          <Loader2 size={14} className="animate-spin" />
+          Loading discussion...
+        </div>
+      ) : !hasContent ? (
         // Empty state: centered composer
         <div className="flex flex-1 flex-col items-center justify-center px-6 py-8">
           <div className="w-full max-w-2xl space-y-2">

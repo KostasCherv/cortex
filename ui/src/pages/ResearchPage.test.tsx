@@ -93,6 +93,26 @@ describe('ResearchPage', () => {
     })
   })
 
+  it('shows a loading indicator instead of the empty composer while switching to a session', async () => {
+    getSessionMock.mockReturnValue(new Promise(() => {})) // never resolves
+
+    render(
+      <ResearchPage
+        authSession={{ access_token: 'token' } as never}
+        activeSessionId="session-9"
+        onSessionActivated={() => {}}
+        onSessionsChanged={() => {}}
+      />,
+    )
+
+    await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith('session-9', 'token'))
+
+    expect(screen.getByText(/loading discussion/i)).toBeInTheDocument()
+    expect(
+      screen.queryByPlaceholderText(/compare model context protocol/i),
+    ).not.toBeInTheDocument()
+  })
+
   it('shows a loader instead of the progress card while a completed session is still loading its report', async () => {
     getSessionMock.mockResolvedValue(completedWithoutReport)
 

@@ -54,6 +54,26 @@ describe('ChatThreadContainer parallel streams', () => {
     resetChatStreamStore()
   })
 
+  it('shows a loading indicator instead of the empty state while session messages are being fetched', async () => {
+    let resolveMessages: (value: { session_id: string; messages: RagChatMessage[] }) => void = () => {}
+    const transport = {
+      key: 'workspace',
+      listSessions: vi.fn(async () => []),
+      loadSessionMessages: vi.fn(() => new Promise((resolve) => { resolveMessages = resolve })),
+      deleteLastExchange: vi.fn(async () => {}),
+      streamMessage: vi.fn(() => new Promise<void>(() => {})),
+    } as unknown as ChatTransport
+
+    renderContainer(transport, 'session-a')
+
+    expect(screen.getByText(/loading discussion/i)).toBeInTheDocument()
+    expect(screen.queryByText('Ask anything.')).not.toBeInTheDocument()
+
+    resolveMessages({ session_id: 'session-a', messages: [] })
+    await waitFor(() => expect(screen.getByText('Ask anything.')).toBeInTheDocument())
+    expect(screen.queryByText(/loading discussion/i)).not.toBeInTheDocument()
+  })
+
   it('keeps a stream alive when switching to another session and folds it in on return', async () => {
     const { transport, captured, loadSessionMessages } = makeTransport({ 'session-a': [], 'session-b': [] })
     const { rerenderWith } = renderContainer(transport, 'session-a')
