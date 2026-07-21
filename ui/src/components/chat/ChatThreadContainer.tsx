@@ -526,83 +526,81 @@ export function ChatThreadContainer({
         </div>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1 px-6 py-6 max-md:px-4">
-        <div className="space-y-4">
-          {loadingSession ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground animate-fade-in">
-              <Loader2 size={14} className="animate-spin" />
-              Loading discussion...
-            </div>
-          ) : (
-            <>
-              {messages.length === 0 && (
-                <p className="py-8 text-center text-sm text-muted-foreground animate-fade-in">{emptyState}</p>
-              )}
-              {messages.map((m) =>
-                m.role === 'user' ? (
-                  <div key={m.message_id} className="flex flex-col items-end gap-1">
-                    <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{m.content}</div>
-                    {!chatting && lastUserMessageId === m.message_id && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-xs text-muted-foreground"
-                        onClick={() => {
-                          setInput(m.content)
-                          setEditingMessageId(m.message_id)
-                        }}
-                      >
-                        Edit
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <div key={m.message_id} className="flex flex-col gap-2">
-                    <div className="flex gap-2 items-start">
-                      <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
-                      <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
-                        <ChatMarkdown content={m.content} />
-                        <CitationMarkers citations={m.citations} />
-                      </div>
-                    </div>
-                    {messages.at(-1)?.message_id === m.message_id && suggestions.length > 0 && (
-                      <div className="ml-9 flex max-w-[75%] flex-wrap gap-2 max-md:max-w-[86%]">
-                        {suggestions.map((text) => (
-                          <Button key={text} type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => void send(text)} disabled={chatting}>
-                            {text}
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ),
-              )}
-              {stream && (
-                <>
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{stream.displayQuestion}</div>
-                  </div>
+      {loadingSession ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 text-sm text-muted-foreground animate-fade-in">
+          <Loader2 size={14} className="animate-spin" />
+          Loading discussion...
+        </div>
+      ) : (
+        <ScrollArea className="min-h-0 flex-1 px-6 py-6 max-md:px-4">
+          <div className="space-y-4">
+            {messages.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground animate-fade-in">{emptyState}</p>
+            )}
+            {messages.map((m) =>
+              m.role === 'user' ? (
+                <div key={m.message_id} className="flex flex-col items-end gap-1">
+                  <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{m.content}</div>
+                  {!chatting && lastUserMessageId === m.message_id && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs text-muted-foreground"
+                      onClick={() => {
+                        setInput(m.content)
+                        setEditingMessageId(m.message_id)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div key={m.message_id} className="flex flex-col gap-2">
                   <div className="flex gap-2 items-start">
                     <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
                     <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
-                      {stream.streamingText || stream.streamingStatus ? (
-                        <ChatMarkdown content={stream.streamingText || stream.streamingStatus || ''} />
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                          <Loader2 size={14} className="animate-spin" />
-                          Thinking...
-                        </span>
-                      )}
+                      <ChatMarkdown content={m.content} />
+                      <CitationMarkers citations={m.citations} />
                     </div>
                   </div>
-                </>
-              )}
-            </>
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </ScrollArea>
+                  {messages.at(-1)?.message_id === m.message_id && suggestions.length > 0 && (
+                    <div className="ml-9 flex max-w-[75%] flex-wrap gap-2 max-md:max-w-[86%]">
+                      {suggestions.map((text) => (
+                        <Button key={text} type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => void send(text)} disabled={chatting}>
+                          {text}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ),
+            )}
+            {stream && (
+              <>
+                <div className="flex flex-col items-end gap-1">
+                  <div className="max-w-[75%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm text-primary-foreground max-md:max-w-[86%]">{stream.displayQuestion}</div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <div className={cn('mt-0.5', assistantAvatarClassName)}>AI</div>
+                  <div className={cn('max-w-[75%] max-md:max-w-[86%]', assistantBubbleClassName)}>
+                    {stream.streamingText || stream.streamingStatus ? (
+                      <ChatMarkdown content={stream.streamingText || stream.streamingStatus || ''} />
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        <Loader2 size={14} className="animate-spin" />
+                        Thinking...
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </ScrollArea>
+      )}
 
       {sessionAttachments.length > 0 && (
         <AttachmentShelf
