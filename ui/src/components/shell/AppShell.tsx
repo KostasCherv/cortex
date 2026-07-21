@@ -25,6 +25,7 @@ export type ActiveView =
 export function AppShell() {
   const [health, setHealth] = useState<HealthState>('loading')
   const [authSession, setAuthSession] = useState<Session | null>(null)
+  const [authChecked, setAuthChecked] = useState(false)
   const [activeView, setActiveView] = useState<ActiveView>({ type: 'chat' })
   const [ragAgents, setRagAgents] = useState<RagAgent[]>([])
   const [resources, setResources] = useState<RagResource[]>([])
@@ -89,6 +90,7 @@ export function AppShell() {
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
       setAuthSession(data.session)
+      setAuthChecked(true)
       if (!data.session) {
         setRagAgents([])
         setResources([])
@@ -215,12 +217,20 @@ export function AppShell() {
     if (!open) setEditingAgent(null)
   }, [])
 
+  if (!authChecked) {
+    return <div className="h-dvh bg-background" />
+  }
+
   if (!authSession) {
-    return <LandingPage onSignIn={() => void signInWithGoogle()} />
+    return (
+      <div className="animate-fade-in">
+        <LandingPage onSignIn={() => void signInWithGoogle()} />
+      </div>
+    )
   }
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-background max-md:flex-col">
+    <div className="flex h-dvh overflow-hidden bg-background max-md:flex-col animate-fade-in">
       <AgentRail
         health={health}
         authSession={authSession}
