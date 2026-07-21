@@ -863,7 +863,7 @@ export function AgentRail({
 
         {/* My Agents section */}
         <div className="flex min-h-0 flex-1 flex-col pt-3">
-          <div className="mb-1 flex w-full shrink-0 items-center justify-between gap-2 pl-4 pr-5">
+          <div className="mb-1 flex w-full shrink-0 items-center justify-between gap-2 px-4">
             <span className="min-w-0 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
               My Agents
             </span>
