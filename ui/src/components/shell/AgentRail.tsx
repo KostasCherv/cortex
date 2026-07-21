@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, Brain, FolderOpen, Loader2, LogOut, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
+import { Bot, Brain, FolderOpen, Loader2, LogOut, Menu, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { HealthDot } from '@/components/layout/HealthDot'
 import {
@@ -37,6 +37,7 @@ import {
 import { useStreamingSessionIds } from '@/components/chat/chatStreamStore'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { useTheme } from '@/hooks/useTheme'
 import { cn } from '@/lib/utils'
 import type { BillingUsageSummary, RagAgent, RagChatSessionSummary, SessionSummary } from '@/types'
@@ -728,6 +729,9 @@ export function AgentRail({
   const { theme, toggle } = useTheme()
   const accessToken = authSession?.access_token ?? null
   const [billingUsage, setBillingUsage] = useState<BillingUsageSummary | null>(null)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), [])
+  const noop = useCallback(() => {}, [])
 
   useEffect(() => {
     void (async () => {
@@ -764,20 +768,20 @@ export function AgentRail({
   const isMemory = activeView.type === 'memory'
   const isResources = activeView.type === 'resources'
 
-  return (
-    <aside className="flex h-dvh w-[280px] min-w-[280px] shrink-0 flex-col border-r border-border bg-secondary max-md:h-[42dvh] max-md:min-h-[260px] max-md:w-full max-md:min-w-0 max-md:border-b max-md:border-r-0">
-      {/* Header */}
-      <div className="flex h-14 shrink-0 items-center justify-between px-4 max-md:h-12">
-        <span className="font-semibold tracking-tight text-foreground">Cortex</span>
-        <HealthDot health={health} />
-      </div>
-
+  // Nav items + session lists + My Agents — rendered once for the desktop
+  // sidebar and once inside the mobile Sheet. `closeSheet` is a no-op on
+  // desktop and collapses the drawer on mobile after a selection.
+  function renderNavAndAgents(closeSheet: () => void) {
+    return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
         <div className="shrink-0 space-y-0.5 pl-2 pr-4">
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => onViewChange({ type: 'chat' })}
+              onClick={() => {
+                onViewChange({ type: 'chat' })
+                closeSheet()
+              }}
               className={cn(
                 'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
                 isChat ? 'bg-background text-foreground font-medium shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-muted/60',
@@ -803,7 +807,10 @@ export function AgentRail({
                   accessToken={authSession.access_token}
                   activeSessionId={activeSessionId}
                   refreshToken={sessionRefreshToken}
-                  onSelect={onSessionSelect}
+                  onSelect={(id) => {
+                    onSessionSelect(id)
+                    closeSheet()
+                  }}
                 />
               </div>
             </ScrollArea>
@@ -812,7 +819,10 @@ export function AgentRail({
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => onViewChange({ type: 'research' })}
+              onClick={() => {
+                onViewChange({ type: 'research' })
+                closeSheet()
+              }}
               className={cn(
                 'min-w-0 flex-1 flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
                 isResearch
@@ -841,7 +851,10 @@ export function AgentRail({
                   accessToken={authSession.access_token}
                   activeSessionId={activeSessionId}
                   refreshToken={sessionRefreshToken}
-                  onSelect={onSessionSelect}
+                  onSelect={(id) => {
+                    onSessionSelect(id)
+                    closeSheet()
+                  }}
                 />
               </div>
             </ScrollArea>
@@ -886,7 +899,10 @@ export function AgentRail({
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => onViewChange({ type: 'rag-agent', agent })}
+                          onClick={() => {
+                            onViewChange({ type: 'rag-agent', agent })
+                            closeSheet()
+                          }}
                           className={cn(
                             'flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
                             isActive
@@ -934,7 +950,10 @@ export function AgentRail({
                             accessToken={authSession.access_token}
                             activeSessionId={activeSessionId}
                             refreshToken={sessionRefreshToken}
-                            onSelect={onSessionSelect}
+                            onSelect={(id) => {
+                              onSessionSelect(id)
+                              closeSheet()
+                            }}
                           />
                         </div>
                       )}
@@ -945,12 +964,19 @@ export function AgentRail({
           </div>
         </div>
       </div>
+    )
+  }
 
-      {/* Footer */}
-      <div className="shrink-0 space-y-0.5 border-t border-border px-2 py-2 max-md:flex max-md:items-center max-md:gap-1 max-md:border-t-0 max-md:pt-0">
+  // Memory/Resources nav buttons — same reuse rationale as renderNavAndAgents.
+  function renderFooterNav(closeSheet: () => void) {
+    return (
+      <>
         <button
           type="button"
-          onClick={() => onViewChange({ type: 'memory' })}
+          onClick={() => {
+            onViewChange({ type: 'memory' })
+            closeSheet()
+          }}
           className={cn(
             'w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
             isMemory
@@ -964,7 +990,10 @@ export function AgentRail({
 
         <button
           type="button"
-          onClick={() => onViewChange({ type: 'resources' })}
+          onClick={() => {
+            onViewChange({ type: 'resources' })
+            closeSheet()
+          }}
           className={cn(
             'w-full flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-secondary',
             isResources
@@ -975,95 +1004,150 @@ export function AgentRail({
           <FolderOpen size={15} className="shrink-0" />
           Resources
         </button>
+      </>
+    )
+  }
 
-        <div className="flex items-center gap-1 pt-1 max-md:ml-auto max-md:pt-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7 text-muted-foreground hover:text-foreground"
-            onClick={toggle}
-            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-          >
-            {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
-          </Button>
+  // Theme toggle + account menu/sign-in — shown in the desktop footer and in
+  // the mobile top bar.
+  function renderAccountControls() {
+    return (
+      <>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground hover:text-foreground"
+          onClick={toggle}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        >
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+        </Button>
 
-          <div className="flex-1" />
+        <div className="flex-1" />
 
-          {authSession ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="size-7 rounded-full" aria-label="Account menu">
-                  <Avatar className="size-6">
-                    <AvatarFallback className="text-[10px]">
-                      {authSession.user.email?.[0]?.toUpperCase() ?? '?'}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top" className="w-64">
+        {authSession ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="size-7 rounded-full" aria-label="Account menu">
+                <Avatar className="size-6">
+                  <AvatarFallback className="text-[10px]">
+                    {authSession.user.email?.[0]?.toUpperCase() ?? '?'}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="w-64">
+              <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
+                {authSession.user.email}
+              </DropdownMenuItem>
+              {billingUsage && (
                 <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
-                  {authSession.user.email}
+                  {billingUsage.plan === 'free'
+                    ? `Free · Research ${billingUsage.usage.research_queries_count}/${billingUsage.limits.research_queries_daily} · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`
+                    : `Pro · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`}
                 </DropdownMenuItem>
-                {billingUsage && (
-                  <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
-                    {billingUsage.plan === 'free'
-                      ? `Free · Research ${billingUsage.usage.research_queries_count}/${billingUsage.limits.research_queries_daily} · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`
-                      : `Pro · Questions ${billingUsage.usage.total_questions_count}/${billingUsage.limits.total_questions_daily}`}
-                  </DropdownMenuItem>
-                )}
-                {billingUsage?.subscription && (
-                  <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
-                    {(() => {
-                      const subscription = billingUsage.subscription
-                      const effectiveEnd = subscription.cancel_at ?? subscription.current_period_end
-                      if (subscription.cancel_at_period_end && effectiveEnd) {
-                        return `Cancels on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
-                      }
-                      if (effectiveEnd && subscription.status === 'active') {
-                        return `Renews on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
-                      }
-                      return `Status: ${subscription.status}`
-                    })()}
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                {billingUsage?.plan === 'free' ? (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (!accessToken) return
-                      void createCheckoutSession(accessToken).then((res) => {
-                        window.location.href = res.url
-                      })
-                    }}
-                  >
-                    Upgrade to Pro
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (!accessToken) return
-                      void createPortalSession(accessToken).then((res) => {
-                        window.location.href = res.url
-                      })
-                    }}
-                  >
-                    Manage Subscription
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={onSignOut}>
-                  <LogOut size={13} className="mr-2" />
-                  Sign out
+              )}
+              {billingUsage?.subscription && (
+                <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
+                  {(() => {
+                    const subscription = billingUsage.subscription
+                    const effectiveEnd = subscription.cancel_at ?? subscription.current_period_end
+                    if (subscription.cancel_at_period_end && effectiveEnd) {
+                      return `Cancels on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
+                    }
+                    if (effectiveEnd && subscription.status === 'active') {
+                      return `Renews on ${formatDateLabel(effectiveEnd)} · ${daysUntilLabel(effectiveEnd)}`
+                    }
+                    return `Status: ${subscription.status}`
+                  })()}
                 </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button size="sm" variant="ghost" className="text-xs h-7 px-2" onClick={onSignIn}>
-              Sign in
+              )}
+              <DropdownMenuSeparator />
+              {billingUsage?.plan === 'free' ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!accessToken) return
+                    void createCheckoutSession(accessToken).then((res) => {
+                      window.location.href = res.url
+                    })
+                  }}
+                >
+                  Upgrade to Pro
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (!accessToken) return
+                    void createPortalSession(accessToken).then((res) => {
+                      window.location.href = res.url
+                    })
+                  }}
+                >
+                  Manage Subscription
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={onSignOut}>
+                <LogOut size={13} className="mr-2" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button size="sm" variant="ghost" className="text-xs h-7 px-2" onClick={onSignIn}>
+            Sign in
+          </Button>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      {/* Mobile top bar + slide-in drawer (below md) */}
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-secondary px-3 md:hidden">
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-8 shrink-0 text-foreground" aria-label="Open menu">
+              <Menu size={18} />
             </Button>
-          )}
-        </div>
+          </SheetTrigger>
+          <SheetContent side="left" className="flex w-[280px] max-w-[85vw] flex-col gap-0 p-0">
+            <SheetHeader className="h-14 shrink-0 flex-row items-center justify-between space-y-0 border-b border-border px-4 py-0">
+              <SheetTitle className="font-semibold tracking-tight text-foreground">Cortex</SheetTitle>
+              <HealthDot health={health} />
+            </SheetHeader>
+            {renderNavAndAgents(closeMobileNav)}
+            <div className="shrink-0 space-y-0.5 border-t border-border px-2 py-2">
+              {renderFooterNav(closeMobileNav)}
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        <span className="font-semibold tracking-tight text-foreground">Cortex</span>
+        <HealthDot health={health} />
+
+        <div className="flex-1" />
+
+        {renderAccountControls()}
       </div>
-    </aside>
+
+      {/* Desktop sidebar (md and above) — unchanged fixed 280px layout */}
+      <aside className="hidden h-dvh w-[280px] min-w-[280px] shrink-0 flex-col border-r border-border bg-secondary md:flex">
+        {/* Header */}
+        <div className="flex h-14 shrink-0 items-center justify-between px-4">
+          <span className="font-semibold tracking-tight text-foreground">Cortex</span>
+          <HealthDot health={health} />
+        </div>
+
+        {renderNavAndAgents(noop)}
+
+        {/* Footer */}
+        <div className="shrink-0 space-y-0.5 border-t border-border px-2 py-2">
+          {renderFooterNav(noop)}
+          <div className="flex items-center gap-1 pt-1">{renderAccountControls()}</div>
+        </div>
+      </aside>
+    </>
   )
 }
