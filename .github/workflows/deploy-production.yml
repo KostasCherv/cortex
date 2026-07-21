@@ -19,31 +19,41 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
     steps:
-      - name: Reject non-main refs and unsuccessful CI runs
+      - name: Check branch and CI outcome
+        id: check
         env:
           DEPLOY_REF: ${{ github.ref }}
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
+          # CI already reports its own failures; a failed/cancelled CI run should
+          # make this workflow skip quietly rather than raise a second, redundant
+          # failure for the same underlying problem.
           if [[ "$EVENT_NAME" == "workflow_run" ]]; then
             if [[ "$WORKFLOW_RUN_BRANCH" != "main" ]]; then
-              echo "Production deployments must run from main; CI ran on $WORKFLOW_RUN_BRANCH." >&2
-              exit 1
+              echo "CI ran on $WORKFLOW_RUN_BRANCH, not main; skipping deploy."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
             if [[ "$WORKFLOW_RUN_CONCLUSION" != "success" ]]; then
-              echo "CI did not succeed (conclusion: $WORKFLOW_RUN_CONCLUSION); skipping deploy." >&2
-              exit 1
+              echo "CI did not succeed (conclusion: $WORKFLOW_RUN_CONCLUSION); skipping deploy."
+              echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
           elif [[ "$DEPLOY_REF" != "refs/heads/main" ]]; then
             echo "Production deployments must run from main; received $DEPLOY_REF." >&2
             exit 1
           fi
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Migrate and deploy backend
     needs: guard-main
+    if: needs.guard-main.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment:
