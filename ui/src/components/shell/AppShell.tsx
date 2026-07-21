@@ -7,6 +7,7 @@ import { NewAgentSheet } from '@/components/agents/NewAgentSheet'
 import { AgentRail } from '@/components/shell/AgentRail'
 import { Button } from '@/components/ui/button'
 import { supabase } from '@/lib/supabase'
+import { LandingPage } from '@/pages/LandingPage'
 import { MemoryPage } from '@/pages/MemoryPage'
 import { ResearchPage } from '@/pages/ResearchPage'
 import { ResourcesPage } from '@/pages/ResourcesPage'
@@ -213,6 +214,10 @@ export function AppShell() {
     setNewAgentSheetOpen(open)
     if (!open) setEditingAgent(null)
   }, [])
+
+  if (!authSession) {
+    return <LandingPage onSignIn={() => void signInWithGoogle()} />
+  }
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background max-md:flex-col">
