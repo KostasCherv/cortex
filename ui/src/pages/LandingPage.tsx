@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, MessageSquare, Moon, Network, ShieldCheck, Sun, Telescope, Zap } from 'lucide-react'
+import { ArrowRight, Bot, Gauge, MessageSquare, Moon, Network, ShieldCheck, Sun, Telescope, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { useTheme } from '@/hooks/useTheme'
@@ -19,9 +19,9 @@ const STATS = [
     label: 'Sustained at up to 200 req/s in production load testing',
   },
   {
-    icon: Network,
-    value: '60 of 70 admitted',
-    label: 'Concurrent requests allowed per IP under rate limiting; the rest returned HTTP 429',
+    icon: Gauge,
+    value: '154ms → 155ms p95',
+    label: 'Latency held flat across a 10x jump from 20 to 200 req/s in production — autoscaling absorbed it transparently',
   },
 ]
 
