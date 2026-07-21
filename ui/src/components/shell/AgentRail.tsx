@@ -1009,8 +1009,11 @@ export function AgentRail({
   }
 
   // Theme toggle + account menu/sign-in — shown in the desktop footer and in
-  // the mobile top bar.
-  function renderAccountControls() {
+  // the mobile top bar. Both copies are always in the DOM (CSS toggles which
+  // one is visible per breakpoint), so each needs a distinct accessible name
+  // to avoid ambiguous getByRole/getByLabel matches for assistive tech and tests.
+  function renderAccountControls(variant: 'mobile' | 'desktop') {
+    const labelSuffix = variant === 'mobile' ? ' (mobile)' : ''
     return (
       <>
         <Button
@@ -1018,7 +1021,7 @@ export function AgentRail({
           size="icon"
           className="size-7 text-muted-foreground hover:text-foreground"
           onClick={toggle}
-          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme${labelSuffix}`}
         >
           {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </Button>
@@ -1028,7 +1031,7 @@ export function AgentRail({
         {authSession ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-7 rounded-full" aria-label="Account menu">
+              <Button variant="ghost" size="icon" className="size-7 rounded-full" aria-label={`Account menu${labelSuffix}`}>
                 <Avatar className="size-6">
                   <AvatarFallback className="text-[10px]">
                     {authSession.user.email?.[0]?.toUpperCase() ?? '?'}
@@ -1094,7 +1097,13 @@ export function AgentRail({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <Button size="sm" variant="ghost" className="text-xs h-7 px-2" onClick={onSignIn}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-xs h-7 px-2"
+            onClick={onSignIn}
+            aria-label={`Sign in${labelSuffix}`}
+          >
             Sign in
           </Button>
         )}
@@ -1129,7 +1138,7 @@ export function AgentRail({
 
         <div className="flex-1" />
 
-        {renderAccountControls()}
+        {renderAccountControls('mobile')}
       </div>
 
       {/* Desktop sidebar (md and above) — unchanged fixed 280px layout */}
@@ -1145,7 +1154,7 @@ export function AgentRail({
         {/* Footer */}
         <div className="shrink-0 space-y-0.5 border-t border-border px-2 py-2">
           {renderFooterNav(noop)}
-          <div className="flex items-center gap-1 pt-1">{renderAccountControls()}</div>
+          <div className="flex items-center gap-1 pt-1">{renderAccountControls('desktop')}</div>
         </div>
       </aside>
     </>

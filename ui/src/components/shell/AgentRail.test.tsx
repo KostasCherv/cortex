@@ -87,4 +87,22 @@ describe('AgentRail', () => {
     expect(onViewChange).toHaveBeenCalledWith({ type: 'research' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('gives the mobile and desktop account controls distinct accessible names', () => {
+    // Both copies are always mounted (CSS toggles which is visible per breakpoint),
+    // so byRole/byLabelText must resolve to exactly one match for each — this is
+    // what broke the "Account menu" Playwright smoke test after the mobile drawer
+    // rework duplicated these controls without disambiguating their labels.
+    renderRail()
+    expect(screen.getAllByRole('button', { name: 'Account menu' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Account menu (mobile)' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Switch to (dark|light) theme$/ })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^Switch to (dark|light) theme \(mobile\)$/ })).toHaveLength(1)
+  })
+
+  it('gives the mobile and desktop sign-in buttons distinct accessible names when signed out', () => {
+    renderRail({ authSession: null })
+    expect(screen.getAllByRole('button', { name: 'Sign in' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Sign in (mobile)' })).toHaveLength(1)
+  })
 })

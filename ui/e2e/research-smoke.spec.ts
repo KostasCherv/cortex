@@ -26,7 +26,7 @@ test('signed-in user creates research and receives a streamed final report', asy
   await page.goto('/')
 
   // This exercises the post-OAuth authenticated path without external credentials.
-  await expect(page.getByLabel('Account menu')).toBeVisible()
+  await expect(page.getByLabel('Account menu', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Research', exact: true }).click()
 
   const query = 'How does retrieval quality affect grounded AI answers?'
