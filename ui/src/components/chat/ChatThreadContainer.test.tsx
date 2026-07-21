@@ -74,6 +74,42 @@ describe('ChatThreadContainer parallel streams', () => {
     expect(screen.queryByText(/loading discussion/i)).not.toBeInTheDocument()
   })
 
+  it('hides the previous session messages behind the loader instead of leaving them visible while switching', async () => {
+    let resolveSessionB: (value: { session_id: string; messages: RagChatMessage[] }) => void = () => {}
+    const sessionAMessage: RagChatMessage = {
+      message_id: 'msg-a',
+      session_id: 'session-a',
+      agent_id: null,
+      owner_id: '',
+      role: 'assistant',
+      content: 'reply from session a',
+      citations: [],
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    const loadSessionMessages = vi.fn((sid: string) => {
+      if (sid === 'session-a') return Promise.resolve({ session_id: 'session-a', messages: [sessionAMessage] })
+      return new Promise((resolve) => { resolveSessionB = resolve })
+    })
+    const transport = {
+      key: 'workspace',
+      listSessions: vi.fn(async () => []),
+      loadSessionMessages,
+      deleteLastExchange: vi.fn(async () => {}),
+      streamMessage: vi.fn(() => new Promise<void>(() => {})),
+    } as unknown as ChatTransport
+
+    const { rerenderWith } = renderContainer(transport, 'session-a')
+    expect(await screen.findByText('reply from session a')).toBeInTheDocument()
+
+    rerenderWith('session-b')
+    expect(screen.getByText(/loading discussion/i)).toBeInTheDocument()
+    expect(screen.queryByText('reply from session a')).not.toBeInTheDocument()
+
+    resolveSessionB({ session_id: 'session-b', messages: [] })
+    await waitFor(() => expect(screen.getByText('Ask anything.')).toBeInTheDocument())
+    expect(screen.queryByText('reply from session a')).not.toBeInTheDocument()
+  })
+
   it('keeps a stream alive when switching to another session and folds it in on return', async () => {
     const { transport, captured, loadSessionMessages } = makeTransport({ 'session-a': [], 'session-b': [] })
     const { rerenderWith } = renderContainer(transport, 'session-a')
