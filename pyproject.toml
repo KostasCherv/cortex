@@ -55,7 +55,7 @@ dev = [
 evals = [
     "dspy[optuna]>=2.5.0",
     "deepeval>=3.0.0",
-    "pandas>=2.2.0",
+    "pandas>=3.0.5",
 ]
 finetune = [
     "datasets>=2.20",
