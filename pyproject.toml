@@ -53,7 +53,7 @@ dev = [
     "bandit[toml]>=1.7.0",
 ]
 evals = [
-    "dspy[optuna]>=2.5.0",
+    "dspy[optuna]>=3.2.1",
     "deepeval>=3.0.0",
     "pandas>=2.2.0",
 ]
