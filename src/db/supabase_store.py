@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -19,6 +20,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _HTTP_TIMEOUT_SECONDS = 20.0
+_TRANSIENT_RETRY_ATTEMPTS = 3
+_TRANSIENT_RETRY_BACKOFF_SECONDS = 0.5
 
 
 def _agent_id_query_param(agent_id: str | None) -> str:
@@ -88,14 +91,21 @@ class SupabaseSessionStore:
         headers = dict(self._headers)
         if extra_headers:
             headers.update(extra_headers)
-        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-            response = await client.request(
-                method,
-                f"{self._base_url}/{path}",
-                params=params,
-                json=json_body,
-                headers=headers,
-            )
+        for attempt in range(_TRANSIENT_RETRY_ATTEMPTS):
+            try:
+                async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+                    response = await client.request(
+                        method,
+                        f"{self._base_url}/{path}",
+                        params=params,
+                        json=json_body,
+                        headers=headers,
+                    )
+                break
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt == _TRANSIENT_RETRY_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(_TRANSIENT_RETRY_BACKOFF_SECONDS * (2**attempt))
         response.raise_for_status()
         return response
 
@@ -110,9 +120,7 @@ class SupabaseSessionStore:
         message = str(payload.get("message", "")).lower()
         code = str(payload.get("code", "")).upper()
         if "does not exist" in message and (
-            "session_runs" in message
-            or "langfuse_" in message
-            or "feedback_" in message
+            "session_runs" in message or "langfuse_" in message or "feedback_" in message
         ):
             return True
         return code.startswith("PGRST")
@@ -182,7 +190,9 @@ class SupabaseSessionStore:
         )
         await self._cache_delete(key)
 
-    async def _invalidate_rag_chat_sessions_list_cache(self, owner_id: str, agent_id: str | None, chat_scope: str) -> None:
+    async def _invalidate_rag_chat_sessions_list_cache(
+        self, owner_id: str, agent_id: str | None, chat_scope: str
+    ) -> None:
         agent_key = agent_id or "__workspace__"
         key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_SESSIONS_LIST,
@@ -190,7 +200,9 @@ class SupabaseSessionStore:
         )
         await self._cache_delete(key)
 
-    async def _invalidate_rag_chat_messages_list_cache(self, owner_id: str, session_id: str) -> None:
+    async def _invalidate_rag_chat_messages_list_cache(
+        self, owner_id: str, session_id: str
+    ) -> None:
         key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
             f"{owner_id}:{session_id}",
@@ -291,7 +303,10 @@ class SupabaseSessionStore:
             candidates: list[dict[str, Any]] = []
             if fallback_payload != request_payload:
                 candidates.append(fallback_payload)
-            if fallback_base_payload != request_payload and fallback_base_payload != fallback_payload:
+            if (
+                fallback_base_payload != request_payload
+                and fallback_base_payload != fallback_payload
+            ):
                 candidates.append(fallback_base_payload)
             if not candidates:
                 raise
@@ -372,7 +387,9 @@ class SupabaseSessionStore:
         )
         latest_status_by_session: dict[str, str] = {}
         for run_row in runs_resp.json():
-            latest_status_by_session.setdefault(run_row["session_id"], run_row.get("status", "completed"))
+            latest_status_by_session.setdefault(
+                run_row["session_id"], run_row.get("status", "completed")
+            )
 
         result = [
             {
@@ -389,9 +406,7 @@ class SupabaseSessionStore:
     async def get_session(self, session_id: str, user_id: str) -> Session | None:
         return await self._fetch_session_from_db(session_id, user_id)
 
-    async def _fetch_session_from_db(
-        self, session_id: str, user_id: str
-    ) -> Session | None:
+    async def _fetch_session_from_db(self, session_id: str, user_id: str) -> Session | None:
         from src.sessions import ConversationTurn, Session
 
         session_resp = await self._request(
@@ -1143,10 +1158,7 @@ class SupabaseSessionStore:
         for link in links:
             by_agent.setdefault(link["agent_id"], []).append(link["resource_id"])
 
-        result = [
-            self._map_rag_agent_row(row, by_agent.get(row["id"], []))
-            for row in agents
-        ]
+        result = [self._map_rag_agent_row(row, by_agent.get(row["id"], [])) for row in agents]
         await self._cache_set_list(cache_key, result)
         return result
 
@@ -1700,7 +1712,9 @@ class SupabaseSessionStore:
         )
         return True, None
 
-    async def list_rag_chat_messages(self, *, session_id: str, owner_id: str) -> list[dict[str, Any]]:
+    async def list_rag_chat_messages(
+        self, *, session_id: str, owner_id: str
+    ) -> list[dict[str, Any]]:
         cache_key = self._cache_key(
             self._CACHE_PREFIX_RAG_CHAT_MESSAGES_LIST,
             f"{owner_id}:{session_id}",
@@ -1825,7 +1839,9 @@ class SupabaseSessionStore:
             return None
         return rows[0]
 
-    async def get_user_subscription_by_subscription_id(self, subscription_id: str) -> dict[str, Any] | None:
+    async def get_user_subscription_by_subscription_id(
+        self, subscription_id: str
+    ) -> dict[str, Any] | None:
         response = await self._request(
             "GET",
             "user_subscriptions",
@@ -1852,7 +1868,9 @@ class SupabaseSessionStore:
             extra_headers={"Prefer": "resolution=merge-duplicates"},
         )
 
-    async def get_daily_usage_counter(self, *, user_id: str, usage_date: date) -> dict[str, Any] | None:
+    async def get_daily_usage_counter(
+        self, *, user_id: str, usage_date: date
+    ) -> dict[str, Any] | None:
         response = await self._request(
             "GET",
             "daily_usage_counters",

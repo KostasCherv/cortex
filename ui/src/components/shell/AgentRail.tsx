@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Brain, FolderOpen, Loader2, LogOut, Menu, MessageSquare, Moon, MoreHorizontal, Pencil, Plus, Sun, Telescope, Trash2 } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
 import { HealthDot } from '@/components/layout/HealthDot'
+import { Brand } from '@/components/layout/Brand'
 import {
   createCheckoutSession,
   createPortalSession,
@@ -1123,7 +1124,7 @@ export function AgentRail({
           </SheetTrigger>
           <SheetContent side="left" className="flex w-[280px] max-w-[85vw] flex-col gap-0 p-0">
             <SheetHeader className="h-14 shrink-0 flex-row items-center justify-between space-y-0 border-b border-border px-4 py-0">
-              <SheetTitle className="font-semibold tracking-tight text-foreground">Cortex</SheetTitle>
+              <SheetTitle><Brand /></SheetTitle>
               <HealthDot health={health} />
             </SheetHeader>
             {renderNavAndAgents(closeMobileNav)}
@@ -1133,7 +1134,7 @@ export function AgentRail({
           </SheetContent>
         </Sheet>
 
-        <span className="font-semibold tracking-tight text-foreground">Cortex</span>
+        <Brand />
         <HealthDot health={health} />
 
         <div className="flex-1" />
@@ -1145,7 +1146,7 @@ export function AgentRail({
       <aside className="hidden h-dvh w-[280px] min-w-[280px] shrink-0 flex-col border-r border-border bg-secondary md:flex">
         {/* Header */}
         <div className="flex h-14 shrink-0 items-center justify-between px-4">
-          <span className="font-semibold tracking-tight text-foreground">Cortex</span>
+          <Brand />
           <HealthDot health={health} />
         </div>
 

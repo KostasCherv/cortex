@@ -1,6 +1,7 @@
 import { ArrowRight, Bot, Gauge, MessageSquare, Moon, Network, ShieldCheck, Sun, Telescope, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Brand } from '@/components/layout/Brand'
 import { useTheme } from '@/hooks/useTheme'
 
 type Props = {
@@ -55,7 +56,7 @@ export function LandingPage({ onSignIn }: Props) {
   return (
     <div className="flex h-dvh flex-col overflow-y-auto bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sm:px-6">
-        <span className="font-semibold tracking-tight">Cortex</span>
+        <Brand />
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"

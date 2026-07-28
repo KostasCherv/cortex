@@ -3,7 +3,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 
 from src.db.supabase_store import SupabaseSessionStore
-from src.sessions import ConversationTurn, SessionRun, append_run, append_turn, create_session, get_session
+from src.sessions import (
+    ConversationTurn,
+    SessionRun,
+    append_run,
+    append_turn,
+    create_session,
+    get_session,
+)
 
 
 async def test_sessions_module_delegates_create_to_store():
@@ -31,8 +38,12 @@ async def test_sessions_module_delegates_append_operations():
     with patch("src.sessions.get_session_store", return_value=mock_store):
         await append_run("user-1", "session-1", run)
         await append_turn("user-1", "session-1", turn)
-    mock_store.append_run.assert_awaited_once_with(user_id="user-1", session_id="session-1", run=run)
-    mock_store.append_turn.assert_awaited_once_with(user_id="user-1", session_id="session-1", turn=turn)
+    mock_store.append_run.assert_awaited_once_with(
+        user_id="user-1", session_id="session-1", run=run
+    )
+    mock_store.append_turn.assert_awaited_once_with(
+        user_id="user-1", session_id="session-1", turn=turn
+    )
 
 
 async def test_store_lists_rag_chat_sessions_with_batched_latest_messages():
@@ -108,6 +119,53 @@ async def test_store_lists_ready_rag_chat_session_attachment_resource_ids():
         "state": "eq.ready",
         "order": "created_at.asc",
     }
+
+
+async def test_request_retries_on_timeout_then_succeeds():
+    store = object.__new__(SupabaseSessionStore)
+    store._base_url = "https://example.supabase.co/rest/v1"
+    store._headers = {}
+
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+
+    mock_client = AsyncMock()
+    mock_client.request = AsyncMock(side_effect=[httpx.ReadTimeout("timed out"), response])
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = False
+
+    with (
+        patch("src.db.supabase_store.httpx.AsyncClient", return_value=mock_client),
+        patch("src.db.supabase_store.asyncio.sleep", new=AsyncMock()),
+    ):
+        result = await store._request("GET", "session_runs")
+
+    assert result is response
+    assert mock_client.request.await_count == 2
+
+
+async def test_request_raises_after_exhausting_retries():
+    store = object.__new__(SupabaseSessionStore)
+    store._base_url = "https://example.supabase.co/rest/v1"
+    store._headers = {}
+
+    mock_client = AsyncMock()
+    mock_client.request = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
+    mock_client.__aenter__.return_value = mock_client
+    mock_client.__aexit__.return_value = False
+
+    with (
+        patch("src.db.supabase_store.httpx.AsyncClient", return_value=mock_client),
+        patch("src.db.supabase_store.asyncio.sleep", new=AsyncMock()),
+    ):
+        try:
+            await store._request("GET", "session_runs")
+            raised = False
+        except httpx.ReadTimeout:
+            raised = True
+
+    assert raised
+    assert mock_client.request.await_count == 3
 
 
 async def test_store_deletes_session_attachments_for_chat_session():
