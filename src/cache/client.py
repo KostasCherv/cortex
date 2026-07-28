@@ -52,7 +52,7 @@ class RedisCache:
 
     async def ping(self) -> bool:
         try:
-            result = self._client.ping()
+            result: Any = self._client.ping()
             if hasattr(result, "__await__"):
                 result = await result
             return bool(result)
