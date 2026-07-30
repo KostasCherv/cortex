@@ -19,5 +19,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Existing state-sync patterns need an incremental React Compiler migration.
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+    },
   },
 ])
