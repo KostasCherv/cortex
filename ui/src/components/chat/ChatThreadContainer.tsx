@@ -252,7 +252,7 @@ export function ChatThreadContainer({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, stream?.streamingStatus, stream?.streamingText])
 
   const openSession = useCallback(
     async (nextSessionId: string) => {
