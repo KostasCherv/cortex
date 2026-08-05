@@ -190,4 +190,20 @@ describe('ChatThreadContainer parallel streams', () => {
     await waitFor(() => expect(composer).not.toBeDisabled())
     expect(screen.getByText('done text')).toBeInTheDocument()
   })
+
+  it('scrolls to the end as a streamed response grows', async () => {
+    const scrollIntoView = vi.fn()
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    const { transport, captured } = makeTransport({ 'session-a': [] })
+    renderContainer(transport, 'session-a')
+
+    const composer = await screen.findByPlaceholderText('Ask a question...')
+    fireEvent.change(composer, { target: { value: 'question' } })
+    fireEvent.click(screen.getByLabelText('Send message'))
+    scrollIntoView.mockClear()
+
+    captured[0].callbacks.onChunk('partial answer')
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+  })
 })
