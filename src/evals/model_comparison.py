@@ -13,7 +13,7 @@ from typing import Iterator
 
 import pandas as pd
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
-from deepeval.test_case import LLMTestCase
+from deepeval.test_case import LLMTestCase, RetrievedContextData
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -64,7 +64,7 @@ def load_golden_set() -> list[dict]:
 
 
 def build_test_case(case: dict, actual_output: str) -> LLMTestCase:
-    retrieval_context = [
+    retrieval_context: list[str | RetrievedContextData] = [
         str(item.get("raw_text", "")).strip()
         for item in case["retrieved_contents"]
         if str(item.get("raw_text", "")).strip()
