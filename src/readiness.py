@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
@@ -12,6 +13,8 @@ from neo4j import GraphDatabase
 from src.cache.client import get_cache
 from src.config import settings
 from src.supabase_keys import supabase_api_headers
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,21 +59,31 @@ async def _supabase_check() -> ReadinessCheck:
         return ReadinessCheck(status="unavailable", critical=settings.readiness_require_supabase)
 
 
-def _verify_neo4j_connectivity() -> None:
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_username, settings.neo4j_password),
-        notifications_min_severity="OFF",
-    )
-    try:
-        # Run a real query (not just verify_connectivity) so scheduled /ready
-        # pings count as activity for AuraDB Free's 72h auto-pause timer.
-        driver.execute_query(
-            "RETURN 1",
-            database_=settings.neo4j_database or None,
+_neo4j_readiness_driver = None
+
+
+def _get_neo4j_readiness_driver():
+    # Reused across checks (the driver owns a pooled connection) instead of
+    # opening a fresh Bolt handshake every 10s — that churn was tripping
+    # Aura's connection limits and causing intermittent "defunct connection"
+    # failures even while the instance itself was healthy.
+    global _neo4j_readiness_driver
+    if _neo4j_readiness_driver is None:
+        _neo4j_readiness_driver = GraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_username, settings.neo4j_password),
+            notifications_min_severity="OFF",
         )
-    finally:
-        driver.close()
+    return _neo4j_readiness_driver
+
+
+def _verify_neo4j_connectivity() -> None:
+    # Run a real query (not just verify_connectivity) so scheduled /ready
+    # pings count as activity for AuraDB Free's 72h auto-pause timer.
+    _get_neo4j_readiness_driver().execute_query(
+        "RETURN 1",
+        database_=settings.neo4j_database or None,
+    )
 
 
 async def _neo4j_check() -> ReadinessCheck:
@@ -89,6 +102,7 @@ async def _neo4j_check() -> ReadinessCheck:
         )
         return ReadinessCheck(status="ok", critical=settings.readiness_require_neo4j)
     except Exception:
+        logger.warning("Neo4j readiness check failed", exc_info=True)
         return ReadinessCheck(status="unavailable", critical=settings.readiness_require_neo4j)
 
 
