@@ -66,7 +66,7 @@ def test_get_authenticated_user_rejects_invalid_jwt():
 def test_get_authenticated_user_handles_jwks_client_error_with_fallback():
     credentials = HTTPAuthorizationCredentials(
         scheme="Bearer",
-        credentials="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.bad-kid",
+        credentials="eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLTEifQ.c2ln",
     )
     with (
         patch("src.auth._jwks_url", return_value="https://example.supabase.co/auth/v1/.well-known/jwks.json"),
@@ -80,6 +80,7 @@ def test_get_authenticated_user_handles_jwks_client_error_with_fallback():
         user = asyncio.run(get_authenticated_user(credentials))
 
     assert user.user_id == "user-1"
+    mock_jwk_client.get_signing_key_from_jwt.assert_called_once_with(credentials.credentials)
     mock_fallback.assert_called_once_with(credentials.credentials)
 
 
