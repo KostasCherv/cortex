@@ -106,7 +106,7 @@ gcloud run services update-traffic cortex \
 
 ## Frontend deployment
 
-Vercel's Git integration deploys the production UI automatically. The backend workflow does not invoke Vercel or require Vercel credentials.
+Automatic Vercel Git deployments are paused with `git.deploymentEnabled: false` in `ui/vercel.json`, so pushes and merges do not deploy the UI. Restore this setting to `true` only when automatic deployments are wanted again. The backend workflow does not invoke Vercel or require Vercel credentials.
 
 Manual environment synchronization and recovery deployment remain available:
 
