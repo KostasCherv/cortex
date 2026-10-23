@@ -16,7 +16,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install
-        run: uv sync --extra dev --extra evals
+        run: uv sync --locked --extra dev --extra evals
       - name: Lint
         run: uv run ruff check src tests
       - name: Security scan (bandit)
