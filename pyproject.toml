@@ -58,7 +58,7 @@ evals = [
     "pandas>=3.0.5",
 ]
 finetune = [
-    "datasets>=2.20",
+    "datasets>=5.1.0",
     "huggingface-hub>=0.23",
 ]
 
